@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 _SENSITIVE_PATTERNS = (
     re.compile(r"(?i)(password\s*[:=]\s*)\S+"),

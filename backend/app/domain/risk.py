@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from pydantic import Field
 
@@ -18,9 +17,9 @@ class RiskLevel(str, Enum):
 
 
 class RiskAssessment(EntityBase):
-    camera_id: Optional[str] = Field(default=None, max_length=128)
-    class_name: Optional[str] = Field(default=None, max_length=128)
-    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    camera_id: str | None = Field(default=None, max_length=128)
+    class_name: str | None = Field(default=None, max_length=128)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_score: float = Field(ge=0.0, le=1.0)
     risk_level: RiskLevel = RiskLevel.low
-    rationale: Optional[str] = Field(default=None, max_length=2048)
+    rationale: str | None = Field(default=None, max_length=2048)

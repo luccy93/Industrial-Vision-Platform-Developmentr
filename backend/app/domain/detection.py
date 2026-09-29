@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -31,7 +30,7 @@ class Detection(EntityBase):
     """Single-frame model observation."""
 
     camera_id: str = Field(min_length=1, max_length=128)
-    frame_id: Optional[UUID] = None
+    frame_id: UUID | None = None
     class_name: str = Field(min_length=1, max_length=128)
     confidence: float = Field(ge=0.0, le=1.0)
     bounding_box: BoundingBox

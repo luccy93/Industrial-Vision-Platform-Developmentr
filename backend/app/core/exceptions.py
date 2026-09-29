@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,11 +20,11 @@ class AppError(Exception):
 
     def __init__(
         self,
-        message: Optional[str] = None,
+        message: str | None = None,
         *,
-        code: Optional[str] = None,
-        status_code: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        status_code: int | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message or self.message)
         if message:
@@ -78,8 +78,10 @@ class ServiceUnavailableError(AppError):
     status_code = 503
 
 
-def error_envelope(code: str, message: str, request_id: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    body: Dict[str, Any] = {"error": {"code": code, "message": message, "request_id": request_id}}
+def error_envelope(
+    code: str, message: str, request_id: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"error": {"code": code, "message": message, "request_id": request_id}}
     if details:
         body["error"]["details"] = details
     return body
@@ -99,7 +101,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:12]
         return JSONResponse(
             status_code=422,
-            content=error_envelope("validation_error", "Request validation failed.", request_id, {"errors": exc.errors()}),
+            content=error_envelope(
+                "validation_error", "Request validation failed.", request_id, {"errors": exc.errors()}
+            ),
         )
 
     @app.exception_handler(StarletteHTTPException)

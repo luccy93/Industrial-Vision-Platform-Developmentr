@@ -10,7 +10,7 @@ from backend.app.domain.detection import BoundingBox, Detection, TrackedObject
 from backend.app.domain.events import PerceptionEvent, QualityEvent, SafetyEvent
 from backend.app.domain.incident import Alert, AlertSeverity, Incident, IncidentStatus
 from backend.app.domain.risk import RiskAssessment, RiskLevel
-from backend.app.domain.video import Frame, VideoStream, StreamStatus
+from backend.app.domain.video import Frame, StreamStatus, VideoStream
 
 __all__ = [
     "Alert",

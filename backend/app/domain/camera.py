@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, Optional
-from uuid import UUID
 
 from pydantic import Field
 
@@ -23,9 +21,9 @@ class Camera(EntityBase):
 
     name: str = Field(min_length=1, max_length=128)
     camera_id: str = Field(min_length=1, max_length=128)
-    location: Optional[str] = Field(default=None, max_length=256)
-    stream_url: Optional[str] = Field(default=None, max_length=1024)
+    location: str | None = Field(default=None, max_length=256)
+    stream_url: str | None = Field(default=None, max_length=1024)
     status: CameraStatus = CameraStatus.unknown
-    resolution_width: Optional[int] = Field(default=None, ge=1)
-    resolution_height: Optional[int] = Field(default=None, ge=1)
-    fps: Optional[float] = Field(default=None, ge=0)
+    resolution_width: int | None = Field(default=None, ge=1)
+    resolution_height: int | None = Field(default=None, ge=1)
+    fps: float | None = Field(default=None, ge=0)
