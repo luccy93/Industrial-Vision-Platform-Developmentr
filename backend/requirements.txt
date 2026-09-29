@@ -4,5 +4,10 @@ pydantic-settings>=2.2,<3
 uvicorn[standard]>=0.29,<1
 sqlalchemy>=2.0,<2.1
 alembic>=1.13,<2
+psycopg2-binary>=2.9
+# Headless OpenCV for server/Docker (no GUI deps). A full
+# opencv-contrib-python install is API-compatible for local dev.
+opencv-python-headless>=4.8,<5
+numpy>=1.26
 python-multipart>=0.0.9
 httpx>=0.27

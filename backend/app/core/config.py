@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)
 
+    # --- V02 video ingestion ---
+    target_processing_fps: float = Field(default=10.0, ge=0.0)
+    frame_skip: int = Field(default=0, ge=0)
+    buffer_size: int = Field(default=30, ge=1, le=1000)
+
     @field_validator("log_level")
     @classmethod
     def _normalize_log_level(cls, value: str) -> str:
