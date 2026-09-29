@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from functools import lru_cache
 
+from fastapi import Request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -28,9 +29,18 @@ def get_session_factory(database_url: str | None = None) -> sessionmaker[Session
     return _session_factory(url)
 
 
-def get_db() -> Iterator[Session]:
-    """FastAPI dependency yielding a request-scoped session."""
-    factory = get_session_factory()
+def get_db(request: Request) -> Iterator[Session]:
+    """FastAPI dependency yielding a request-scoped session.
+
+    Prefers the factory bound to the application
+    (``app.state.session_factory``) so each app — including tests — controls
+    its database; falls back to global settings otherwise.
+    """
+    factory: sessionmaker[Session] | None = None
+    if request is not None:
+        factory = getattr(request.app.state, "session_factory", None)
+    if factory is None:
+        factory = get_session_factory()
     session = factory()
     try:
         yield session

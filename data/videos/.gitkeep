@@ -1,0 +1,5 @@
+# Local video fixtures for development/testing (V02).
+#
+# Drop a small sample clip here as `sample.mp4` and point a file camera at
+# `data/videos/sample.mp4`. Do NOT commit large binaries — tests generate
+# synthetic frames programmatically instead.

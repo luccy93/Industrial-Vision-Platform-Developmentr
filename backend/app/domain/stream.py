@@ -7,7 +7,6 @@ explicit and deterministic — see ``StreamState.can_transition_to``.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,9 +32,7 @@ class StreamState(str, Enum):
 
 
 _ALLOWED_TRANSITIONS: dict[StreamState, frozenset[StreamState]] = {
-    StreamState.DISCONNECTED: frozenset(
-        {StreamState.CONNECTING, StreamState.STOPPED}
-    ),
+    StreamState.DISCONNECTED: frozenset({StreamState.CONNECTING, StreamState.STOPPED}),
     StreamState.CONNECTING: frozenset(
         {StreamState.CONNECTED, StreamState.ERROR, StreamState.STOPPED, StreamState.STOPPING}
     ),

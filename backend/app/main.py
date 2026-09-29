@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.v1.health import _base_payload, _checks
 from backend.app.api.v1.router import v1_router
+from backend.app.api.v1.streams_ws import router as streams_ws_router
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.exceptions import register_exception_handlers
 from backend.app.core.logging import configure_logging, get_logger
@@ -32,7 +33,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     logger = get_logger("industrial-vision")
     logger.info("startup service=%s env=%s", settings.app_name, settings.app_env.value)
+    # Best-effort schema init (Alembic owns prod; never block startup).
+    try:
+        from backend.app.infrastructure.db import init_db
+
+        init_db(settings.database_url)
+    except Exception:
+        logger.warning("database init skipped (unreachable?)", exc_info=True)
     yield
+    try:
+        from backend.app.api.v1.cameras import get_supervisor
+
+        get_supervisor().stop_all()
+    except Exception:
+        logger.debug("supervisor shutdown failed", exc_info=True)
     logger.info("shutdown service=%s", settings.app_name)
 
 
@@ -47,6 +61,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    from backend.app.api.v1.cameras import _app_supervisor
+    from backend.app.infrastructure.db import get_session_factory
+
+    app.state.session_factory = get_session_factory(settings.database_url)
+    app.state.supervisor = _app_supervisor()
 
     app.add_middleware(
         CORSMiddleware,
@@ -65,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(v1_router)
+    app.include_router(streams_ws_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

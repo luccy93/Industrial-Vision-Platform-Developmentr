@@ -28,9 +28,7 @@ def upgrade() -> None:
         sa.Column("width", sa.Integer(), nullable=True),
         sa.Column("height", sa.Integer(), nullable=True),
         sa.Column("target_fps", sa.Float(), nullable=True),
-        sa.Column(
-            "reconnect_enabled", sa.Boolean(), nullable=False, server_default=sa.true()
-        ),
+        sa.Column("reconnect_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("metadata", sa.JSON(), nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

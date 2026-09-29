@@ -40,8 +40,7 @@ class VideoSource(ABC):
 
     @property
     @abstractmethod
-    def kind(self) -> SourceType:
-        ...
+    def kind(self) -> SourceType: ...
 
     @abstractmethod
     def _target(self) -> int | str:

@@ -24,8 +24,10 @@ def test_ready_reports_honest_downstream_states(client: TestClient) -> None:
     assert checks["models"]["status"] == "not_loaded_in_v01"
 
 
-def test_v1_stubs_are_structured_placeholders(client: TestClient) -> None:
-    assert client.get("/api/v1/cameras").status_code == 200
+def test_v1_resources_are_reachable(client: TestClient) -> None:
+    res = client.get("/api/v1/cameras")
+    assert res.status_code == 200
+    assert res.json()["items"] == []
     assert client.get("/api/v1/detections").status_code == 200
     assert client.get("/api/v1/incidents").status_code == 200
     assert client.get("/api/v1/alerts").status_code == 200
