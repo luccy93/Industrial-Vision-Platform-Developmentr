@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from backend.app.domain.camera import Camera
 from backend.app.domain.stream import SourceType, StreamMetrics
 from backend.app.infrastructure.db import get_db, get_session_factory
 from backend.app.ingestion.manager import StreamSupervisor, create_source
@@ -67,8 +68,8 @@ class CameraUpdateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-def _public_dict(camera: object) -> dict[str, Any]:
-    data = camera.model_dump() if hasattr(camera, "model_dump") else dict(camera)  # type: ignore[arg-type]
+def _public_dict(camera: Camera) -> dict[str, Any]:
+    data = camera.model_dump()
     data.pop("source_secret", None)
     # Serialize datetimes/UUIDs safely.
     for key in ("id", "timestamp", "created_at", "updated_at"):

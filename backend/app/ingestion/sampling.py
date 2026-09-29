@@ -42,7 +42,8 @@ class FrameSampler:
         if self.frame_skip and (self._seen - 1) % (self.frame_skip + 1) != 0:
             return False
         if self._last_accepted_at is not None and self.interval > 0:
-            if now - self._last_accepted_at < self.interval:
+            # Epsilon absorbs float-boundary jitter (e.g. 0.3-0.2 < 0.1).
+            if now - self._last_accepted_at + 1e-9 < self.interval:
                 return False
         self._last_accepted_at = now
         self._accepted += 1

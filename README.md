@@ -2,9 +2,20 @@
 
 > Real-time computer vision for industrial safety, quality, and autonomous perception.
 
-V01 establishes the **production foundation** — modular architecture, typed contracts,
-configuration, API skeleton, observability basics, Docker, and tests. It does **not**
-yet implement live streaming, YOLO inference, tracking, or safety/quality analytics.
+V02 adds the **real-time video ingestion pipeline** — USB/RTSP/file sources,
+bounded frame buffering, sampling, preprocessing, stream lifecycle with
+reconnect, PG-persisted camera configs, WS telemetry, and a Cameras page.
+It does **not** yet implement YOLO inference, tracking, or safety/quality analytics.
+
+## Features (V02)
+
+- Video sources: USB (`usb`), RTSP (`rtsp`), file (`file`) behind one `VideoSource` interface
+- Per-camera worker threads (FastAPI loop never blocked; one failure can't crash the backend)
+- Bounded `FrameBuffer` (drop-oldest), `FrameSampler` (`TARGET_PROCESSING_FPS`/`FRAME_SKIP`), extensible `Preprocessor`
+- Stream states: `DISCONNECTED→CONNECTING→CONNECTED→RUNNING→STOPPING→STOPPED` + `ERROR/RECONNECTING` with backoff
+- Camera CRUD + `start/stop/status` under `/api/v1/cameras` (PostgreSQL; secrets write-only, redacted logs)
+- WebSocket `/ws/cameras/{camera_id}`: `stream_status` / `frame` metadata / `stream_error` (no video bytes)
+- Frontend Cameras page: status, FPS, counters, Start/Stop/Refresh
 
 ## Features (V01)
 
@@ -52,7 +63,21 @@ cd frontend; npm install
 
 All keys documented in `.env.example`:
 `APP_NAME, APP_ENV, LOG_LEVEL, API_HOST, API_PORT, DATABASE_URL, REDIS_URL,
-GPU_ENABLED, MODEL_DEVICE, MODEL_CONFIDENCE_THRESHOLD, WEBSOCKET_ENABLED`.
+GPU_ENABLED, MODEL_DEVICE, MODEL_CONFIDENCE_THRESHOLD, WEBSOCKET_ENABLED,
+TARGET_PROCESSING_FPS, FRAME_SKIP, BUFFER_SIZE`.
+
+## Video Ingestion Quickstart (V02)
+
+```powershell
+# 1. migrate + run
+alembic -c backend/alembic.ini upgrade head
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+Register a file camera (no hardware needed):
+`POST /api/v1/cameras {"name":"Dev","source_type":"file","source":"data/videos/sample.mp4"}`,
+then `POST /api/v1/cameras/{id}/start` and `GET .../status`.
+See `docs/VIDEO_INGESTION.md` for USB/RTSP setup, lifecycle, and troubleshooting.
 
 ## Local Development
 
@@ -77,6 +102,6 @@ docker compose up --build
 
 ## Project Roadmap
 
-- **V01** — foundation (this release)
-- **V02** — video ingestion + live camera stubs → frontend status
+- **V01** — foundation
+- **V02** — video ingestion pipeline (this release)
 - **V03+** — inference, tracking, safety/quality/perception, risk, incidents, analytics

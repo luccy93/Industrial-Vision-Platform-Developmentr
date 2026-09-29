@@ -41,12 +41,24 @@ Dashboard
 - CI skeleton: `.github/workflows/ci.yml` (backend tests + frontend typecheck/build).
 - Docs: constitution, architecture, development, README.
 
-## Future volumes (explicitly NOT in V01)
+## V02 — Implemented (video ingestion)
+
+- `backend/app/ingestion/`: `VideoSource` (USB/RTSP/file over OpenCV) →
+  `StreamManager` worker threads → bounded `FrameBuffer` (drop-oldest) →
+  `FrameSampler` → extensible `Preprocessor` → `IngestionFrame`.
+- Camera configs in PostgreSQL (`cameras` table, Alembic `001_create_cameras`);
+  stream state/buffers/metrics in memory.
+- `/api/v1/cameras` CRUD + `start/stop/status`; WS `/ws/cameras/{id}`
+  (`stream_status`/`frame` metadata/`stream_error`, no video bytes).
+- Frontend Cameras page (status, FPS, counters, Start/Stop/Refresh).
+- 68 pytest tests incl. perf bounds; see `docs/VIDEO_INGESTION.md`.
+
+## Future volumes (explicitly NOT in V01/V02)
 
 | Stage | Status | Notes |
 |---|---|---|
-| Live camera RTSP ingestion | planned (V02) | OpenCV/FFmpeg workers |
-| Frame processing pipeline | planned | decode/resize/normalize |
+| Live camera RTSP ingestion | done (V02) | OpenCV workers, reconnect w/ backoff |
+| Frame processing pipeline | done (V02) | buffer → sample → resize/convert |
 | YOLO production inference | planned (V03+) | PyTorch/ONNX, GPU pool |
 | Multi-object tracking | planned | ByteTrack/OC-SORT eval |
 | Safety detection | planned | PPE/zone/intrusion |

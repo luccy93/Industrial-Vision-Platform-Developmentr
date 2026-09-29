@@ -42,9 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("database init skipped (unreachable?)", exc_info=True)
     yield
     try:
-        from backend.app.api.v1.cameras import get_supervisor
-
-        get_supervisor().stop_all()
+        supervisor = getattr(app.state, "supervisor", None)
+        if supervisor is not None:
+            supervisor.stop_all()
     except Exception:
         logger.debug("supervisor shutdown failed", exc_info=True)
     logger.info("shutdown service=%s", settings.app_name)

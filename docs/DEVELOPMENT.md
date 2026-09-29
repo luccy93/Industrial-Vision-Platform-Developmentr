@@ -1,4 +1,4 @@
-# Development Guide (V01)
+# Development Guide (V02)
 
 ## Prerequisites
 
@@ -6,17 +6,20 @@
 - Node.js 20+, npm
 - Docker + Docker Compose v2
 - Git
+- OpenCV (via `backend/requirements.txt`; local `opencv-contrib-python` is API-compatible)
 
 ## Backend — local (without Docker)
 
 ```powershell
 copy .env.example .env
 pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+alembic -c backend/alembic.ini upgrade head   # cameras table (needs DATABASE_URL)
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 # Health:
 #   http://localhost:8000/health
 #   http://localhost:8000/ready
 #   http://localhost:8000/api/v1/health
+# Cameras UI: http://localhost:3000/cameras (needs frontend dev server)
 ```
 
 ## Frontend — local
@@ -32,11 +35,19 @@ npm run dev
 ## Tests
 
 ```powershell
-# Backend (from repo root):
+# Backend (from repo root; SQLite-backed, no USB/RTSP/GPU needed):
 pytest backend/tests -v
 # Frontend gates:
 cd frontend; npm run typecheck; npm run build
+# Lint / types:
+ruff check backend; ruff format --check backend; python -m mypy backend
 ```
+
+## Camera testing without hardware
+
+Tests synthesize frames (NumPy) and video files (OpenCV writer) in tmp dirs.
+For manual testing, point a `file` camera at `data/videos/sample.mp4` —
+never commit large binaries. Full guide: `docs/VIDEO_INGESTION.md`.
 
 ## Docker
 
