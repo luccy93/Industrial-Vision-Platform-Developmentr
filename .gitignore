@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Type checking / lint
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets — never commit real credentials
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+*.tsbuildinfo
+.next/
+
+# Docker / data volumes
+postgres-data/
+redis-data/
+
+# Alembic versions cache (keep versions/, ignore pycache only)
+# Logs
+*.log
+logs/
