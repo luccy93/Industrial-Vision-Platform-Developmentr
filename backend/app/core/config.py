@@ -68,9 +68,7 @@ class Settings(BaseSettings):
 
     @property
     def model_class_allowlist(self) -> frozenset[str]:
-        return frozenset(
-            part.strip().lower() for part in self.model_classes.split(",") if part.strip()
-        )
+        return frozenset(part.strip().lower() for part in self.model_classes.split(",") if part.strip())
 
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)

@@ -10,7 +10,7 @@ from uuid import UUID
 
 import numpy as np
 
-from backend.app.inference.schemas import InferenceDetection
+from backend.app.inference.schemas import InferenceBoundingBox, InferenceDetection
 
 
 class ModelState(str, Enum):
@@ -83,21 +83,18 @@ class InferenceModel(ABC):
 
     @property
     @abstractmethod
-    def device(self) -> str:
-        ...
+    def device(self) -> str: ...
 
     @property
     @abstractmethod
-    def class_names(self) -> dict[int, str]:
-        ...
+    def class_names(self) -> dict[int, str]: ...
 
     @abstractmethod
     def load(self) -> None:
         """Load weights once. Raises ``ModelError`` with a clear reason."""
 
     @abstractmethod
-    def unload(self) -> None:
-        ...
+    def unload(self) -> None: ...
 
     @abstractmethod
     def predict_raw(self, image: np.ndarray) -> RawDetections:
@@ -139,7 +136,7 @@ class InferenceModel(ABC):
                     class_id=int(class_id),
                     class_name=str(class_name),
                     confidence=float(confidence),
-                    bounding_box={"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                    bounding_box=InferenceBoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
                     model_name=self.name,
                     inference_time_ms=latency_ms,
                 )

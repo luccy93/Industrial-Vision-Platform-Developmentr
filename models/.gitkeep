@@ -1,0 +1,3 @@
+# YOLO weights live here as external runtime artifacts (see docs/INFERENCE.md).
+# Obtain with: python -m backend.app.inference.smoke_test --download
+# Never commit *.pt / *.onnx / *.engine files (see .gitignore).

@@ -1,4 +1,7 @@
-"""Cameras resource — V02: PostgreSQL-backed CRUD + stream lifecycle.
+"""Cameras resource — V02 CRUD/lifecycle + V03 inference attach/detach.
+
+Starting a stream also attaches an inference worker (best-effort: inference
+failures never fail stream startup). Stopping/deleting detaches it.
 
 Configuration persists in PostgreSQL (survives restarts); stream state,
 buffers, and metrics stay in memory. ``source_secret`` is write-only and
@@ -7,6 +10,7 @@ never appears in responses or logs.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,6 +24,8 @@ from backend.app.ingestion.manager import StreamSupervisor, create_source
 from backend.app.ingestion.repository import CameraRepository
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
+
+logger = logging.getLogger("industrial-vision.api")
 
 _fallback_supervisor = StreamSupervisor()
 
@@ -122,6 +128,7 @@ def get_camera(camera_id: str, repository: CameraRepository = Depends(get_reposi
 def update_camera(
     camera_id: str,
     payload: CameraUpdateRequest,
+    request: Request,
     repository: CameraRepository = Depends(get_repository),
     supervisor: StreamSupervisor = Depends(get_supervisor),
 ) -> dict:
@@ -129,26 +136,52 @@ def update_camera(
     camera = repository.update(camera_id, **updates)
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
-    # Config changed → drop the running worker; next start uses fresh config.
+    # Config changed → drop the running workers; next start uses fresh config.
     supervisor.remove(camera_id)
+    _detach_inference(request, camera_id)
     return _public_dict(camera)
 
 
 @router.delete("/{camera_id}", status_code=200)
 def delete_camera(
     camera_id: str,
+    request: Request,
     repository: CameraRepository = Depends(get_repository),
     supervisor: StreamSupervisor = Depends(get_supervisor),
 ) -> dict:
     supervisor.remove(camera_id)
+    _detach_inference(request, camera_id)
     if not repository.delete(camera_id):
         raise HTTPException(status_code=404, detail="camera not found")
     return {"deleted": camera_id}
 
 
+def _detach_inference(request: Request, camera_id: str) -> None:
+    supervisor = getattr(request.app.state, "inference_supervisor", None)
+    if supervisor is not None:
+        try:
+            supervisor.detach(camera_id)
+        except Exception:
+            logger.debug("inference detach failed for %s", camera_id, exc_info=True)
+
+
+def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
+    """Best-effort: inference problems must never fail stream startup."""
+    try:
+        supervisor = getattr(request.app.state, "inference_supervisor", None)
+        model_manager = getattr(request.app.state, "model_manager", None)
+        if supervisor is None or model_manager is None:
+            return
+        worker = supervisor.attach(camera_id, model_manager, frame_source)  # type: ignore[arg-type]
+        worker.start()
+    except Exception:
+        logger.warning("inference attach failed for %s", camera_id, exc_info=True)
+
+
 @router.post("/{camera_id}/start")
 def start_stream(
     camera_id: str,
+    request: Request,
     repository: CameraRepository = Depends(get_repository),
     supervisor: StreamSupervisor = Depends(get_supervisor),
 ) -> dict:
@@ -169,15 +202,21 @@ def start_stream(
             frame_skip=settings.frame_skip,
         )
     manager.start()
+    _attach_inference(request, camera_id, manager.buffer.get_latest)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 
 @router.post("/{camera_id}/stop")
-def stop_stream(camera_id: str, supervisor: StreamSupervisor = Depends(get_supervisor)) -> dict:
+def stop_stream(
+    camera_id: str,
+    request: Request,
+    supervisor: StreamSupervisor = Depends(get_supervisor),
+) -> dict:
     manager = supervisor.get(camera_id)
     if manager is None:
         raise HTTPException(status_code=404, detail="stream not found")
     manager.stop()
+    _detach_inference(request, camera_id)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 

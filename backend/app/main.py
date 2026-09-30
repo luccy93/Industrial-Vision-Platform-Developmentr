@@ -41,12 +41,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("database init skipped (unreachable?)", exc_info=True)
     yield
-    try:
-        supervisor = getattr(app.state, "supervisor", None)
-        if supervisor is not None:
-            supervisor.stop_all()
-    except Exception:
-        logger.debug("supervisor shutdown failed", exc_info=True)
+    for key in ("inference_supervisor", "supervisor"):
+        try:
+            supervisor = getattr(app.state, key, None)
+            if supervisor is not None:
+                supervisor.stop_all()
+        except Exception:
+            logger.debug("%s shutdown failed", key, exc_info=True)
     logger.info("shutdown service=%s", settings.app_name)
 
 
@@ -66,6 +67,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.session_factory = get_session_factory(settings.database_url)
     app.state.supervisor = _app_supervisor()
+    from backend.app.inference.manager import ModelManager
+    from backend.app.inference.worker import InferenceSupervisor
+
+    app.state.model_manager = ModelManager.from_settings(settings)
+    app.state.inference_supervisor = InferenceSupervisor()
 
     app.add_middleware(
         CORSMiddleware,
@@ -85,6 +91,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(v1_router)
     app.include_router(streams_ws_router)
+    from backend.app.api.v1.inference import router as inference_router
+
+    app.include_router(inference_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

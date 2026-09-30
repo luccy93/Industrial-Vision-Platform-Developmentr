@@ -97,8 +97,7 @@ class YOLOModel(InferenceModel):
         except ImportError as exc:
             self._state = ModelState.NOT_READY
             raise ModelUnavailableError(
-                "ultralytics is not installed; install backend/requirements.txt "
-                "or use MockModel for tests"
+                "ultralytics is not installed; install backend/requirements.txt or use MockModel for tests"
             ) from exc
         if not os.path.exists(self.model_path):
             self._state = ModelState.NOT_READY

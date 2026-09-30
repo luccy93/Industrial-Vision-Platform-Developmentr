@@ -60,5 +60,5 @@ logs/
 *.pt
 *.onnx
 *.engine
-models/
+models/*
 !models/.gitkeep

@@ -43,9 +43,41 @@ export type StreamStatus = {
   last_error?: string;
 };
 
+export type InferenceStatus = {
+  loaded: boolean;
+  state: string;
+  model_name: string;
+  device: string;
+  class_count: number;
+  confidence_threshold: number;
+  inference_fps: number;
+  average_latency_ms: number;
+  detections_per_frame: number;
+  active_workers: number;
+};
+
+export type DetectionSummary = {
+  camera_id: string;
+  inference_running: boolean;
+  count: number;
+  results: Array<{
+    frame_id: string;
+    timestamp: string;
+    inference_time_ms: number;
+    model_name: string;
+    device: string;
+    detections: Array<{
+      class_id: number;
+      class_name: string;
+      confidence: number;
+      bounding_box: { x1: number; y1: number; x2: number; y2: number };
+    }>;
+  }>;
+};
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", note: "V01 foundation" },
-  { href: "/cameras", label: "Cameras", note: "V02 ingestion" },
+  { href: "/cameras", label: "Cameras", note: "V03 detection" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];

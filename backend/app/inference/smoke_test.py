@@ -40,8 +40,8 @@ def main() -> int:
             shutil.move("yolo11n.pt", args.model)
         print(f"downloaded: {args.model}")
 
-    from backend.app.inference.yolo_model import YOLOModel
     from backend.app.inference.base import ModelError
+    from backend.app.inference.yolo_model import YOLOModel
 
     model = YOLOModel(name="yolo-smoke", model_path=args.model, device=args.device)
     try:

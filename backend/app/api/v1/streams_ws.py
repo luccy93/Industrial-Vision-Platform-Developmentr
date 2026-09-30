@@ -52,6 +52,7 @@ async def camera_stream_socket(
         factory = get_session_factory()
     repository = CameraRepository(factory)
     supervisor = getattr(websocket.app.state, "supervisor", None) or _fallback_supervisor
+    inference_supervisor = getattr(websocket.app.state, "inference_supervisor", None)
     camera = repository.get(camera_id)
     if camera is None:
         await websocket.send_text(
@@ -69,6 +70,7 @@ async def camera_stream_socket(
         return
 
     last_state: StreamState | None = None
+    last_detection_id: str | None = None
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -76,6 +78,12 @@ async def camera_stream_socket(
             if state != last_state:
                 await websocket.send_text(json.dumps(_status_message(camera_id, state)))
                 last_state = state
+            if inference_supervisor is not None:
+                worker = inference_supervisor.get(camera_id)
+                latest = worker.latest() if worker else None
+                if latest is not None and str(latest.frame_id) != last_detection_id:
+                    last_detection_id = str(latest.frame_id)
+                    await websocket.send_text(json.dumps(latest.to_websocket()))
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(
