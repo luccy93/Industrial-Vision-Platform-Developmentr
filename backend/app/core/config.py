@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     def model_class_allowlist(self) -> frozenset[str]:
         return frozenset(part.strip().lower() for part in self.model_classes.split(",") if part.strip())
 
+    # --- V04 tracking engine (native ByteTrack-compatible) ---
+    track_min_hits: int = Field(default=3, ge=1, le=20)
+    track_max_age: int = Field(default=30, ge=1, le=600)
+    track_iou_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    track_history_size: int = Field(default=30, ge=1, le=300)
+    # Detections at/above this confidence join stage-1 association; below it,
+    # down to MODEL_CONFIDENCE_THRESHOLD, join stage-2 (track continuation).
+    track_high_conf: float = Field(default=0.5, ge=0.0, le=1.0)
+
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)
 
