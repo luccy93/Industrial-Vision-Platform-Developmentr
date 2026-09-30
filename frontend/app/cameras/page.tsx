@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { StatusCard } from "../../components/system/StatusCard";
 import { Card } from "../../components/ui/Card";
 import { appConfig } from "../../lib/config";
-import type { CameraItem, DetectionSummary, InferenceStatus, StreamStatus } from "../../types";
+import type { CameraItem, DetectionSummary, InferenceStatus, StreamStatus, TrackSummary } from "../../types";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${appConfig.apiUrl}${path}`, {
@@ -25,6 +25,31 @@ const STATE_STYLE: Record<string, string> = {
 
 function stateStyle(state: string): string {
   return STATE_STYLE[state] ?? "bg-slate-500/15 text-slate-300";
+}
+
+function TrackingPanel({ summary }: { summary: TrackSummary | undefined }) {
+  if (!summary || summary.count === 0) {
+    return <p className="mt-2 text-xs text-slate-400">No active tracks.</p>;
+  }
+  return (
+    <div className="mt-2 rounded-lg border border-slate-800 p-2">
+      <p className="text-xs text-slate-400">Active Tracks: {summary.count}</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {summary.tracks.map((t) => (
+          <span
+            key={t.track_id}
+            title={`state ${t.state} · age ${t.age} · speed ${t.velocity.speed.toFixed(1)} px/s`}
+            className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300"
+          >
+            {t.class_name} #{t.track_id} · {(t.confidence * 100).toFixed(0)}%
+          </span>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        {summary.tracks.map((t) => `#${t.track_id}:${t.state}`).join("  ")}
+      </p>
+    </div>
+  );
 }
 
 function DetectionPanel({ summary }: { summary: DetectionSummary | undefined }) {
@@ -53,6 +78,7 @@ export default function CamerasPage() {
   const [statuses, setStatuses] = useState<Record<string, StreamStatus>>({});
   const [inference, setInference] = useState<InferenceStatus | null>(null);
   const [detections, setDetections] = useState<Record<string, DetectionSummary>>({});
+  const [tracks, setTracks] = useState<Record<string, TrackSummary>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -92,6 +118,19 @@ export default function CamerasPage() {
       const detNext: Record<string, DetectionSummary> = {};
       for (const [id, d] of detEntries) if (d) detNext[id] = d;
       setDetections(detNext);
+      const trackEntries = await Promise.all(
+        data.items.map(async (c) => {
+          try {
+            const t = await api<TrackSummary>(`/api/v1/cameras/${c.camera_id}/tracks`);
+            return [c.camera_id, t] as const;
+          } catch {
+            return [c.camera_id, null] as const;
+          }
+        })
+      );
+      const trackNext: Record<string, TrackSummary> = {};
+      for (const [id, t] of trackEntries) if (t) trackNext[id] = t;
+      setTracks(trackNext);
     } catch (e) {
       setError(e instanceof Error ? e.message : "API unreachable");
     }
@@ -165,6 +204,7 @@ export default function CamerasPage() {
                 <StatusCard label="Frames dropped" status={String(m?.frames_dropped ?? "—")} />
               </div>
               <DetectionPanel summary={detections[c.camera_id]} />
+              <TrackingPanel summary={tracks[c.camera_id]} />
               <div className="mt-3 flex gap-2">
                 <button
                   disabled={busy !== null}

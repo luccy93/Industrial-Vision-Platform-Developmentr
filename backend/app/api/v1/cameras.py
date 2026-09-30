@@ -11,7 +11,10 @@ never appears in responses or logs.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from backend.app.tracking.manager import TrackingManager
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -165,6 +168,14 @@ def _detach_inference(request: Request, camera_id: str) -> None:
             logger.debug("inference detach failed for %s", camera_id, exc_info=True)
 
 
+def _tracking_manager(request: Request) -> TrackingManager | None:
+    manager = getattr(request.app.state, "tracking_manager", None)
+    # isinstance needs the runtime class; import locally to avoid cycles.
+    from backend.app.tracking.manager import TrackingManager as _TM
+
+    return manager if isinstance(manager, _TM) else None
+
+
 def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
     """Best-effort: inference problems must never fail stream startup."""
     try:
@@ -172,7 +183,13 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
         model_manager = getattr(request.app.state, "model_manager", None)
         if supervisor is None or model_manager is None:
             return
-        worker = supervisor.attach(camera_id, model_manager, frame_source)  # type: ignore[arg-type]
+        tracking = _tracking_manager(request)
+        if tracking is not None:
+            try:
+                tracking.reset_camera(camera_id)
+            except Exception:
+                logger.debug("tracking reset failed for %s", camera_id, exc_info=True)
+        worker = supervisor.attach(camera_id, model_manager, frame_source, tracking_manager=tracking)  # type: ignore[arg-type]
         worker.start()
     except Exception:
         logger.warning("inference attach failed for %s", camera_id, exc_info=True)

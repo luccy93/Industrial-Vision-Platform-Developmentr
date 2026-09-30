@@ -75,6 +75,24 @@ export type DetectionSummary = {
   }>;
 };
 
+export type TrackSummary = {
+  camera_id: string;
+  tracking_running: boolean;
+  count: number;
+  tracks: Array<{
+    track_id: number;
+    class_id: number;
+    class_name: string;
+    confidence: number;
+    bounding_box: { x1: number; y1: number; x2: number; y2: number };
+    state: string;
+    age: number;
+    hits: number;
+    time_since_update: number;
+    velocity: { x: number; y: number; speed: number };
+  }>;
+};
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", note: "V01 foundation" },
   { href: "/cameras", label: "Cameras", note: "V03 detection" },

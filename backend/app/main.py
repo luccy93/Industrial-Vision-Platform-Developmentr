@@ -72,6 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.model_manager = ModelManager.from_settings(settings)
     app.state.inference_supervisor = InferenceSupervisor()
+    from backend.app.tracking.manager import TrackingManager
+
+    app.state.tracking_manager = TrackingManager(settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -94,6 +97,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.inference import router as inference_router
 
     app.include_router(inference_router)
+    from backend.app.api.v1.tracking import router as tracking_router
+
+    app.include_router(tracking_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

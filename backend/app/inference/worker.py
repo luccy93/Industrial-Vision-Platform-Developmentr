@@ -21,6 +21,7 @@ from backend.app.domain.frame import IngestionFrame
 from backend.app.inference.base import ModelError
 from backend.app.inference.manager import ModelManager
 from backend.app.inference.schemas import InferenceResult
+from backend.app.tracking.manager import TrackingManager
 
 logger = logging.getLogger("industrial-vision.inference")
 
@@ -28,7 +29,13 @@ FrameSource = Callable[[], IngestionFrame | None]
 
 
 class InferenceWorker:
-    """One worker thread per camera: queue → model → results ring."""
+    """One worker thread per camera: queue → model → results ring.
+
+    V04 adds an inline tracking stage after each inference result. Tracking
+    runs in the same worker thread (sub-millisecond vs millisecond-scale
+    inference) rather than a separate thread pool — no extra queues, no extra
+    threads, still never on the FastAPI event loop.
+    """
 
     def __init__(
         self,
@@ -38,13 +45,17 @@ class InferenceWorker:
         queue_size: int = 4,
         poll_interval: float = 0.05,
         results_size: int = 30,
+        tracking_manager: TrackingManager | None = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
         self._frame_source = frame_source
+        self._tracking_manager = tracking_manager
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
+        self._tracks: list = []
+        self._tracked_frame_id: object = None
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -141,6 +152,21 @@ class InferenceWorker:
         with self._lock:
             self._results.append(result)
             self._last_error = None
+        self._track(result)
+
+    def _track(self, result: InferenceResult) -> None:
+        """V04 stage: associate detections into tracks (isolated failures)."""
+        manager = self._tracking_manager
+        if manager is None:
+            return
+        try:
+            tracks = manager.update(self.camera_id, result.detections, result.frame_id, result.timestamp)
+        except Exception as exc:
+            logger.warning("tracking failed for %s: %s", self.camera_id, exc)
+            return
+        with self._lock:
+            self._tracks = tracks
+            self._tracked_frame_id = result.frame_id
 
     def _sleep(self, seconds: float) -> None:
         self._stop_event.wait(seconds)
@@ -148,6 +174,11 @@ class InferenceWorker:
     def latest(self) -> InferenceResult | None:
         with self._lock:
             return self._results[-1] if self._results else None
+
+    def latest_tracked(self) -> tuple[object, list]:
+        """(frame_id, tracks) of the most recently tracked result."""
+        with self._lock:
+            return self._tracked_frame_id, list(self._tracks)
 
     def recent(self, limit: int = 10) -> list[InferenceResult]:
         with self._lock:

@@ -71,6 +71,7 @@ async def camera_stream_socket(
 
     last_state: StreamState | None = None
     last_detection_id: str | None = None
+    last_tracked_id: str | None = None
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -84,6 +85,20 @@ async def camera_stream_socket(
                 if latest is not None and str(latest.frame_id) != last_detection_id:
                     last_detection_id = str(latest.frame_id)
                     await websocket.send_text(json.dumps(latest.to_websocket()))
+                tracked_id, tracks = worker.latest_tracked() if worker else (None, [])
+                if tracked_id is not None and str(tracked_id) != last_tracked_id:
+                    last_tracked_id = str(tracked_id)
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "tracking",
+                                "camera_id": camera_id,
+                                "frame_id": str(tracked_id),
+                                "timestamp": utcnow().isoformat(),
+                                "tracks": [track.to_websocket() for track in tracks],
+                            }
+                        )
+                    )
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(
