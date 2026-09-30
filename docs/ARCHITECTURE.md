@@ -62,14 +62,23 @@ Dashboard
 - CPU/GPU via `MODEL_DEVICE=auto`; weights external (`models/yolo11n.pt`,
   never committed). See `docs/INFERENCE.md`. **V03 = detection, V04 = tracking.**
 
-## Future volumes (explicitly NOT in V01/V02/V03)
+## V04 — Implemented (multi-object tracking)
+
+- `backend/app/tracking/`: `Tracker` ABC → native `ByteTrackTracker`
+  (IoU + Hungarian, NumPy/SciPy CPU, zero new deps), `TrackingManager`
+  (per-camera isolation), `TrackedObject` (TENTATIVE/CONFIRMED/LOST/REMOVED,
+  bounded history, px/s velocity), `GET /api/v1/tracking/status`,
+  `GET /api/v1/cameras/{id}/tracks`, WS `tracking` messages, UI track chips.
+- See `docs/TRACKING.md`. **V03 = Detection, V04 = Tracking, V05 = Safety.**
+
+## Future volumes (explicitly NOT in V01–V04)
 
 | Stage | Status | Notes |
 |---|---|---|
 | Live camera RTSP ingestion | done (V02) | OpenCV workers, reconnect w/ backoff |
 | Frame processing pipeline | done (V02) | buffer → sample → resize/convert |
 | YOLO production inference | done (V03) | Ultralytics, CPU/GPU, mock-tested |
-| Multi-object tracking | planned | ByteTrack/OC-SORT eval |
+| Multi-object tracking | done (V04) | native ByteTrack-compatible |
 | Safety detection | planned | PPE/zone/intrusion |
 | Quality inspection | planned | defect/anomaly |
 | Autonomous perception | planned | scene graph |

@@ -56,6 +56,12 @@ Tests synthesize frames (NumPy) and video files (OpenCV writer) in tmp dirs.
 For manual testing, point a `file` camera at `data/videos/sample.mp4` —
 never commit large binaries. Full guide: `docs/VIDEO_INGESTION.md`.
 
+## Tracking tuning (V04)
+
+`TRACK_MIN_HITS` (confirmation), `TRACK_MAX_AGE` (LOST→REMOVED),
+`TRACK_IOU_THRESHOLD` (association), `TRACK_HISTORY_SIZE` (memory bound),
+`TRACK_HIGH_CONF` (stage-1/2 split). Full guide: `docs/TRACKING.md`.
+
 ## Docker
 
 ```powershell

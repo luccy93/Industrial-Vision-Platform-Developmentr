@@ -8,7 +8,21 @@ reconnect, PG-persisted camera configs, WS telemetry, and a Cameras page.
 V03 adds the **AI inference engine** — Ultralytics YOLO behind an
 `InferenceModel` abstraction, per-camera inference workers, detection API +
 WebSocket `detection` messages, PG-free runtime results, and a detection panel.
-It does **not** yet implement tracking, safety/quality analytics, or incidents.
+V04 adds **multi-object tracking** — a native ByteTrack-compatible engine
+(IoU + Hungarian via SciPy, CPU-only, zero new deps), per-camera isolated
+trackers, TENTATIVE/CONFIRMED/LOST/REMOVED lifecycle, bounded history,
+image-space velocity, tracking API + WebSocket `tracking` messages, and track
+chips in the UI. It does **not** yet implement safety, incidents, or quality.
+**V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.**
+
+## Features (V04)
+
+- Native ByteTrack-compatible tracker (IoU + Hungarian, NumPy/SciPy, CPU, no new deps)
+- Per-camera isolated trackers; `(camera_id, track_id)` identity; IDs restart safely on stream restart
+- Lifecycle TENTATIVE → CONFIRMED → LOST → REMOVED (`TRACK_MIN_HITS/MAX_AGE/IOU_THRESHOLD`)
+- Bounded per-track history (`TRACK_HISTORY_SIZE`), image-space velocity (px/s)
+- `GET /api/v1/tracking/status`, `GET /api/v1/cameras/{id}/tracks` (runtime state, no PG writes)
+- WS `tracking` messages alongside V02/V03 messages; frontend track chips (`Person #17`, state, speed)
 
 ## Features (V03)
 
@@ -116,4 +130,5 @@ docker compose up --build
 - **V01** — foundation
 - **V02** — video ingestion pipeline
 - **V03** — AI inference & detection (this release; V03 = detection, V04 = tracking)
-- **V04+** — tracking, safety/quality/perception, risk, incidents, analytics
+- **V04** — multi-object tracking (this release)
+- **V05+** — safety/quality/perception, risk, incidents, analytics
