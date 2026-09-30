@@ -53,13 +53,22 @@ Dashboard
 - Frontend Cameras page (status, FPS, counters, Start/Stop/Refresh).
 - 68 pytest tests incl. perf bounds; see `docs/VIDEO_INGESTION.md`.
 
-## Future volumes (explicitly NOT in V01/V02)
+## V03 — Implemented (AI inference & detection)
+
+- `backend/app/inference/`: `InferenceModel` ABC → `YOLOModel`/`MockModel`,
+  `ModelManager` (load-once, thread-safe), per-camera `InferenceWorker`s with
+  bounded queues + results rings, `GET /api/v1/inference/status`,
+  `GET /api/v1/cameras/{id}/detections`, WS `detection` messages.
+- CPU/GPU via `MODEL_DEVICE=auto`; weights external (`models/yolo11n.pt`,
+  never committed). See `docs/INFERENCE.md`. **V03 = detection, V04 = tracking.**
+
+## Future volumes (explicitly NOT in V01/V02/V03)
 
 | Stage | Status | Notes |
 |---|---|---|
 | Live camera RTSP ingestion | done (V02) | OpenCV workers, reconnect w/ backoff |
 | Frame processing pipeline | done (V02) | buffer → sample → resize/convert |
-| YOLO production inference | planned (V03+) | PyTorch/ONNX, GPU pool |
+| YOLO production inference | done (V03) | Ultralytics, CPU/GPU, mock-tested |
 | Multi-object tracking | planned | ByteTrack/OC-SORT eval |
 | Safety detection | planned | PPE/zone/intrusion |
 | Quality inspection | planned | defect/anomaly |

@@ -43,6 +43,13 @@ cd frontend; npm run typecheck; npm run build
 ruff check backend; ruff format --check backend; python -m mypy backend
 ```
 
+## Model weights (V03)
+
+Weights are external: `MODEL_PATH=models/yolo11n.pt` (gitignored). Fetch
+explicitly with `python -m backend.app.inference.smoke_test --download`, or
+run the mock-backed suite which needs nothing. Validate a local model with
+`python -m backend.app.inference.smoke_test` (READY or honest SKIPPED).
+
 ## Camera testing without hardware
 
 Tests synthesize frames (NumPy) and video files (OpenCV writer) in tmp dirs.

@@ -5,17 +5,28 @@
 V02 adds the **real-time video ingestion pipeline** — USB/RTSP/file sources,
 bounded frame buffering, sampling, preprocessing, stream lifecycle with
 reconnect, PG-persisted camera configs, WS telemetry, and a Cameras page.
-It does **not** yet implement YOLO inference, tracking, or safety/quality analytics.
+V03 adds the **AI inference engine** — Ultralytics YOLO behind an
+`InferenceModel` abstraction, per-camera inference workers, detection API +
+WebSocket `detection` messages, PG-free runtime results, and a detection panel.
+It does **not** yet implement tracking, safety/quality analytics, or incidents.
+
+## Features (V03)
+
+- `InferenceModel` ABC + `YOLOModel` (Ultralytics, lazy import, no silent downloads) + deterministic `MockModel`
+- `MODEL_DEVICE=auto` (CUDA iff available, else CPU), conf/IoU/imgsz/max-det, class allowlist
+- Per-camera inference workers, bounded queues (drop-oldest), results rings, isolated errors
+- `GET /api/v1/inference/status`, `GET /api/v1/cameras/{id}/detections` (runtime state, no PG writes)
+- WS `detection` messages alongside V02 `stream_status`/`frame`/`stream_error`
+- Frontend detection panel (model, device, FPS, latency, classes + confidence)
+- `python -m backend.app.inference.smoke_test` (READY or honest SKIPPED)
 
 ## Features (V02)
-
-- Video sources: USB (`usb`), RTSP (`rtsp`), file (`file`) behind one `VideoSource` interface
 - Per-camera worker threads (FastAPI loop never blocked; one failure can't crash the backend)
 - Bounded `FrameBuffer` (drop-oldest), `FrameSampler` (`TARGET_PROCESSING_FPS`/`FRAME_SKIP`), extensible `Preprocessor`
 - Stream states: `DISCONNECTED→CONNECTING→CONNECTED→RUNNING→STOPPING→STOPPED` + `ERROR/RECONNECTING` with backoff
 - Camera CRUD + `start/stop/status` under `/api/v1/cameras` (PostgreSQL; secrets write-only, redacted logs)
 - WebSocket `/ws/cameras/{camera_id}`: `stream_status` / `frame` metadata / `stream_error` (no video bytes)
-- Frontend Cameras page: status, FPS, counters, Start/Stop/Refresh
+- Frontend Cameras page: status, FPS, counters, Start/Stop/Refresh, detection panel
 
 ## Features (V01)
 
@@ -103,5 +114,6 @@ docker compose up --build
 ## Project Roadmap
 
 - **V01** — foundation
-- **V02** — video ingestion pipeline (this release)
-- **V03+** — inference, tracking, safety/quality/perception, risk, incidents, analytics
+- **V02** — video ingestion pipeline
+- **V03** — AI inference & detection (this release; V03 = detection, V04 = tracking)
+- **V04+** — tracking, safety/quality/perception, risk, incidents, analytics
