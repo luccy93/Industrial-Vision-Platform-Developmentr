@@ -44,10 +44,33 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
-    # --- AI / model (configuration only in V01) ---
+    # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")
     model_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # --- V03 inference engine ---
+    model_name: str = Field(default="yolo11n")
+    model_path: str = Field(default="models/yolo11n.pt")
+    model_iou_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
+    model_image_size: int = Field(default=640, ge=320, le=1280)
+    model_max_detections: int = Field(default=300, ge=1, le=1000)
+    # Comma-separated class allowlist, e.g. "person,car"; empty = all classes.
+    model_classes: str = Field(default="")
+
+    @field_validator("model_device")
+    @classmethod
+    def _normalize_device(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in ("auto", "cpu", "cuda"):
+            raise ValueError("MODEL_DEVICE must be one of auto|cpu|cuda")
+        return normalized
+
+    @property
+    def model_class_allowlist(self) -> frozenset[str]:
+        return frozenset(
+            part.strip().lower() for part in self.model_classes.split(",") if part.strip()
+        )
 
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)

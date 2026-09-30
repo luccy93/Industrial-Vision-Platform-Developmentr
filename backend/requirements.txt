@@ -9,5 +9,10 @@ psycopg2-binary>=2.9
 # opencv-contrib-python install is API-compatible for local dev.
 opencv-python-headless>=4.8,<5
 numpy>=1.26
+# V03 inference. torch CPU is sufficient for dev; install the CUDA build
+# separately for GPU hosts. ultralytics is imported lazily — the API boots
+# and tests pass without it.
+torch>=2.0
+ultralytics>=8.0
 python-multipart>=0.0.9
 httpx>=0.27

@@ -55,3 +55,10 @@ redis-data/
 # Logs
 *.log
 logs/
+
+# AI model weights — external runtime artifacts, never committed
+*.pt
+*.onnx
+*.engine
+models/
+!models/.gitkeep
