@@ -79,6 +79,19 @@ class Settings(BaseSettings):
     # down to MODEL_CONFIDENCE_THRESHOLD, join stage-2 (track continuation).
     track_high_conf: float = Field(default=0.5, ge=0.0, le=1.0)
 
+    # --- V05 safety intelligence (deterministic geometry rules) ---
+    safety_enabled: bool = Field(default=True)
+    safety_fall_aspect_ratio_threshold: float = Field(default=1.2, ge=0.1, le=10.0)
+    safety_fall_persistence_frames: int = Field(default=5, ge=1, le=300)
+    safety_crowd_warning_count: int = Field(default=5, ge=1, le=1000)
+    safety_crowd_critical_count: int = Field(default=10, ge=1, le=1000)
+    safety_proximity_iou_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    safety_proximity_center_distance_ratio: float = Field(default=0.3, ge=0.0, le=2.0)
+    safety_stationary_speed_threshold: float = Field(default=15.0, ge=0.0)
+    safety_stationary_duration_seconds: float = Field(default=10.0, ge=0.0)
+    safety_event_resolution_grace_seconds: float = Field(default=3.0, ge=0.0, le=300.0)
+    safety_max_events_per_camera: int = Field(default=100, ge=1, le=10000)
+
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)
 
