@@ -75,6 +75,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.tracking.manager import TrackingManager
 
     app.state.tracking_manager = TrackingManager(settings)
+    from backend.app.safety.engine import SafetyEngine
+    from backend.app.safety.rules import default_rules
+
+    app.state.safety_engine = SafetyEngine(settings, default_rules(settings))
 
     app.add_middleware(
         CORSMiddleware,
@@ -100,6 +104,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.tracking import router as tracking_router
 
     app.include_router(tracking_router)
+    from backend.app.api.v1.safety import router as safety_router
+
+    app.include_router(safety_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

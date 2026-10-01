@@ -93,9 +93,34 @@ export type TrackSummary = {
   }>;
 };
 
+export type SafetyEventItem = {
+  event_id: string;
+  camera_id: string;
+  event_type: string;
+  severity: string;
+  status: string;
+  track_ids: number[];
+  confidence: number;
+  timestamp: string;
+  first_seen: string;
+  last_seen: string;
+  duration_ms: number;
+  message: string;
+};
+
+export type SafetyStatus = {
+  enabled: boolean;
+  engine_status: string;
+  rules_loaded: string[];
+  active_camera_count: number;
+  active_event_count: number;
+  average_latency_ms: number;
+};
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", note: "V01 foundation" },
   { href: "/cameras", label: "Cameras", note: "V03 detection" },
+  { href: "/safety", label: "Safety", note: "V05 intelligence" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];

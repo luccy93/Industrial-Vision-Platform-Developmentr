@@ -21,6 +21,7 @@ from backend.app.domain.frame import IngestionFrame
 from backend.app.inference.base import ModelError
 from backend.app.inference.manager import ModelManager
 from backend.app.inference.schemas import InferenceResult
+from backend.app.safety.engine import SafetyEngine
 from backend.app.tracking.manager import TrackingManager
 
 logger = logging.getLogger("industrial-vision.inference")
@@ -46,16 +47,20 @@ class InferenceWorker:
         poll_interval: float = 0.05,
         results_size: int = 30,
         tracking_manager: TrackingManager | None = None,
+        safety_engine: SafetyEngine | None = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
         self._frame_source = frame_source
         self._tracking_manager = tracking_manager
+        self._safety_engine = safety_engine
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
         self._tracks: list = []
         self._tracked_frame_id: object = None
+        self._safety_new: list = []
+        self._safety_active: list = []
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -167,6 +172,21 @@ class InferenceWorker:
         with self._lock:
             self._tracks = tracks
             self._tracked_frame_id = result.frame_id
+        self._analyze_safety(tracks, result)
+
+    def _analyze_safety(self, tracks: list, result: InferenceResult) -> None:
+        """V05 stage: tracking output → safety events (isolated failures)."""
+        engine = self._safety_engine
+        if engine is None:
+            return
+        try:
+            analysis = engine.process(self.camera_id, tracks, result.timestamp)
+        except Exception as exc:
+            logger.warning("safety analysis failed for %s: %s", self.camera_id, exc)
+            return
+        with self._lock:
+            self._safety_new = list(analysis.new_events)
+            self._safety_active = list(analysis.active_events)
 
     def _sleep(self, seconds: float) -> None:
         self._stop_event.wait(seconds)
@@ -179,6 +199,11 @@ class InferenceWorker:
         """(frame_id, tracks) of the most recently tracked result."""
         with self._lock:
             return self._tracked_frame_id, list(self._tracks)
+
+    def latest_safety(self) -> tuple[list, list]:
+        """(new_events, active_events) from the latest safety pass."""
+        with self._lock:
+            return list(self._safety_new), list(self._safety_active)
 
     def recent(self, limit: int = 10) -> list[InferenceResult]:
         with self._lock:

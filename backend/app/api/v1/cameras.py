@@ -184,12 +184,24 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
         if supervisor is None or model_manager is None:
             return
         tracking = _tracking_manager(request)
+        safety_engine = getattr(request.app.state, "safety_engine", None)
         if tracking is not None:
             try:
-                tracking.reset_camera(camera_id)
+                tracking.reset_camera(camera_id)  # type: ignore[union-attr]
             except Exception:
                 logger.debug("tracking reset failed for %s", camera_id, exc_info=True)
-        worker = supervisor.attach(camera_id, model_manager, frame_source, tracking_manager=tracking)  # type: ignore[arg-type]
+        if safety_engine is not None:
+            try:
+                safety_engine.reset_camera(camera_id)
+            except Exception:
+                logger.debug("safety reset failed for %s", camera_id, exc_info=True)
+        worker = supervisor.attach(  # type: ignore[arg-type]
+            camera_id,
+            model_manager,
+            frame_source,
+            tracking_manager=tracking,
+            safety_engine=safety_engine,
+        )
         worker.start()
     except Exception:
         logger.warning("inference attach failed for %s", camera_id, exc_info=True)

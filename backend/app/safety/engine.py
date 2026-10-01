@@ -164,6 +164,24 @@ class SafetyEngine:
             metrics=metrics,
         )
 
+    def suppress(self, camera_id: str, event_id: str) -> SafetyEventStatus:
+        """Move an active event to SUPPRESSED. Raises ValueError if unknown."""
+        from uuid import UUID
+
+        state = self._cameras.get(camera_id)
+        wanted = UUID(event_id)
+        if state is None:
+            raise ValueError(f"unknown event {event_id}")
+        with self._lock:
+            for key, event in list(state.active.items()):
+                if event.event_id == wanted:
+                    event.status = SafetyEventStatus.SUPPRESSED
+                    state.recent.append(event)
+                    del state.active[key]
+                    state.resolved += 1
+                    return event.status
+        raise ValueError(f"unknown event {event_id}")
+
     def active_events(self, camera_id: str, limit: int = 50) -> list[SafetyEvent]:
         state = self._cameras.get(camera_id)
         if state is None:

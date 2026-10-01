@@ -53,6 +53,7 @@ async def camera_stream_socket(
     repository = CameraRepository(factory)
     supervisor = getattr(websocket.app.state, "supervisor", None) or _fallback_supervisor
     inference_supervisor = getattr(websocket.app.state, "inference_supervisor", None)
+    safety_engine = getattr(websocket.app.state, "safety_engine", None)
     camera = repository.get(camera_id)
     if camera is None:
         await websocket.send_text(
@@ -72,6 +73,7 @@ async def camera_stream_socket(
     last_state: StreamState | None = None
     last_detection_id: str | None = None
     last_tracked_id: str | None = None
+    sent_safety: dict[str, str] = {}
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -97,6 +99,20 @@ async def camera_stream_socket(
                                 "timestamp": utcnow().isoformat(),
                                 "tracks": [track.to_websocket() for track in tracks],
                             }
+                        )
+                    )
+            if safety_engine is not None:
+                # First pass publishes current state; afterwards only deltas
+                # (new events, status changes incl. resolutions).
+                candidates = list(safety_engine.active_events(camera_id, 50))
+                for event in candidates + safety_engine.recent_events(camera_id, 10):
+                    key = str(event.event_id)
+                    if sent_safety.get(key) == event.status.value:
+                        continue
+                    sent_safety[key] = event.status.value
+                    await websocket.send_text(
+                        json.dumps(
+                            {"type": "safety_event", "camera_id": camera_id, "event": event.to_websocket()}
                         )
                     )
             if manager is not None:

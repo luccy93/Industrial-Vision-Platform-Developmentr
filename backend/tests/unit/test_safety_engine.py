@@ -35,10 +35,10 @@ class StubRule(SafetyRule):
         ]
 
 
-def _settings(**overrides) -> Settings:  # type: ignore[no-untyped-def]
-    params = {"safety_event_resolution_grace_seconds": 3.0}
+def _settings(**overrides: object) -> Settings:
+    params: dict[str, object] = {"safety_event_resolution_grace_seconds": 3.0}
     params.update(overrides)
-    return Settings(_env_file=None, **params)  # type: ignore[call-arg]
+    return Settings(_env_file=None, **params)  # type: ignore
 
 
 def _ts(seconds: float) -> datetime:
@@ -46,7 +46,8 @@ def _ts(seconds: float) -> datetime:
 
 
 def test_create_update_resolve_lifecycle() -> None:
-    engine = SafetyEngine(_settings(), [StubRule(active=True)])
+    stub = StubRule(active=True)
+    engine = SafetyEngine(_settings(), [stub])
     first = engine.process("cam-1", [], _ts(0))
     assert len(first.new_events) == 1 and len(first.active_events) == 1
     event_id = first.new_events[0].event_id
@@ -56,7 +57,8 @@ def test_create_update_resolve_lifecycle() -> None:
     assert second.active_events[0].event_id == event_id  # stable ID
     assert second.active_events[0].duration_ms == 1000.0
 
-    engine._rules[0]._active = False  # type: ignore[union-attr]
+    engine._rules[0]  # registered stub
+    stub._active = False
     engine.process("cam-1", [], _ts(2))  # within grace → still active
     assert len(engine.active_events("cam-1")) == 1
     done = engine.process("cam-1", [], _ts(6))  # past grace → resolved
