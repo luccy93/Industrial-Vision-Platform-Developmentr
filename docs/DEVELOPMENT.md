@@ -62,6 +62,13 @@ never commit large binaries. Full guide: `docs/VIDEO_INGESTION.md`.
 `TRACK_IOU_THRESHOLD` (association), `TRACK_HISTORY_SIZE` (memory bound),
 `TRACK_HIGH_CONF` (stage-1/2 split). Full guide: `docs/TRACKING.md`.
 
+## Safety tuning (V05)
+
+`SAFETY_*` in `.env.example`: fall aspect/persistence, crowd counts,
+proximity IoU/distance, stationary speed/duration, resolution grace, per-camera
+event cap. Rules are deterministic — tune against synthetic tracks in
+`backend/tests/safety_helpers.py`. Full guide: `docs/SAFETY_INTELLIGENCE.md`.
+
 ## Docker
 
 ```powershell

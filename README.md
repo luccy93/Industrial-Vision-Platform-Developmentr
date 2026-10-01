@@ -12,8 +12,20 @@ V04 adds **multi-object tracking** — a native ByteTrack-compatible engine
 (IoU + Hungarian via SciPy, CPU-only, zero new deps), per-camera isolated
 trackers, TENTATIVE/CONFIRMED/LOST/REMOVED lifecycle, bounded history,
 image-space velocity, tracking API + WebSocket `tracking` messages, and track
-chips in the UI. It does **not** yet implement safety, incidents, or quality.
+chips in the UI.
+V05 adds the **safety intelligence engine** — four deterministic geometry
+rules (fall-risk, crowd, person/vehicle proximity, stationary), event dedup +
+lifecycle, safety API + WebSocket `safety_event`, and a Safety page. It does
+**not** yet implement incidents, PPE/zone enforcement, or quality.
 **V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.**
+
+## Features (V05)
+
+- Four deterministic geometry rules (fall-risk, crowd, proximity, stationary) on V04 tracks — no NN, no new deps
+- `SafetyEngine` per-camera state, dedup (stable IDs), grace-period resolution, suppress API
+- `GET /api/v1/safety/status`, `GET /api/v1/cameras/{id}/safety/events` (bounded, in-memory)
+- WS `safety_event` (new + resolution updates); Safety page with status/severity filters
+- Documented non-claims: no certified compliance, no meters, no medical detection, uncalibrated scores
 
 ## Features (V04)
 
@@ -130,5 +142,6 @@ docker compose up --build
 - **V01** — foundation
 - **V02** — video ingestion pipeline
 - **V03** — AI inference & detection (this release; V03 = detection, V04 = tracking)
-- **V04** — multi-object tracking (this release)
-- **V05+** — safety/quality/perception, risk, incidents, analytics
+- **V04** — multi-object tracking
+- **V05** — safety intelligence foundations (this release)
+- **V06+** — zones/proximity engine, quality/perception, risk, incidents, analytics

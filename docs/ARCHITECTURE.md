@@ -71,7 +71,17 @@ Dashboard
   `GET /api/v1/cameras/{id}/tracks`, WS `tracking` messages, UI track chips.
 - See `docs/TRACKING.md`. **V03 = Detection, V04 = Tracking, V05 = Safety.**
 
-## Future volumes (explicitly NOT in V01–V04)
+## V05 — Implemented (safety intelligence foundations)
+
+- `backend/app/safety/`: `SafetyRule` ABC → 4 geometry rules, `SafetyEngine`
+  (per-camera state, dedup, grace resolution, suppress), `SafetyEvent`
+  lifecycle, `GET /api/v1/safety/status`,
+  `GET /api/v1/cameras/{id}/safety/events`, WS `safety_event`, Safety page.
+- Deterministic foundations only: no compliance/meters/medical/calibrated claims.
+- See `docs/SAFETY_INTELLIGENCE.md`.
+  **V03 = Detection, V04 = Tracking, V05 = Industrial Safety Intelligence.**
+
+## Future volumes (explicitly NOT in V01–V05)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -79,7 +89,7 @@ Dashboard
 | Frame processing pipeline | done (V02) | buffer → sample → resize/convert |
 | YOLO production inference | done (V03) | Ultralytics, CPU/GPU, mock-tested |
 | Multi-object tracking | done (V04) | native ByteTrack-compatible |
-| Safety detection | planned | PPE/zone/intrusion |
+| Safety detection | partial (V05) | geometry foundations; PPE/zone/intrusion in V06+ |
 | Quality inspection | planned | defect/anomaly |
 | Autonomous perception | planned | scene graph |
 | Risk engine | planned | scoring/thresholds |
