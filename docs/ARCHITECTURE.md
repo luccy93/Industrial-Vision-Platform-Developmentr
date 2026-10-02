@@ -81,7 +81,23 @@ Dashboard
 - See `docs/SAFETY_INTELLIGENCE.md`.
   **V03 = Detection, V04 = Tracking, V05 = Industrial Safety Intelligence.**
 
-## Future volumes (explicitly NOT in V01–V05)
+## V06 — Implemented (restricted zones & advanced proximity)
+
+- `backend/app/spatial/`: `geometry.py` (pure polygon/bbox math), `engine.py`
+  (per-camera zone registry + membership/dwell state + proximity pair
+  evaluation, bounded), `rules.py` (adapters into the V05 `SafetyRule` contract),
+  `repository.py` (PG `zones` table), zone CRUD + `GET /api/v1/spatial/status`
+  + `GET /api/v1/cameras/{id}/zones/state`, WS `zone_event`/`proximity_event`,
+  Zones page with normalized SVG polygon editor.
+- Zone configuration is persisted per camera (Alembic `002_create_zones`);
+  membership/dwell/pair state is runtime-only and never written to PG.
+- Spatial rules produce ordinary `SafetyEvent`s (dedup, grace resolution,
+  suppression, REST visibility) — no parallel event system.
+- Image space only: normalized `[0,1]` polygons, bbox bottom-center anchor,
+  ratio/IoU thresholds. No calibration, depth, or metric distance.
+- See `docs/SPATIAL_SAFETY.md`.
+
+## Future volumes (explicitly NOT in V01–V06)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -89,7 +105,9 @@ Dashboard
 | Frame processing pipeline | done (V02) | buffer → sample → resize/convert |
 | YOLO production inference | done (V03) | Ultralytics, CPU/GPU, mock-tested |
 | Multi-object tracking | done (V04) | native ByteTrack-compatible |
-| Safety detection | partial (V05) | geometry foundations; PPE/zone/intrusion in V06+ |
+| Safety detection | partial (V05) | geometry foundations |
+| Zones & advanced proximity | done (V06) | restricted-zone entry/exit/dwell, 3 relationships, image-space only |
+| PPE detection | planned (V07+) | helmet/vest — no V06 equivalent |
 | Quality inspection | planned | defect/anomaly |
 | Autonomous perception | planned | scene graph |
 | Risk engine | planned | scoring/thresholds |

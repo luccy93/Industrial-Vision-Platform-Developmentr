@@ -1,6 +1,10 @@
 [tool.ruff]
 target-version = "py311"
 line-length = 110
+# `main.py` is an unrelated standalone script from the initial repository
+# upload; the platform application lives in `backend/app`. Keep lint/format
+# scoped to platform code instead of rewriting an untouched third-party file.
+extend-exclude = ["main.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

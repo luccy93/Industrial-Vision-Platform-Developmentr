@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.app.api.v1.cameras import get_repository
@@ -52,6 +52,10 @@ class ZoneCreateRequest(BaseModel):
     dwell_threshold_seconds: float | None = Field(default=None, ge=0.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    _normalize_enums = field_validator("zone_type", "severity", mode="before")(
+        lambda value: value.strip().upper() if isinstance(value, str) else value
+    )
+
 
 class ZoneUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
@@ -61,6 +65,10 @@ class ZoneUpdateRequest(BaseModel):
     severity: SafetySeverity | None = None
     dwell_threshold_seconds: float | None = Field(default=None, ge=0.0)
     metadata: dict[str, Any] | None = None
+
+    _normalize_enums = field_validator("zone_type", "severity", mode="before")(
+        lambda value: value.strip().upper() if isinstance(value, str) else value
+    )
 
 
 def _zone_payload(zone: SafetyZone) -> dict[str, Any]:

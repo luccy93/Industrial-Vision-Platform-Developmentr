@@ -39,9 +39,21 @@ npm run dev
 pytest backend/tests -v
 # Frontend gates:
 cd frontend; npm run typecheck; npm run build
-# Lint / types:
-ruff check backend; ruff format --check backend; python -m mypy backend
+# Lint / types (repo-wide; the stray root main.py is excluded via pyproject.toml):
+ruff check .; ruff format --check .; python -m mypy .
 ```
+
+V06 tests are grouped by intent: `unit/test_geometry.py` (polygon math),
+`unit/test_zone_runtime.py` (entry/exit/dwell/grace),
+`unit/test_proximity.py` (strategies + bounded pairs),
+`unit/test_zone_repository.py` (PG contract), `integration/test_spatial_api*.py`
+(CRUD/status/state/ergonomics), `integration/test_spatial_engine.py` and
+`test_spatial_ws.py` (lifecycle + V05 compatibility),
+`integration/test_spatial_integration.py` (Alembic cycle, startup warm-up,
+stream lifecycle), and `performance/test_spatial_perf.py` (state bounds,
+latency budget, concurrency). Test timestamps come from
+`backend/tests/safety_helpers.utc()` — a **fixed synthetic epoch**, so duration
+assertions never depend on how fast the machine runs.
 
 ## Model weights (V03)
 
@@ -68,6 +80,16 @@ never commit large binaries. Full guide: `docs/VIDEO_INGESTION.md`.
 proximity IoU/distance, stationary speed/duration, resolution grace, per-camera
 event cap. Rules are deterministic — tune against synthetic tracks in
 `backend/tests/safety_helpers.py`. Full guide: `docs/SAFETY_INTELLIGENCE.md`.
+
+## Spatial tuning (V06)
+
+`SPATIAL_*` in `.env.example`: enable flag, default dwell, state grace,
+per-camera zone cap, proximity strategy + IoU threshold, and per-relationship
+enabled/threshold/severity triples. Zone geometry is normalized `[0,1]` image
+space, so thresholds are resolution-independent but **not** comparable across
+cameras with different viewpoints, and never meters. `zone_type`/`severity`
+inputs are case-insensitive; stored/serialized values are always uppercase.
+Full guide: `docs/SPATIAL_SAFETY.md`.
 
 ## Docker
 

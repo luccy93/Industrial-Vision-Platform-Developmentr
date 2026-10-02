@@ -13,9 +13,14 @@ from backend.app.tracking.schemas import (
     TrackVelocity,
 )
 
+# Fixed synthetic epoch: wall-clock timestamps make duration assertions flaky
+# (the observed delta depends on how long the test process takes to run).
+_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 def utc(offset_seconds: float = 0.0) -> datetime:
-    return datetime.now(UTC) + timedelta(seconds=offset_seconds)
+    """Deterministic test clock: `utc(0)`, `utc(1.5)`, ... are exact offsets."""
+    return _EPOCH + timedelta(seconds=offset_seconds)
 
 
 def make_track(

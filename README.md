@@ -15,9 +15,27 @@ image-space velocity, tracking API + WebSocket `tracking` messages, and track
 chips in the UI.
 V05 adds the **safety intelligence engine** — four deterministic geometry
 rules (fall-risk, crowd, person/vehicle proximity, stationary), event dedup +
-lifecycle, safety API + WebSocket `safety_event`, and a Safety page. It does
-**not** yet implement incidents, PPE/zone enforcement, or quality.
-**V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.**
+lifecycle, safety API + WebSocket `safety_event`, and a Safety page.
+V06 adds the **spatial safety engine** — PG-persisted camera zones with
+normalized polygons, image-space entry/exit/dwell reasoning, advanced proximity
+relationships (person/vehicle, person/person, vehicle/vehicle) with
+`CENTER_DISTANCE`/`IOU`/`HYBRID` strategies, spatial API + WebSocket
+`zone_event`/`proximity_event`, and a Zones page with a polygon editor. Zone
+membership and proximity are **image-space approximations, never meters**.
+**V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.
+V06 = Restricted Zones & Advanced Proximity.**
+
+## Features (V06)
+
+- Camera-scoped zones in PostgreSQL (`zones` table, Alembic `002_create_zones`); normalized `[0,1]` polygons with server-side validation
+- Image-space membership via bbox bottom-center (documented ground-contact heuristic) → `RESTRICTED_ZONE_ENTRY` / `RESTRICTED_ZONE_EXIT` / `ZONE_DWELL`
+- Dwell timers per zone (`SPATIAL_DEFAULT_DWELL_SECONDS`, per-zone override) that never leave events stuck (disappearance + grace purge)
+- Proximity relationships person/vehicle, person/person, vehicle/vehicle with `CENTER_DISTANCE`, `IOU`, or `HYBRID` strategy, canonical ordered pair identity, bounded pair enumeration
+- Spatial rules reuse the V05 event lifecycle (dedup, one stable `event_id`, grace resolution, suppression) — no parallel event system
+- `GET /api/v1/spatial/status`, zone CRUD + `GET /api/v1/cameras/{id}/zones/state`; runtime state stays in memory
+- WS `zone_event` / `proximity_event` added without changing `stream_status`, `frame`, `stream_error`, `detection`, `tracking`, `safety_event`
+- Zones page: normalized SVG polygon editor (add/undo/clear, create/edit/toggle/delete), engine status, membership overlay, spatial event list
+- Documented non-claims: image-space only (no calibration/depth), no physical distance, uncalibrated confidence scores
 
 ## Features (V05)
 
@@ -101,7 +119,8 @@ cd frontend; npm install
 All keys documented in `.env.example`:
 `APP_NAME, APP_ENV, LOG_LEVEL, API_HOST, API_PORT, DATABASE_URL, REDIS_URL,
 GPU_ENABLED, MODEL_DEVICE, MODEL_CONFIDENCE_THRESHOLD, WEBSOCKET_ENABLED,
-TARGET_PROCESSING_FPS, FRAME_SKIP, BUFFER_SIZE`.
+TARGET_PROCESSING_FPS, FRAME_SKIP, BUFFER_SIZE`,
+plus V05 safety (`SAFETY_*`) and V06 spatial (`SPATIAL_*`) keys.
 
 ## Video Ingestion Quickstart (V02)
 
@@ -141,7 +160,8 @@ docker compose up --build
 
 - **V01** — foundation
 - **V02** — video ingestion pipeline
-- **V03** — AI inference & detection (this release; V03 = detection, V04 = tracking)
+- **V03** — AI inference & detection (V03 = detection, V04 = tracking)
 - **V04** — multi-object tracking
-- **V05** — safety intelligence foundations (this release)
-- **V06+** — zones/proximity engine, quality/perception, risk, incidents, analytics
+- **V05** — safety intelligence foundations
+- **V06** — restricted zones & advanced proximity (this release)
+- **V07+** — quality/perception, risk, incidents, analytics

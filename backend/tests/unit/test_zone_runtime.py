@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from backend.app.core.config import Settings
 from backend.app.spatial.engine import SpatialEngine
 from backend.app.spatial.rules import ZoneRule, spatial_rules
@@ -80,12 +82,12 @@ def test_dwell_emits_once_threshold_and_keeps_refreshing() -> None:
     dwell = engine.process_zones("cam-01", [track], _WIDTH, _HEIGHT, utc(2))
     assert [e.transition for e in dwell] == [ZoneTransition.STATIONARY_INSIDE]
     assert dwell[0].reason == "dwell_threshold"
-    assert dwell[0].dwell_seconds == 2.0
+    assert dwell[0].dwell_seconds == pytest.approx(2.0)
     assert dwell[0].evidence["first_observation"] is True
 
     again = engine.process_zones("cam-01", [track], _WIDTH, _HEIGHT, utc(3))
     assert again[0].evidence["first_observation"] is False
-    assert again[0].dwell_seconds == 3.0
+    assert again[0].dwell_seconds == pytest.approx(3.0)
 
 
 def test_dwell_uses_zone_override_then_default() -> None:

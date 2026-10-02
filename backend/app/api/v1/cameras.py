@@ -293,12 +293,9 @@ def stop_stream(
         raise HTTPException(status_code=404, detail="stream not found")
     manager.stop()
     _detach_inference(request, camera_id)
-    engine = _spatial_engine(request)
-    if engine is not None:
-        try:
-            engine.reset_camera(camera_id)
-        except Exception:
-            logger.debug("spatial reset failed for %s", camera_id, exc_info=True)
+    # Stopping invalidates every track ID: drop spatial runtime state but keep
+    # the stored zone configuration loaded for the next start.
+    _reset_spatial(request, camera_id)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 
