@@ -168,11 +168,171 @@ export type SpatialStatus = {
   active_state_count: number;
 };
 
+// --- V07 quality inspection ---
+
+export type InspectionType =
+  | "GENERAL"
+  | "SURFACE"
+  | "ASSEMBLY"
+  | "COMPONENT"
+  | "DIMENSION"
+  | "CUSTOM";
+
+export type RegionType = "RECTANGLE" | "POLYGON";
+
+export type DefectSeverity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type QualityDecision = "PASS" | "FAIL" | "REVIEW" | "ERROR";
+
+export type QualityEventType =
+  | "QUALITY_FAIL"
+  | "QUALITY_REVIEW"
+  | "QUALITY_ERROR"
+  | "DEFECT_DETECTED";
+
+export type QualityEventStatus = "ACTIVE" | "RESOLVED" | "SUPPRESSED";
+
+export type DecisionPolicy = {
+  fail_threshold: number;
+  review_threshold: number;
+  fail_severities: DefectSeverity[];
+  review_severities: DefectSeverity[];
+  required_region_ids: string[];
+  missing_evidence_behavior: "REVIEW" | "FAIL" | "IGNORE";
+  error_behavior: "RECORD_ERROR" | "SKIP";
+};
+
+export type InspectionRegion = {
+  region_id: string;
+  camera_id: string;
+  profile_id: string;
+  name: string;
+  region_type: RegionType;
+  geometry: Record<string, unknown>;
+  enabled: boolean;
+  required: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DefectCategory = {
+  defect_id: string;
+  code: string;
+  name: string;
+  description: string;
+  severity: DefectSeverity;
+  enabled: boolean;
+  confidence_threshold: number;
+  review_threshold: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InspectionProfile = {
+  profile_id: string;
+  camera_id: string;
+  name: string;
+  enabled: boolean;
+  inspection_type: InspectionType;
+  confidence_threshold: number;
+  review_threshold: number;
+  decision_policy: DecisionPolicy;
+  product_correlation: {
+    product_id: string | null;
+    batch_id: string | null;
+    work_order_id: string | null;
+    unit_id: string | null;
+  } | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DefectObservation = {
+  observation_id: string;
+  defect_code: string;
+  defect_name: string;
+  severity: DefectSeverity;
+  confidence: number;
+  bounding_box: [number, number, number, number] | null;
+  region_id: string | null;
+  track_id: number | null;
+};
+
+export type InspectionResult = {
+  inspection_id: string;
+  camera_id: string;
+  profile_id: string;
+  frame_id: string | null;
+  decision: QualityDecision;
+  decision_reason: string;
+  severity: DefectSeverity;
+  observations: DefectObservation[];
+  inspection_time_ms: number;
+  model_name: string | null;
+  model_version: string | null;
+  regions_evaluated: string[];
+  error_code: string | null;
+  timestamp: string;
+};
+
+export type QualityEvent = {
+  event_id: string;
+  inspection_id: string | null;
+  event_type: QualityEventType;
+  decision: QualityDecision;
+  severity: DefectSeverity;
+  status: QualityEventStatus;
+  confidence: number;
+  defect_code: string | null;
+  region_id: string | null;
+  track_id: number | null;
+  timestamp: string;
+  first_seen: string;
+  last_seen: string;
+  duration_ms: number;
+  message: string;
+  observations: number;
+};
+
+export type QualityStatus = {
+  enabled: boolean;
+  engine_status: string;
+  model_status: string;
+  model_name: string | null;
+  model_version: string | null;
+  active_profiles: number;
+  active_sessions: number;
+  inspection_count: number;
+  pass_count: number;
+  fail_count: number;
+  review_count: number;
+  error_count: number;
+  defect_count: number;
+  average_inspection_ms: number;
+  last_inspection_timestamp: string | null;
+  frames_skipped: number;
+  inspection_fps: number;
+  cameras: Record<
+    string,
+    {
+      profiles: number;
+      sessions: number;
+      inspections: number;
+      last_decision: QualityDecision | null;
+      last_inspection_at: string | null;
+    }
+  >;
+};
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", note: "V01 foundation" },
   { href: "/cameras", label: "Cameras", note: "V03 detection" },
   { href: "/safety", label: "Safety", note: "V05 intelligence" },
   { href: "/zones", label: "Zones", note: "V06 spatial engine" },
+  { href: "/quality", label: "Quality", note: "V07 inspection" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];

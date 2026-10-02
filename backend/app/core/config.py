@@ -109,6 +109,69 @@ class Settings(BaseSettings):
     spatial_max_zones_per_camera: int = Field(default=20, ge=1, le=200)
     spatial_state_grace_seconds: float = Field(default=5.0, ge=0.0, le=300.0)
 
+    # --- V07 quality inspection (framework; no specialized defect weights) ---
+    quality_enabled: bool = Field(default=True)
+    # Named inspection model. Empty = INSPECTION_MODEL_NOT_CONFIGURED: an
+    # inspection attempt then decides ERROR (never PASS). The scripted fixture
+    # adapter resolves only outside production (see quality.registry).
+    quality_inspection_model: str = Field(default="")
+    quality_inspection_interval_frames: int = Field(default=5, ge=1, le=600)
+    quality_max_profiles_per_camera: int = Field(default=10, ge=1, le=100)
+    quality_max_regions_per_profile: int = Field(default=20, ge=1, le=200)
+    quality_max_observations_per_inspection: int = Field(default=50, ge=1, le=1000)
+    quality_max_results_per_camera: int = Field(default=30, ge=1, le=1000)
+    quality_max_events_per_camera: int = Field(default=100, ge=1, le=10000)
+    quality_event_resolution_grace_seconds: float = Field(default=3.0, ge=0.0, le=300.0)
+    quality_default_confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    quality_default_review_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    quality_default_fail_severities: str = Field(default="HIGH,CRITICAL")
+    quality_missing_evidence_behavior: str = Field(default="REVIEW")
+    quality_inspection_error_behavior: str = Field(default="RECORD_ERROR")
+
+    @field_validator("quality_default_fail_severities")
+    @classmethod
+    def _normalize_fail_severities(cls, value: str) -> str:
+        from backend.app.quality.schemas import DefectSeverity
+
+        parts = [part.strip().upper() for part in value.split(",") if part.strip()]
+        allowed = {s.value for s in DefectSeverity}
+        unknown = [part for part in parts if part not in allowed]
+        if unknown:
+            raise ValueError(f"QUALITY_DEFAULT_FAIL_SEVERITIES unknown values: {unknown}")
+        return ",".join(parts)
+
+    @field_validator("quality_missing_evidence_behavior")
+    @classmethod
+    def _normalize_missing_evidence(cls, value: str) -> str:
+        from backend.app.quality.schemas import MissingEvidenceBehavior
+
+        normalized = value.upper()
+        if normalized not in {b.value for b in MissingEvidenceBehavior}:
+            raise ValueError(
+                "QUALITY_MISSING_EVIDENCE_BEHAVIOR must be one of "
+                f"{[b.value for b in MissingEvidenceBehavior]}"
+            )
+        return normalized
+
+    @field_validator("quality_inspection_error_behavior")
+    @classmethod
+    def _normalize_error_behavior(cls, value: str) -> str:
+        from backend.app.quality.schemas import InspectionErrorBehavior
+
+        normalized = value.upper()
+        if normalized not in {b.value for b in InspectionErrorBehavior}:
+            raise ValueError(
+                "QUALITY_INSPECTION_ERROR_BEHAVIOR must be one of "
+                f"{[b.value for b in InspectionErrorBehavior]}"
+            )
+        return normalized
+
+    @property
+    def quality_fail_severities(self) -> frozenset[str]:
+        return frozenset(
+            part.strip() for part in self.quality_default_fail_severities.split(",") if part.strip()
+        )
+
     @field_validator("spatial_proximity_strategy")
     @classmethod
     def _normalize_strategy(cls, value: str) -> str:

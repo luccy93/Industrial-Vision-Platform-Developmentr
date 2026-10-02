@@ -40,7 +40,7 @@ def _spatial(client: Any) -> SpatialEngine:
 
 
 def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """002_create_zones applies, is reversible, and re-applies cleanly."""
+    """The migration chain applies and reverses cleanly (002 zones, 003 quality)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -48,15 +48,22 @@ def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  
     config.set_main_option("script_location", str(_REPO_ROOT / "backend" / "alembic"))
 
     command.upgrade(config, "head")
-    assert {"cameras", "zones"} <= _tables(url)
+    assert {"cameras", "zones", "inspection_profiles"} <= _tables(url)
 
+    # V07 (003) reverses first: quality tables go, zones stay.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "inspection_profiles" not in remaining
+    assert "zones" in remaining
+
+    # V06 (002) reverses next: zones go, cameras stay.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "zones" not in remaining
     assert "cameras" in remaining
 
     command.upgrade(config, "head")
-    assert "zones" in _tables(url)
+    assert {"zones", "inspection_profiles"} <= _tables(url)
 
 
 def _seed_camera_and_zone(test_settings: Any, camera_id: str = "cam-lifecycle") -> None:

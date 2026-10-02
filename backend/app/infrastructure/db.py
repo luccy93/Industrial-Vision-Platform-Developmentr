@@ -14,7 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.core.config import get_settings
-from backend.app.models import zone_orm  # noqa: F401 (registers the zones table)
+from backend.app.models import (
+    quality_orm,  # noqa: F401 (registers the quality tables)
+    zone_orm,  # noqa: F401 (registers the zones table)
+)
 from backend.app.models.camera_orm import Base
 
 

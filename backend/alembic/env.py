@@ -13,7 +13,10 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, os.path.abspath("."))
 
 from backend.app.core.config import get_settings  # noqa: E402
-from backend.app.models import zone_orm  # noqa: E402,F401 (register zones metadata)
+from backend.app.models import (
+    quality_orm,  # noqa: E402,F401 (register quality metadata)
+    zone_orm,  # noqa: E402,F401 (register zones metadata)
+)
 from backend.app.models.camera_orm import Base  # noqa: E402
 
 config = context.config
