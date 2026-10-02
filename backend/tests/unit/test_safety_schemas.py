@@ -38,6 +38,11 @@ def test_event_defaults_and_enums() -> None:
         "CROWD_CRITICAL",
         "PERSON_VEHICLE_PROXIMITY",
         "PROLONGED_STATIONARY",
+        "RESTRICTED_ZONE_ENTRY",
+        "RESTRICTED_ZONE_EXIT",
+        "ZONE_DWELL",
+        "PERSON_PERSON_PROXIMITY",
+        "VEHICLE_VEHICLE_PROXIMITY",
     }
     assert {s.value for s in SafetySeverity} == {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
     assert {s.value for s in SafetyEventStatus} == {"ACTIVE", "RESOLVED", "SUPPRESSED"}

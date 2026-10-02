@@ -23,12 +23,23 @@ const SEVERITY_STYLE: Record<string, string> = {
   INFO: "bg-slate-500/15 text-slate-300"
 };
 
+// V06 spatial events (zones + relationships) share the V05 event contract.
+const SPATIAL_EVENT_TYPES = new Set([
+  "RESTRICTED_ZONE_ENTRY",
+  "RESTRICTED_ZONE_EXIT",
+  "ZONE_DWELL",
+  "PERSON_VEHICLE_PROXIMITY",
+  "PERSON_PERSON_PROXIMITY",
+  "VEHICLE_VEHICLE_PROXIMITY"
+]);
+
 export default function SafetyPage() {
   const [status, setStatus] = useState<SafetyStatus | null>(null);
   const [cameras, setCameras] = useState<CameraItem[]>([]);
   const [events, setEvents] = useState<SafetyEventItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"active" | "resolved" | "all">("all");
   const [severityFilter, setSeverityFilter] = useState<string>("All");
+  const [scopeFilter, setScopeFilter] = useState<"all" | "v05" | "spatial">("all");
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -67,7 +78,9 @@ export default function SafetyPage() {
   const visible = events.filter(
     (e) =>
       (statusFilter === "all" || e.status === statusFilter.toUpperCase()) &&
-      (severityFilter === "All" || e.severity === severityFilter)
+      (severityFilter === "All" || e.severity === severityFilter) &&
+      (scopeFilter === "all" ||
+        (scopeFilter === "spatial" ? SPATIAL_EVENT_TYPES.has(e.event_type) : !SPATIAL_EVENT_TYPES.has(e.event_type)))
   );
 
   return (
@@ -114,6 +127,15 @@ export default function SafetyPage() {
             <option key={s}>{s}</option>
           ))}
         </select>
+        {(["all", "v05", "spatial"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setScopeFilter(f)}
+            className={`rounded-lg px-3 py-1.5 ${scopeFilter === f ? "bg-slate-100 text-slate-900" : "bg-slate-800 hover:bg-slate-700"}`}
+          >
+            {f === "v05" ? "V05 rules" : f === "spatial" ? "V06 spatial" : "All scopes"}
+          </button>
+        ))}
       </div>
       {visible.length === 0 && !error && (
         <Card title="No events">No safety events match the current filters. Start a camera stream to generate detections.</Card>
@@ -122,7 +144,14 @@ export default function SafetyPage() {
         {visible.map((e) => (
           <div key={e.event_id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-semibold">{e.event_type}</p>
+              <p className="font-semibold">
+                {e.event_type}
+                {SPATIAL_EVENT_TYPES.has(e.event_type) && (
+                  <span className="ml-2 rounded-full bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-300">
+                    V06 spatial
+                  </span>
+                )}
+              </p>
               <div className="flex gap-1">
                 <span className={`rounded-full px-2 py-0.5 text-xs ${SEVERITY_STYLE[e.severity] ?? SEVERITY_STYLE.INFO}`}>
                   {e.severity}

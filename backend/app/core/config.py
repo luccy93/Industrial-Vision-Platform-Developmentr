@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     spatial_enabled: bool = Field(default=True)
     spatial_default_dwell_seconds: float = Field(default=5.0, ge=0.0, le=3600.0)
     spatial_proximity_strategy: str = Field(default="HYBRID")
+    spatial_proximity_iou_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
     spatial_person_vehicle_enabled: bool = Field(default=True)
     spatial_person_vehicle_threshold: float = Field(default=0.3, ge=0.0, le=2.0)
     spatial_person_vehicle_severity: str = Field(default="HIGH")

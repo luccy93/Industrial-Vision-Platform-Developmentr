@@ -23,6 +23,7 @@ from backend.app.api.v1.cameras import _fallback_supervisor
 from backend.app.domain.common import utcnow
 from backend.app.domain.stream import StreamState
 from backend.app.ingestion.repository import CameraRepository
+from backend.app.safety.schemas import SafetyEvent
 
 logger = logging.getLogger("industrial-vision.ws")
 
@@ -36,6 +37,21 @@ def _status_message(camera_id: str, state: StreamState) -> dict:
         "state": state.value,
         "timestamp": utcnow().isoformat(),
     }
+
+
+def _spatial_message_type(event: SafetyEvent) -> str:
+    """V06 adds typed spatial channels without changing the V05 contract.
+
+    Routing is rule-based, not type-based: the V05 ``person_vehicle_proximity``
+    rule emits the same ``PERSON_VEHICLE_PROXIMITY`` type as the V06
+    relationship rule, and only the latter belongs on the spatial channels.
+    """
+    rule = str(event.metadata.get("rule", ""))
+    if rule == "restricted_zone":
+        return "zone_event"
+    if rule == "proximity_relationships":
+        return "proximity_event"
+    return "safety_event"
 
 
 @router.websocket("/ws/cameras/{camera_id}")
@@ -110,11 +126,15 @@ async def camera_stream_socket(
                     if sent_safety.get(key) == event.status.value:
                         continue
                     sent_safety[key] = event.status.value
-                    await websocket.send_text(
-                        json.dumps(
-                            {"type": "safety_event", "camera_id": camera_id, "event": event.to_websocket()}
-                        )
-                    )
+                    message = {
+                        "type": _spatial_message_type(event),
+                        "camera_id": camera_id,
+                        "event": event.to_websocket(),
+                    }
+                    if message["type"] != "safety_event":
+                        # V06 keeps V05 payloads intact and adds typed channels.
+                        message["spatial"] = event.evidence
+                    await websocket.send_text(json.dumps(message))
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(

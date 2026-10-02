@@ -13,11 +13,18 @@ from backend.app.tracking.schemas import TrackedObject
 
 @dataclass
 class SceneState:
-    """One frame's tracking snapshot for a single camera."""
+    """One frame's tracking snapshot for a single camera.
+
+    ``frame_width``/``frame_height`` are the original frame size used to map
+    pixel boxes into normalized zone space. ``0`` means unknown, in which case
+    rules that need a reference frame size degrade to unit coordinates.
+    """
 
     camera_id: str
     timestamp: datetime
     tracks: list[TrackedObject] = field(default_factory=list)
+    frame_width: float = 0.0
+    frame_height: float = 0.0
 
     def persons(self) -> list[TrackedObject]:
         return [t for t in self.tracks if t.class_name.lower() == "person"]

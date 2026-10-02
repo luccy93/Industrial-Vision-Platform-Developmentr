@@ -106,6 +106,7 @@ export type SafetyEventItem = {
   last_seen: string;
   duration_ms: number;
   message: string;
+  spatial?: boolean;
 };
 
 export type SafetyStatus = {
@@ -117,10 +118,61 @@ export type SafetyStatus = {
   average_latency_ms: number;
 };
 
+export type ZoneType = "RESTRICTED" | "DANGER" | "WARNING" | "SAFE" | "CUSTOM";
+
+export type ZonePoint = {
+  x: number;
+  y: number;
+};
+
+export type ZoneItem = {
+  zone_id: string;
+  camera_id: string;
+  name: string;
+  zone_type: ZoneType;
+  polygon: ZonePoint[];
+  enabled: boolean;
+  severity: string;
+  dwell_threshold_seconds: number | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ZoneMembership = {
+  camera_id: string;
+  zone_id: string;
+  track_id: number;
+  inside: boolean;
+  entered_at: string | null;
+  dwell_seconds: number;
+};
+
+export type SpatialStatus = {
+  enabled: boolean;
+  engine_status: string;
+  coordinate_space: string;
+  membership_heuristic: string;
+  default_dwell_seconds: number;
+  state_grace_seconds: number;
+  proximity_strategy: string;
+  proximity_iou_threshold: number;
+  relationships: Array<{
+    relationship: string;
+    enabled: boolean;
+    threshold: number;
+    severity: string;
+  }>;
+  zone_count: number;
+  camera_count: number;
+  active_state_count: number;
+};
+
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", note: "V01 foundation" },
   { href: "/cameras", label: "Cameras", note: "V03 detection" },
   { href: "/safety", label: "Safety", note: "V05 intelligence" },
+  { href: "/zones", label: "Zones", note: "V06 spatial engine" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];

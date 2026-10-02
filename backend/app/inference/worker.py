@@ -59,6 +59,8 @@ class InferenceWorker:
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
         self._tracks: list = []
         self._tracked_frame_id: object = None
+        self._frame_width: float = 0.0
+        self._frame_height: float = 0.0
         self._safety_new: list = []
         self._safety_active: list = []
         self._lock = threading.Lock()
@@ -157,9 +159,9 @@ class InferenceWorker:
         with self._lock:
             self._results.append(result)
             self._last_error = None
-        self._track(result)
+        self._track(result, frame)
 
-    def _track(self, result: InferenceResult) -> None:
+    def _track(self, result: InferenceResult, frame: IngestionFrame) -> None:
         """V04 stage: associate detections into tracks (isolated failures)."""
         manager = self._tracking_manager
         if manager is None:
@@ -172,6 +174,11 @@ class InferenceWorker:
         with self._lock:
             self._tracks = tracks
             self._tracked_frame_id = result.frame_id
+            # V06 spatial reasoning needs a reference frame size to map pixel
+            # boxes into normalized zone space.
+            height, width = frame.image.shape[:2]
+            self._frame_width = float(width)
+            self._frame_height = float(height)
         self._analyze_safety(tracks, result)
 
     def _analyze_safety(self, tracks: list, result: InferenceResult) -> None:
@@ -180,7 +187,11 @@ class InferenceWorker:
         if engine is None:
             return
         try:
-            analysis = engine.process(self.camera_id, tracks, result.timestamp)
+            with self._lock:
+                width, height = self._frame_width, self._frame_height
+            analysis = engine.process(
+                self.camera_id, tracks, result.timestamp, frame_width=width, frame_height=height
+            )
         except Exception as exc:
             logger.warning("safety analysis failed for %s: %s", self.camera_id, exc)
             return

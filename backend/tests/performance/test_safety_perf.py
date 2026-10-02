@@ -18,21 +18,24 @@ def _engine() -> SafetyEngine:
 def test_engine_latency_low_milliseconds() -> None:
     engine = _engine()
     tracks = [make_track(i) for i in range(1, 11)]
-    started = time.time()
+    started = time.perf_counter()
     for i in range(100):
         engine.process("perf", tracks, utc(i * 0.1))
-    elapsed_ms = (time.time() - started) * 1000.0 / 100
+    elapsed_ms = (time.perf_counter() - started) * 1000.0 / 100
     assert elapsed_ms < 50.0  # low-ms budget for synthetic scenes
 
 
 def test_rule_evaluation_throughput() -> None:
     engine = _engine()
     tracks = [make_track(i) for i in range(1, 6)]
-    started = time.time()
+    # perf_counter (not time.time) — Windows' wall clock is too coarse to
+    # measure sub-millisecond evaluation loops.
+    started = time.perf_counter()
     evaluations = 200
     for i in range(evaluations):
         engine.process("tput", tracks, utc(i * 0.05))
-    per_second = evaluations / (time.time() - started)
+    elapsed = max(time.perf_counter() - started, 1e-9)
+    per_second = evaluations / elapsed
     assert per_second > 50  # 50+ scene evaluations/sec minimum
 
 

@@ -23,6 +23,35 @@ class SafetyEventType(str, Enum):
     CROWD_CRITICAL = "CROWD_CRITICAL"
     PERSON_VEHICLE_PROXIMITY = "PERSON_VEHICLE_PROXIMITY"
     PROLONGED_STATIONARY = "PROLONGED_STATIONARY"
+    # --- V06 spatial safety (zones + relationships) ---
+    RESTRICTED_ZONE_ENTRY = "RESTRICTED_ZONE_ENTRY"
+    RESTRICTED_ZONE_EXIT = "RESTRICTED_ZONE_EXIT"
+    ZONE_DWELL = "ZONE_DWELL"
+    PERSON_PERSON_PROXIMITY = "PERSON_PERSON_PROXIMITY"
+    VEHICLE_VEHICLE_PROXIMITY = "VEHICLE_VEHICLE_PROXIMITY"
+
+    @property
+    def is_spatial(self) -> bool:
+        """True for types only V06 can emit.
+
+        ``PERSON_VEHICLE_PROXIMITY`` is deliberately excluded: both the V05 rule
+        and the V06 relationship rule emit it, so the authoritative spatial
+        check for an *event* is :attr:`SafetyEvent.is_spatial` (rule-based).
+        """
+        return self in _SPATIAL_EVENT_TYPES
+
+
+_SPATIAL_EVENT_TYPES: frozenset[SafetyEventType] = frozenset(
+    {
+        SafetyEventType.RESTRICTED_ZONE_ENTRY,
+        SafetyEventType.RESTRICTED_ZONE_EXIT,
+        SafetyEventType.ZONE_DWELL,
+        SafetyEventType.PERSON_PERSON_PROXIMITY,
+        SafetyEventType.VEHICLE_VEHICLE_PROXIMITY,
+    }
+)
+# Rules registered by the V06 spatial package (``backend.app.spatial.rules``).
+SPATIAL_RULES: frozenset[str] = frozenset({"restricted_zone", "proximity_relationships"})
 
 
 class SafetySeverity(str, Enum):
@@ -62,6 +91,11 @@ class SafetyEvent(BaseModel):
         self.timestamp = timestamp
         self.duration_ms = max(0.0, (timestamp - self.first_seen).total_seconds() * 1000.0)
 
+    @property
+    def is_spatial(self) -> bool:
+        """True when a V06 spatial rule produced this event (image-space)."""
+        return str(self.metadata.get("rule", "")) in SPATIAL_RULES
+
     def to_websocket(self) -> dict[str, Any]:
         return {
             "event_id": str(self.event_id),
@@ -75,6 +109,7 @@ class SafetyEvent(BaseModel):
             "last_seen": self.last_seen.isoformat(),
             "duration_ms": self.duration_ms,
             "message": self.message,
+            "spatial": self.is_spatial,
         }
 
 

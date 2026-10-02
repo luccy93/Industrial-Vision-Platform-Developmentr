@@ -18,6 +18,9 @@ def test_safety_status_shape(client: TestClient) -> None:
         "crowd_density",
         "person_vehicle_proximity",
         "stationary_object",
+        # V06 spatial rules ride the same lifecycle.
+        "restricted_zone",
+        "proximity_relationships",
     }
     assert "active_event_count" in body and "average_latency_ms" in body
 

@@ -13,6 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,33 @@ from backend.app.core.logging import configure_logging, get_logger
 _started_at = time.time()
 
 
+def _load_spatial_configuration(app: FastAPI, logger: Any) -> None:
+    """Warm the V06 zone runtime from stored configuration (best-effort).
+
+    Zone configuration lives in PostgreSQL; the runtime holds a snapshot so the
+    worker thread never touches the database. A database that is unreachable at
+    startup must not block the API — spatial simply starts empty.
+    """
+    try:
+        from backend.app.api.v1.spatial import sync_camera_zones
+        from backend.app.ingestion.repository import CameraRepository
+        from backend.app.spatial.engine import SpatialEngine
+        from backend.app.spatial.repository import ZoneRepository
+
+        spatial = getattr(app.state, "spatial_engine", None)
+        factory = getattr(app.state, "session_factory", None)
+        if not isinstance(spatial, SpatialEngine) or factory is None:
+            return
+        cameras = CameraRepository(factory).list()
+        zones = ZoneRepository(factory)
+        for camera in cameras:
+            loaded = sync_camera_zones(spatial, zones, camera.camera_id)
+            if loaded:
+                logger.info("loaded %s zone(s) for camera %s", len(loaded), camera.camera_id)
+    except Exception:
+        logger.warning("zone configuration load skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
@@ -40,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         init_db(settings.database_url)
     except Exception:
         logger.warning("database init skipped (unreachable?)", exc_info=True)
+    _load_spatial_configuration(app, logger)
     yield
     for key in ("inference_supervisor", "supervisor"):
         try:
@@ -77,8 +106,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.tracking_manager = TrackingManager(settings)
     from backend.app.safety.engine import SafetyEngine
     from backend.app.safety.rules import default_rules
+    from backend.app.spatial.engine import SpatialEngine
+    from backend.app.spatial.rules import spatial_rules
 
-    app.state.safety_engine = SafetyEngine(settings, default_rules(settings))
+    # V06: one spatial runtime shared by the zone/proximity rules so they
+    # participate in the V05 event lifecycle (dedup, grace, suppression).
+    app.state.spatial_engine = SpatialEngine(settings)
+    app.state.safety_engine = SafetyEngine(
+        settings, default_rules(settings) + spatial_rules(app.state.spatial_engine)
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -107,6 +143,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.safety import router as safety_router
 
     app.include_router(safety_router)
+    from backend.app.api.v1.spatial import router as spatial_router
+
+    app.include_router(spatial_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

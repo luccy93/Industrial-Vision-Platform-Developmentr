@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from backend.app.spatial.engine import SpatialEngine
     from backend.app.tracking.manager import TrackingManager
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -154,6 +155,7 @@ def delete_camera(
 ) -> dict:
     supervisor.remove(camera_id)
     _detach_inference(request, camera_id)
+    _drop_spatial(request, camera_id)
     if not repository.delete(camera_id):
         raise HTTPException(status_code=404, detail="camera not found")
     return {"deleted": camera_id}
@@ -176,6 +178,50 @@ def _tracking_manager(request: Request) -> TrackingManager | None:
     return manager if isinstance(manager, _TM) else None
 
 
+def _spatial_engine(request: Request) -> SpatialEngine | None:
+    from backend.app.spatial.engine import SpatialEngine as _SE
+
+    engine = getattr(request.app.state, "spatial_engine", None)
+    return engine if isinstance(engine, _SE) else None
+
+
+def _reset_spatial(request: Request, camera_id: str) -> None:
+    """Drop per-camera zone/proximity state and reload zone configuration.
+
+    A restarted stream invalidates every track ID, so stale membership must not
+    survive; zone configuration itself is reloaded from PostgreSQL.
+    """
+    engine = _spatial_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.api.v1.spatial import sync_camera_zones
+            from backend.app.spatial.repository import ZoneRepository
+
+            sync_camera_zones(engine, ZoneRepository(factory), camera_id)
+    except Exception:
+        logger.debug("spatial reset failed for %s", camera_id, exc_info=True)
+
+
+def _drop_spatial(request: Request, camera_id: str) -> None:
+    """Delete a camera's zones and forget its spatial runtime state."""
+    engine = _spatial_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.spatial.repository import ZoneRepository
+
+            ZoneRepository(factory).delete_for_camera(camera_id)
+    except Exception:
+        logger.debug("spatial cleanup failed for %s", camera_id, exc_info=True)
+
+
 def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
     """Best-effort: inference problems must never fail stream startup."""
     try:
@@ -195,6 +241,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
                 safety_engine.reset_camera(camera_id)
             except Exception:
                 logger.debug("safety reset failed for %s", camera_id, exc_info=True)
+        _reset_spatial(request, camera_id)
         worker = supervisor.attach(  # type: ignore[arg-type]
             camera_id,
             model_manager,
@@ -246,6 +293,12 @@ def stop_stream(
         raise HTTPException(status_code=404, detail="stream not found")
     manager.stop()
     _detach_inference(request, camera_id)
+    engine = _spatial_engine(request)
+    if engine is not None:
+        try:
+            engine.reset_camera(camera_id)
+        except Exception:
+            logger.debug("spatial reset failed for %s", camera_id, exc_info=True)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 

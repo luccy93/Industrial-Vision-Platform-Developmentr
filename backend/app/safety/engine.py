@@ -82,9 +82,17 @@ class SafetyEngine:
         camera_id: str,
         tracks: list[TrackedObject],
         timestamp: datetime,
+        frame_width: float = 0.0,
+        frame_height: float = 0.0,
     ) -> SafetyAnalysisResult:
         started = time.perf_counter()
-        scene = SceneState(camera_id=camera_id, timestamp=timestamp, tracks=list(tracks))
+        scene = SceneState(
+            camera_id=camera_id,
+            timestamp=timestamp,
+            tracks=list(tracks),
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
         state = self._camera_state(camera_id)
         with self._lock:
             state.evaluations += 1
