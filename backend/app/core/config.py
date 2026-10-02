@@ -92,6 +92,44 @@ class Settings(BaseSettings):
     safety_event_resolution_grace_seconds: float = Field(default=3.0, ge=0.0, le=300.0)
     safety_max_events_per_camera: int = Field(default=100, ge=1, le=10000)
 
+    # --- V06 spatial safety (image-space zones + proximity) ---
+    spatial_enabled: bool = Field(default=True)
+    spatial_default_dwell_seconds: float = Field(default=5.0, ge=0.0, le=3600.0)
+    spatial_proximity_strategy: str = Field(default="HYBRID")
+    spatial_person_vehicle_enabled: bool = Field(default=True)
+    spatial_person_vehicle_threshold: float = Field(default=0.3, ge=0.0, le=2.0)
+    spatial_person_vehicle_severity: str = Field(default="HIGH")
+    spatial_person_person_enabled: bool = Field(default=False)
+    spatial_person_person_threshold: float = Field(default=0.25, ge=0.0, le=2.0)
+    spatial_person_person_severity: str = Field(default="MEDIUM")
+    spatial_vehicle_vehicle_enabled: bool = Field(default=False)
+    spatial_vehicle_vehicle_threshold: float = Field(default=0.25, ge=0.0, le=2.0)
+    spatial_vehicle_vehicle_severity: str = Field(default="LOW")
+    spatial_max_zones_per_camera: int = Field(default=20, ge=1, le=200)
+    spatial_state_grace_seconds: float = Field(default=5.0, ge=0.0, le=300.0)
+
+    @field_validator("spatial_proximity_strategy")
+    @classmethod
+    def _normalize_strategy(cls, value: str) -> str:
+        normalized = value.upper()
+        if normalized not in ("CENTER_DISTANCE", "IOU", "HYBRID"):
+            raise ValueError("SPATIAL_PROXIMITY_STRATEGY must be CENTER_DISTANCE|IOU|HYBRID")
+        return normalized
+
+    @field_validator(
+        "spatial_person_vehicle_severity",
+        "spatial_person_person_severity",
+        "spatial_vehicle_vehicle_severity",
+    )
+    @classmethod
+    def _normalize_spatial_severity(cls, value: str) -> str:
+        from backend.app.safety.schemas import SafetySeverity
+
+        normalized = value.upper()
+        if normalized not in {s.value for s in SafetySeverity}:
+            raise ValueError(f"spatial severity must be one of {[s.value for s in SafetySeverity]}")
+        return normalized
+
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)
 
