@@ -63,8 +63,12 @@ class TrajectoryEstimator:
         norm_speed = motion.speed(norm_velocity)
         points = [
             NormalizedPoint(
-                x=min(1.0, max(0.0, current_norm[0] + norm_velocity[0] * self.horizon_seconds * i / self.steps)),
-                y=min(1.0, max(0.0, current_norm[1] + norm_velocity[1] * self.horizon_seconds * i / self.steps)),
+                x=min(
+                    1.0, max(0.0, current_norm[0] + norm_velocity[0] * self.horizon_seconds * i / self.steps)
+                ),
+                y=min(
+                    1.0, max(0.0, current_norm[1] + norm_velocity[1] * self.horizon_seconds * i / self.steps)
+                ),
             )
             for i in range(1, self.steps + 1)
         ]

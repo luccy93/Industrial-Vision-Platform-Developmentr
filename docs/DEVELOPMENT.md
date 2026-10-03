@@ -118,6 +118,17 @@ stored/serialized values are always uppercase. Tune the decision policy
 against scripted fixture observations in `backend/tests/quality_helpers.py`.
 Full guide: `docs/QUALITY_INSPECTION.md`.
 
+## Autonomous tuning (V08)
+
+`AUTONOMOUS_*` in `.env.example`: enable flag, model-adapter names (empty =
+honest `NOT_CONFIGURED`), per-subsystem feature flags, perception sampling
+interval, trajectory horizon/history, collision threshold/grace, object/event/
+result/profile caps, motion speed and approach-area thresholds. Motion and
+trajectory quantities are normalized image units per second — tune against
+synthetic V04 tracks with exact histories in
+`backend/tests/autonomous_helpers.py` (fixed-epoch clock, OpenCV-drawn lane
+frames). Full guide: `docs/AUTONOMOUS_PERCEPTION.md`.
+
 ## Docker
 
 ```powershell

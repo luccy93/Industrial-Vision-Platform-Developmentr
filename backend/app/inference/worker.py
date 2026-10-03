@@ -240,9 +240,7 @@ class InferenceWorker:
         with self._lock:
             self._quality_latest = list(results)
 
-    def _analyze_autonomous(
-        self, tracks: list, frame: IngestionFrame, result: InferenceResult
-    ) -> None:
+    def _analyze_autonomous(self, tracks: list, frame: IngestionFrame, result: InferenceResult) -> None:
         """V08 stage: tracks + frame → autonomous perception (sampled, isolated).
 
         Perception runs on the same worker thread but only every Nth frame
@@ -263,9 +261,7 @@ class InferenceWorker:
                     self._autonomous_skipped += 1
                 engine.note_skipped(self.camera_id)
                 return
-            perceived = engine.process(
-                self.camera_id, tracks, frame, result.timestamp, frame.frame_id
-            )
+            perceived = engine.process(self.camera_id, tracks, frame, result.timestamp, frame.frame_id)
             engine.note_queue_depth(self.camera_id, self._queue.qsize())
         except Exception as exc:
             logger.warning("autonomous perception failed for %s: %s", self.camera_id, exc)

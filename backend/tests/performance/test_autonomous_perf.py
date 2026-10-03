@@ -23,18 +23,13 @@ def _settings(**overrides) -> Settings:
 
 
 def _frame(camera_id: str = "cam-01") -> IngestionFrame:
-    return IngestionFrame(
-        camera_id=camera_id, frame_number=1, width=640, height=480, image=synthetic_frame()
-    )
+    return IngestionFrame(camera_id=camera_id, frame_number=1, width=640, height=480, image=synthetic_frame())
 
 
 def _tracks(n: int = 6) -> list:
     out = []
     for i in range(n):
-        boxes = [
-            (50.0 + i * 80.0 + j * 8.0, 100.0, 100.0 + i * 80.0 + j * 8.0, 300.0)
-            for j in range(5)
-        ]
+        boxes = [(50.0 + i * 80.0 + j * 8.0, 100.0, 100.0 + i * 80.0 + j * 8.0, 300.0) for j in range(5)]
         out.append(make_track(i + 1, "car", boxes[-1], history_boxes=boxes, history_span_seconds=2.0))
     return out
 
@@ -86,8 +81,17 @@ def test_collision_latency_with_busy_scene() -> None:
     started = time.perf_counter()
     for i in range(200):
         risk = engine.assess_pair(
-            "track-1", "track-2", (0.3, 0.5), (0.7, 0.5), (0.2, 0.0), (-0.2, 0.0),
-            0.6, 0.5, True, True, utc(i * 0.1),
+            "track-1",
+            "track-2",
+            (0.3, 0.5),
+            (0.7, 0.5),
+            (0.2, 0.0),
+            (-0.2, 0.0),
+            0.6,
+            0.5,
+            True,
+            True,
+            utc(i * 0.1),
         )
         assert risk.risk_level.value not in ("",)
     per_call_ms = (time.perf_counter() - started) * 5.0

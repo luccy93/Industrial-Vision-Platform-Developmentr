@@ -30,8 +30,32 @@ quality events (inspection-level + observation-level `DEFECT_DETECTED`), quality
 API + WebSocket `quality_event`/`quality_result`, and a Quality page with a
 region editor. V07 is the **framework, not a trained defect model**: no
 specialized weights are required or downloaded.
+V08 adds the **autonomous perception engine** — PG-persisted perception
+profiles, relative scene understanding from V04 tracks (no second tracker),
+deterministic scene classification and OpenCV lane baselines with honest
+confidence, image-space motion/trajectory estimation, relative-depth
+abstraction (`NOT_CONFIGURED` by default), collision-risk analysis with
+estimated-or-null TTC, a relative bird's-eye view, perception API + WebSocket
+`autonomous_perception`/`collision_risk`/`lane_event`, and an Autonomous page
+with lane overlay and Relative BEV canvas. V08 reports **relative geometry
+and estimates, never meters or certified collision times**.
 **V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.
-V06 = Restricted Zones & Advanced Proximity. V07 = Quality Inspection.**
+V06 = Restricted Zones & Advanced Proximity. V07 = Quality Inspection.
+V08 = Autonomous Perception.**
+
+## Features (V08)
+
+- Camera-scoped perception profiles in PostgreSQL (`autonomous_perception_profiles`; Alembic `004_create_autonomous_perception_profiles`)
+- `SceneClassifier` / `LaneDetector` / `DepthEstimator` ABCs + scripted fixtures (explicit outputs, refused in production) + honest `NOT_CONFIGURED` degradation
+- Perceived objects reuse V04 track IDs; timestamped motion primitives (velocity/acceleration/direction/approach) with NaN/zero-delta guards
+- Deterministic baselines: heuristic scene classifier, OpenCV edge+Hough lanes (normalized polylines), constant-velocity trajectories, canonical-pair collision risks
+- TTC present only with closing motion + depth (`null` otherwise — no division by zero); missing inputs yield `UNKNOWN` risk, never fabricated probabilities
+- Relative BEV (`lateral=(x−0.5)×2`, `longitudinal=1−y`) with objects, lanes, trajectories, risk flags — labeled relative everywhere
+- Perception events with deduped ACTIVE/RESOLVED lifecycle: `COLLISION_RISK`, `LANE_DEPARTURE_RISK`, `OBJECT_APPROACH`, `OBJECT_CROSSING`, `SCENE_CHANGE`
+- `GET /api/v1/autonomous/status` (per-subsystem availability incl. explicit depth `NOT_CONFIGURED`), profile CRUD, bounded latest/events endpoints
+- WS `autonomous_perception` / `collision_risk` / `lane_event` added without changing any V02–V07 message
+- Autonomous page: availability badges (never zero-for-missing), profile management, object table, lane overlay, Relative BEV canvas, risk list, event feed
+- Documented non-claims: no certified driving/ADAS safety, no meters/depth/coordinates, uncalibrated scores, no image storage
 
 ## Features (V07)
 
@@ -185,5 +209,6 @@ docker compose up --build
 - **V04** — multi-object tracking
 - **V05** — safety intelligence foundations
 - **V06** — restricted zones & advanced proximity
-- **V07** — quality inspection framework (this release)
-- **V08+** — trained defect models, perception, risk, incidents, analytics
+- **V07** — quality inspection framework
+- **V08** — autonomous perception foundation (this release)
+- **V09+** — trained perception models, risk, incidents, analytics

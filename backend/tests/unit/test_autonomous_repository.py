@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from backend.app.infrastructure.db import get_session_factory, init_db
-from backend.app.models.autonomous_orm import AutonomousProfileORM
 from backend.app.autonomous.repository import AutonomousProfileConflictError, AutonomousProfileRepository
 from backend.app.autonomous.schemas import SceneType
+from backend.app.infrastructure.db import get_session_factory, init_db
+from backend.app.models.autonomous_orm import AutonomousProfileORM
 from backend.tests.autonomous_helpers import make_profile
 
 

@@ -567,6 +567,34 @@ class AutonomousPerceptionEngine:
             else:
                 state.active[key].touch(timestamp)
 
+        if result.lanes:
+            from backend.app.autonomous.lanes import analyze_lane_departure
+
+            level, evidence = analyze_lane_departure(result.lanes)
+            if level not in (RiskLevel.NONE, RiskLevel.UNKNOWN):
+                key = "LANE_DEPARTURE"
+                touched.add(key)
+                message = f"lane departure risk {level.value} (edge distance {evidence.get('edge_distance')})"
+                if key not in state.active:
+                    state.active[key] = AutonomousPerceptionEvent(
+                        scene_id=result.scene_id,
+                        camera_id=result.camera_id,
+                        event_type=PerceptionEventType.LANE_DEPARTURE_RISK,
+                        risk_level=level,
+                        confidence=0.5,
+                        timestamp=timestamp,
+                        first_seen=timestamp,
+                        last_seen=timestamp,
+                        message=message,
+                        evidence=evidence,
+                        metadata={"profile_id": profile.profile_id},
+                    )
+                else:
+                    event = state.active[key]
+                    event.touch(timestamp)
+                    event.risk_level = level
+                    event.message = message
+
         if state.last_scene_type is not None and scene_type is not state.last_scene_type:
             key = "SCENE_CHANGE"
             touched.add(key)

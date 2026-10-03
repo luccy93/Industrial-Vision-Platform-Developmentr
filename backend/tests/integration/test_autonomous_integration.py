@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
@@ -15,8 +15,8 @@ from backend.tests.safety_helpers import make_track
 
 
 def _seed_camera_and_profile(test_settings: Any, camera_id: str = "cam-life") -> None:
-    from backend.app.autonomous.schemas import AutonomousProfile
     from backend.app.autonomous.repository import AutonomousProfileRepository
+    from backend.app.autonomous.schemas import AutonomousProfile
     from backend.app.domain.stream import SourceType
     from backend.app.ingestion.repository import CameraRepository
 
@@ -124,7 +124,7 @@ def test_worker_stage_produces_perception(test_settings) -> None:  # type: ignor
             time.sleep(0.05)
         perceived = worker.latest_perception()
         assert perceived is not None
-        assert perceived.camera_id == "cam-w"
+        assert cast(Any, perceived).camera_id == "cam-w"
         stats = worker.stats()
         assert stats["autonomous_frames"] > 0
     finally:
@@ -173,14 +173,20 @@ def test_worker_skips_when_disabled(test_settings) -> None:  # type: ignore[no-u
 
 
 def test_camera_delete_removes_perception_profiles(client: TestClient) -> None:
-    assert client.post(
-        "/api/v1/cameras",
-        json={"name": "Gone", "camera_id": "cam-gone", "source_type": "file", "source": "v.mp4"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/cameras/cam-gone/autonomous-profiles",
-        json={"name": "Road", "profile_id": "p-1"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/cameras",
+            json={"name": "Gone", "camera_id": "cam-gone", "source_type": "file", "source": "v.mp4"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/cameras/cam-gone/autonomous-profiles",
+            json={"name": "Road", "profile_id": "p-1"},
+        ).status_code
+        == 201
+    )
     assert client.delete("/api/v1/cameras/cam-gone").status_code == 200
     from typing import cast
 

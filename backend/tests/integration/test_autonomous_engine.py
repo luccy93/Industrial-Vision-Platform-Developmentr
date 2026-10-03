@@ -10,12 +10,11 @@ from backend.app.autonomous.lanes import FixtureLaneDetector, RawLane
 from backend.app.autonomous.scene import FixtureSceneClassifier
 from backend.app.autonomous.schemas import (
     PerceptionEventType,
-    RiskLevel,
     SceneType,
 )
 from backend.app.core.config import Settings
 from backend.app.domain.frame import IngestionFrame
-from backend.app.tracking.schemas import TrackState
+from backend.app.tracking.schemas import TrackedObject, TrackState
 from backend.tests.autonomous_helpers import make_lane_frame, make_profile, synthetic_frame, utc
 from backend.tests.safety_helpers import make_track
 
@@ -25,12 +24,10 @@ def _settings(**overrides) -> Settings:
 
 
 def _frame(camera_id: str = "cam-01") -> IngestionFrame:
-    return IngestionFrame(
-        camera_id=camera_id, frame_number=1, width=640, height=480, image=synthetic_frame()
-    )
+    return IngestionFrame(camera_id=camera_id, frame_number=1, width=640, height=480, image=synthetic_frame())
 
 
-def _moving_track(track_id: int = 1, shift: float = 40.0) -> object:
+def _moving_track(track_id: int = 1, shift: float = 40.0) -> TrackedObject:
     boxes = [(100.0 + i * shift / 4, 100.0, 150.0 + i * shift / 4, 300.0) for i in range(5)]
     return make_track(track_id, "car", boxes[-1], history_boxes=boxes, history_span_seconds=2.0)
 
@@ -81,9 +78,7 @@ def test_removed_tracks_excluded() -> None:
 
 def test_fixture_scene_classifier_applied() -> None:
     engine = _engine(
-        scene_classifier=FixtureSceneClassifier(
-            scene_type=SceneType.ROAD, confidence=0.8, reason="test"
-        )
+        scene_classifier=FixtureSceneClassifier(scene_type=SceneType.ROAD, confidence=0.8, reason="test")
     )
     result = engine.process("cam-01", [_moving_track()], _frame(), utc(0), None)
     assert result.scene is not None
@@ -95,9 +90,7 @@ def test_fixture_scene_classifier_applied() -> None:
 def test_profile_scene_override_wins() -> None:
     from backend.app.autonomous.schemas import AutonomousProfile
 
-    engine = _engine(
-        scene_classifier=FixtureSceneClassifier(scene_type=SceneType.ROAD, reason="test")
-    )
+    engine = _engine(scene_classifier=FixtureSceneClassifier(scene_type=SceneType.ROAD, reason="test"))
     engine.set_profiles(
         "cam-01",
         [
@@ -179,15 +172,14 @@ def test_grace_resolution_after_separation() -> None:
     track_a = make_track(1, "car", boxes_a[-1], history_boxes=boxes_a, history_span_seconds=2.0)
     track_b = make_track(2, "car", boxes_b[-1], history_boxes=boxes_b, history_span_seconds=2.0)
     engine.process("cam-01", [track_a, track_b], _frame(), utc(0), None)
-    had_risk = any(
-        e.event_type is PerceptionEventType.COLLISION_RISK
-        for e in engine.active_events("cam-01")
-    )
+    had_risk = any(e.event_type is PerceptionEventType.COLLISION_RISK for e in engine.active_events("cam-01"))
     # Separate the pair far apart with no relative motion, past the grace period.
     still_a = make_track(1, "car", (10.0, 10.0, 60.0, 60.0))
     still_b = make_track(2, "car", (500.0, 400.0, 550.0, 450.0))
     engine.process("cam-01", [still_a, still_b], _frame(), utc(10), None)
-    remaining = [e for e in engine.active_events("cam-01") if e.event_type is PerceptionEventType.COLLISION_RISK]
+    remaining = [
+        e for e in engine.active_events("cam-01") if e.event_type is PerceptionEventType.COLLISION_RISK
+    ]
     assert had_risk or True  # risk presence depends on thresholds; resolution must hold regardless
     assert remaining == []
 

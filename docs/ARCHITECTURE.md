@@ -120,7 +120,32 @@ Dashboard
 - Framework only — no claim that generic detectors find defects. See
   `docs/QUALITY_INSPECTION.md`.
 
-## Future volumes (explicitly NOT in V01–V07)
+## V08 — Implemented (autonomous perception foundation)
+
+- `backend/app/autonomous/`: `schemas.py` (scene, objects, ego, lanes,
+  trajectories, risks, BEV, events, profiles), `motion.py` (pure timestamped
+  motion primitives), `scene.py`/`lanes.py`/`depth.py` (model ABCs + fixtures
+  + registries), `scene_baseline.py` (heuristic classifier),
+  `lane_baseline.py` (OpenCV edge+Hough lanes), `trajectory.py`
+  (constant-velocity), `collision.py` (canonical-pair risk heuristic),
+  `bev.py` (relative plane mapping), `engine.py` (perception, events,
+  metrics), `repository.py` (PG profiles), `ws.py` (message builders).
+- Perception profiles persisted per camera (Alembic
+  `004_create_autonomous_perception_profiles`); scenes, objects,
+  trajectories, risks, and events are runtime-only and never written to PG.
+- Missing models degrade to `NOT_CONFIGURED`/`UNKNOWN` (never fake output);
+  fixtures resolve only outside production; TTC is estimated-or-null.
+- Perception events (`COLLISION_RISK`, `LANE_DEPARTURE_RISK`,
+  `OBJECT_APPROACH`, `OBJECT_CROSSING`, `SCENE_CHANGE`) use deduped
+  ACTIVE/RESOLVED lifecycle in a separate domain — no safety/quality coupling.
+- Worker integration: sampled (`AUTONOMOUS_PERCEPTION_INTERVAL_FRAMES`),
+  exception-isolated `_analyze_autonomous` stage; WS `autonomous_perception` /
+  `collision_risk` / `lane_event`; `/autonomous` page with lane overlay +
+  Relative BEV canvas.
+- Foundation only — no certified driving/ADAS safety, no meters. See
+  `docs/AUTONOMOUS_PERCEPTION.md`.
+
+## Future volumes (explicitly NOT in V01–V08)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -131,9 +156,10 @@ Dashboard
 | Safety detection | partial (V05) | geometry foundations |
 | Zones & advanced proximity | done (V06) | restricted-zone entry/exit/dwell, 3 relationships, image-space only |
 | Quality inspection framework | done (V07) | profiles/regions/categories/policy/events — no trained defect model |
-| Trained defect models | planned (V08+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
-| PPE detection | planned (V08+) | helmet/vest — no V07 equivalent |
-| Autonomous perception | planned | scene graph |
+| Autonomous perception foundation | done (V08) | relative scene/motion/lanes/risk/BEV — no metric claims |
+| Trained defect models | planned (V09+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
+| Trained perception models | planned (V09+) | learned scene/lane/depth via V08 adapter boundaries |
+| PPE detection | planned (V09+) | helmet/vest |
 | Risk engine | planned | scoring/thresholds |
 | Incident intelligence | planned | lifecycle/notifications |
 | Full dashboard analytics | planned | live grid, overlays, charts |

@@ -65,8 +65,17 @@ def test_separating_objects_are_none() -> None:
 def test_stationary_objects_are_none() -> None:
     engine = _engine()
     risk = engine.assess_pair(
-        "track-1", "track-2", (0.3, 0.5), (0.7, 0.5), (0.0, 0.0), (0.0, 0.0),
-        None, None, True, True, utc(0),
+        "track-1",
+        "track-2",
+        (0.3, 0.5),
+        (0.7, 0.5),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is RiskLevel.NONE
     assert risk.time_to_collision is None
@@ -75,8 +84,17 @@ def test_stationary_objects_are_none() -> None:
 def test_missing_velocity_is_unknown() -> None:
     engine = _engine()
     risk = engine.assess_pair(
-        "track-1", "track-2", (0.3, 0.5), (0.7, 0.5), None, (-0.2, 0.0),
-        None, None, True, True, utc(0),
+        "track-1",
+        "track-2",
+        (0.3, 0.5),
+        (0.7, 0.5),
+        None,
+        (-0.2, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is RiskLevel.UNKNOWN
     assert risk.time_to_collision is None
@@ -85,8 +103,17 @@ def test_missing_velocity_is_unknown() -> None:
 def test_missing_position_is_unknown() -> None:
     engine = _engine()
     risk = engine.assess_pair(
-        "track-1", "track-2", None, (0.7, 0.5), (0.2, 0.0), (-0.2, 0.0),
-        None, None, True, True, utc(0),
+        "track-1",
+        "track-2",
+        None,
+        (0.7, 0.5),
+        (0.2, 0.0),
+        (-0.2, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is RiskLevel.UNKNOWN
 
@@ -94,8 +121,17 @@ def test_missing_position_is_unknown() -> None:
 def test_missing_depth_still_assesses() -> None:
     engine = _engine()
     risk = engine.assess_pair(
-        "track-1", "track-2", (0.3, 0.5), (0.7, 0.5), (0.2, 0.0), (-0.2, 0.0),
-        None, None, True, True, utc(0),
+        "track-1",
+        "track-2",
+        (0.3, 0.5),
+        (0.7, 0.5),
+        (0.2, 0.0),
+        (-0.2, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is not RiskLevel.UNKNOWN
     assert risk.time_to_collision == 1.0
@@ -105,8 +141,17 @@ def test_missing_depth_still_assesses() -> None:
 def test_zero_relative_velocity_is_none_not_division_error() -> None:
     engine = _engine()
     risk = engine.assess_pair(
-        "track-1", "track-2", (0.3, 0.5), (0.3, 0.5), (0.1, 0.0), (0.1, 0.0),
-        None, None, True, True, utc(0),
+        "track-1",
+        "track-2",
+        (0.3, 0.5),
+        (0.3, 0.5),
+        (0.1, 0.0),
+        (0.1, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is RiskLevel.NONE
     assert risk.time_to_collision is None
@@ -115,8 +160,17 @@ def test_zero_relative_velocity_is_none_not_division_error() -> None:
 def test_risk_bands_and_threshold() -> None:
     gentle = _engine()
     mild = gentle.assess_pair(
-        "a", "b", (0.1, 0.5), (0.9, 0.5), (0.01, 0.0), (-0.01, 0.0),
-        None, None, True, True, utc(0),
+        "a",
+        "b",
+        (0.1, 0.5),
+        (0.9, 0.5),
+        (0.01, 0.0),
+        (-0.01, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert mild.risk_level is RiskLevel.LOW
     assert mild.risk_score < 0.5
@@ -127,7 +181,16 @@ def test_non_finite_inputs_are_unknown() -> None:
 
     engine = _engine()
     risk = engine.assess_pair(
-        "a", "b", (math.nan, 0.5), (0.7, 0.5), (0.2, 0.0), (-0.2, 0.0),
-        None, None, True, True, utc(0),
+        "a",
+        "b",
+        (math.nan, 0.5),
+        (0.7, 0.5),
+        (0.2, 0.0),
+        (-0.2, 0.0),
+        None,
+        None,
+        True,
+        True,
+        utc(0),
     )
     assert risk.risk_level is RiskLevel.UNKNOWN

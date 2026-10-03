@@ -174,12 +174,10 @@ async def camera_stream_socket(
                 latest = autonomous_engine.latest_result(camera_id)
                 if latest is not None and str(latest.scene_id) != last_perception_id:
                     last_perception_id = str(latest.scene_id)
-                    await websocket.send_text(
-                        json.dumps(autonomous_perception_message(camera_id, latest))
-                    )
-                for event in autonomous_engine.active_events(
-                    camera_id, 50
-                ) + autonomous_engine.recent_events(camera_id, 10):
+                    await websocket.send_text(json.dumps(autonomous_perception_message(camera_id, latest)))
+                for event in autonomous_engine.active_events(camera_id, 50) + autonomous_engine.recent_events(
+                    camera_id, 10
+                ):
                     key = str(event.event_id)
                     if sent_perception.get(key) == event.status.value:
                         continue

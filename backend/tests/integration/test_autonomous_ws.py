@@ -127,9 +127,9 @@ def test_ws_collision_risk_event_delivery(client: TestClient) -> None:
         camera_id="cam-wrisk", frame_number=1, width=640, height=480, image=synthetic_frame()
     )
     engine.process("cam-wrisk", [track_a, track_b], frame, utc(0), None)
-    assert any(
-        e.event_type.value == "COLLISION_RISK" for e in engine.active_events("cam-wrisk")
-    ), "expected a live collision-risk event for the closing pair"
+    assert any(e.event_type.value == "COLLISION_RISK" for e in engine.active_events("cam-wrisk")), (
+        "expected a live collision-risk event for the closing pair"
+    )
 
     risk_message = None
     with client.websocket_connect("/ws/cameras/cam-wrisk") as websocket:

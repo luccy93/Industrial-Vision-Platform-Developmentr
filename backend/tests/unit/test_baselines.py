@@ -19,9 +19,7 @@ def test_scene_empty_is_unknown() -> None:
 def test_scene_road_with_vehicles_and_lanes() -> None:
     model = HeuristicSceneClassifier()
     model.load()
-    hypothesis = model.classify(
-        camera_id="c", object_classes=["car", "truck"], object_count=4, lane_count=2
-    )
+    hypothesis = model.classify(camera_id="c", object_classes=["car", "truck"], object_count=4, lane_count=2)
     assert hypothesis.scene_type is SceneType.ROAD
     assert hypothesis.confidence == 0.75
 
@@ -38,18 +36,14 @@ def test_scene_warehouse_without_road_vehicles() -> None:
 def test_scene_robot_classes_win() -> None:
     model = HeuristicSceneClassifier()
     model.load()
-    hypothesis = model.classify(
-        camera_id="c", object_classes=["agv", "car"], object_count=2, lane_count=0
-    )
+    hypothesis = model.classify(camera_id="c", object_classes=["agv", "car"], object_count=2, lane_count=0)
     assert hypothesis.scene_type is SceneType.INDOOR_MOBILE_ROBOT
 
 
 def test_scene_parking_weak_evidence() -> None:
     model = HeuristicSceneClassifier()
     model.load()
-    hypothesis = model.classify(
-        camera_id="c", object_classes=["car"], object_count=2, lane_count=0
-    )
+    hypothesis = model.classify(camera_id="c", object_classes=["car"], object_count=2, lane_count=0)
     assert hypothesis.scene_type is SceneType.PARKING
     assert hypothesis.confidence == 0.4
 
@@ -66,9 +60,7 @@ def test_scene_yard_with_people() -> None:
 def test_scene_unmatched_mix_is_unknown() -> None:
     model = HeuristicSceneClassifier()
     model.load()
-    hypothesis = model.classify(
-        camera_id="c", object_classes=["dog"], object_count=1, lane_count=0
-    )
+    hypothesis = model.classify(camera_id="c", object_classes=["dog"], object_count=1, lane_count=0)
     assert hypothesis.scene_type is SceneType.UNKNOWN
 
 

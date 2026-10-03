@@ -35,9 +35,7 @@ def test_build_bev_maps_objects_lanes_trajectories() -> None:
         points=[],
         horizon_seconds=2.0,
     )
-    risk = CollisionRisk(
-        object_ids=["track-1", "track-2"], risk_level=RiskLevel.HIGH, risk_score=0.8
-    )
+    risk = CollisionRisk(object_ids=["track-1", "track-2"], risk_level=RiskLevel.HIGH, risk_score=0.8)
     view = build_bev([obj], [lane], [trajectory], [risk], utc(0))
     assert view.coordinate_frame.value == "RELATIVE_BEV"
     assert len(view.objects) == 1
