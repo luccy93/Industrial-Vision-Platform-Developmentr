@@ -172,6 +172,33 @@ class Settings(BaseSettings):
             part.strip() for part in self.quality_default_fail_severities.split(",") if part.strip()
         )
 
+    # --- V08 autonomous perception (relative scene understanding; no metric claims) ---
+    autonomous_enabled: bool = Field(default=True)
+    # Named model adapters. Empty = NOT_CONFIGURED: that subsystem reports
+    # unavailable and the rest of perception continues. "fixture" resolves the
+    # scripted test adapters OUTSIDE production only (see autonomous.registry).
+    autonomous_scene_classifier: str = Field(default="")
+    autonomous_lane_detector: str = Field(default="")
+    autonomous_depth_model: str = Field(default="")
+    autonomous_lane_detection_enabled: bool = Field(default=True)
+    autonomous_depth_enabled: bool = Field(default=False)
+    autonomous_trajectory_enabled: bool = Field(default=True)
+    autonomous_collision_risk_enabled: bool = Field(default=True)
+    autonomous_bev_enabled: bool = Field(default=True)
+    autonomous_perception_interval_frames: int = Field(default=10, ge=1, le=600)
+    autonomous_trajectory_horizon_seconds: float = Field(default=2.0, ge=0.1, le=10.0)
+    autonomous_trajectory_history_points: int = Field(default=8, ge=2, le=60)
+    autonomous_collision_grace_seconds: float = Field(default=0.5, ge=0.0, le=300.0)
+    autonomous_collision_risk_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    autonomous_max_objects_per_scene: int = Field(default=100, ge=1, le=1000)
+    autonomous_max_results_per_camera: int = Field(default=30, ge=1, le=1000)
+    autonomous_max_events_per_camera: int = Field(default=100, ge=1, le=10000)
+    autonomous_max_profiles_per_camera: int = Field(default=10, ge=1, le=100)
+    # Normalized-units-per-second below which an object counts as stationary.
+    autonomous_motion_speed_threshold: float = Field(default=0.02, ge=0.0, le=2.0)
+    # Fractional bbox-area growth per second that counts as approaching.
+    autonomous_approach_area_ratio: float = Field(default=0.02, ge=0.0, le=2.0)
+
     @field_validator("spatial_proximity_strategy")
     @classmethod
     def _normalize_strategy(cls, value: str) -> str:

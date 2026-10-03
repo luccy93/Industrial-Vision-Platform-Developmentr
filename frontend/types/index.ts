@@ -333,6 +333,140 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/safety", label: "Safety", note: "V05 intelligence" },
   { href: "/zones", label: "Zones", note: "V06 spatial engine" },
   { href: "/quality", label: "Quality", note: "V07 inspection" },
+  { href: "/autonomous", label: "Autonomous", note: "V08 perception" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
+
+// --- V08 autonomous perception ---
+
+export type SceneType =
+  | "ROAD"
+  | "PARKING"
+  | "WAREHOUSE"
+  | "INDUSTRIAL_YARD"
+  | "INDOOR_MOBILE_ROBOT"
+  | "UNKNOWN";
+
+export type PerceivedObjectState =
+  | "MOVING"
+  | "STATIONARY"
+  | "APPROACHING"
+  | "RECEDING"
+  | "CROSSING"
+  | "UNKNOWN";
+
+export type LaneType = "SOLID" | "DASHED" | "DOUBLE_SOLID" | "UNKNOWN";
+
+export type RiskLevel = "NONE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | "UNKNOWN";
+
+export type PerceptionEventType =
+  | "COLLISION_RISK"
+  | "LANE_DEPARTURE_RISK"
+  | "OBJECT_APPROACH"
+  | "OBJECT_CROSSING"
+  | "SCENE_CHANGE";
+
+export type Availability = "AVAILABLE" | "NOT_CONFIGURED" | "ESTIMATED" | "UNKNOWN";
+
+export type PerceivedObject = {
+  object_id: string;
+  track_id: number | null;
+  class_name: string;
+  confidence: number;
+  bounding_box: [number, number, number, number] | null;
+  velocity: [number, number] | null;
+  relative_depth: number | null;
+  depth_source: string;
+  object_state: PerceivedObjectState;
+};
+
+export type LaneItem = {
+  lane_id: string;
+  points: Array<{ x: number; y: number }>;
+  confidence: number;
+  lane_type: LaneType;
+  side: string | null;
+};
+
+export type CollisionRiskItem = {
+  object_ids: [string, string];
+  risk_level: RiskLevel;
+  risk_score: number;
+  time_to_collision: number | null;
+  confidence: number;
+  reason: string;
+};
+
+export type PerceptionEvent = {
+  event_id: string;
+  event_type: PerceptionEventType;
+  risk_level: RiskLevel;
+  object_ids: string[];
+  confidence: number;
+  status: "ACTIVE" | "RESOLVED";
+  timestamp: string;
+  duration_ms: number;
+  message: string;
+};
+
+export type AutonomousResult = {
+  scene_id: string;
+  camera_id: string;
+  frame_id: string | null;
+  timestamp: string;
+  scene_type: SceneType;
+  objects: PerceivedObject[];
+  lanes: LaneItem[];
+  trajectories: number;
+  collision_risks: number;
+  processing_time_ms: number;
+};
+
+export type AutonomousProfile = {
+  profile_id: string;
+  camera_id: string;
+  name: string;
+  enabled: boolean;
+  scene_type: SceneType;
+  lane_detection_enabled: boolean;
+  depth_enabled: boolean;
+  trajectory_enabled: boolean;
+  collision_risk_enabled: boolean;
+  bev_enabled: boolean;
+  trajectory_horizon_seconds: number;
+  collision_risk_threshold: number;
+  collision_grace_seconds: number;
+  configuration: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AutonomousStatus = {
+  enabled: boolean;
+  engine_status: string;
+  scene_classifier_status: string;
+  lane_detector_status: string;
+  depth_status: string;
+  trajectory_status: string;
+  collision_status: string;
+  bev_status: string;
+  active_profiles: number;
+  active_cameras: number;
+  tracked_objects: number;
+  perception_count: number;
+  average_perception_ms: number;
+  last_perception_timestamp: string | null;
+  frames_skipped: number;
+  perception_fps: number;
+  cameras: Record<
+    string,
+    {
+      profiles: number;
+      perceptions: number;
+      last_scene_type: SceneType | null;
+      last_perception_at: string | null;
+    }
+  >;
+};

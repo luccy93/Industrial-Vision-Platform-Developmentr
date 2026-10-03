@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath("."))
 
 from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.models import (
+    autonomous_orm,  # noqa: E402,F401 (register autonomous metadata)
     quality_orm,  # noqa: E402,F401 (register quality metadata)
     zone_orm,  # noqa: E402,F401 (register zones metadata)
 )
