@@ -156,6 +156,7 @@ def delete_camera(
     supervisor.remove(camera_id)
     _detach_inference(request, camera_id)
     _drop_spatial(request, camera_id)
+    _drop_quality(request, camera_id)
     if not repository.delete(camera_id):
         raise HTTPException(status_code=404, detail="camera not found")
     return {"deleted": camera_id}
@@ -222,6 +223,62 @@ def _drop_spatial(request: Request, camera_id: str) -> None:
         logger.debug("spatial cleanup failed for %s", camera_id, exc_info=True)
 
 
+def _quality_engine(request: Request) -> Any:
+    from backend.app.quality.engine import QualityInspectionEngine
+
+    engine = getattr(request.app.state, "quality_engine", None)
+    return engine if isinstance(engine, QualityInspectionEngine) else None
+
+
+def _reset_quality(request: Request, camera_id: str) -> None:
+    """Drop per-camera quality runtime state and reload stored configuration.
+
+    A restarted stream invalidates sessions and events; profile/region/
+    category configuration is reloaded from PostgreSQL.
+    """
+    engine = _quality_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.api.v1.quality import sync_camera_quality
+            from backend.app.quality.repository import (
+                DefectCategoryRepository,
+                InspectionProfileRepository,
+            )
+
+            sync_camera_quality(
+                engine,
+                InspectionProfileRepository(factory),
+                DefectCategoryRepository(factory),
+                camera_id,
+            )
+    except Exception:
+        logger.debug("quality reset failed for %s", camera_id, exc_info=True)
+
+
+def _drop_quality(request: Request, camera_id: str) -> None:
+    """Delete a camera's quality configuration and forget its runtime state.
+
+    Defect categories are a reusable global catalog — they survive camera
+    deletion. Only the camera's profiles, regions, and associations go.
+    """
+    engine = _quality_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.quality.repository import InspectionProfileRepository
+
+            InspectionProfileRepository(factory).delete_for_camera(camera_id)
+    except Exception:
+        logger.debug("quality cleanup failed for %s", camera_id, exc_info=True)
+
+
 def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
     """Best-effort: inference problems must never fail stream startup."""
     try:
@@ -231,6 +288,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             return
         tracking = _tracking_manager(request)
         safety_engine = getattr(request.app.state, "safety_engine", None)
+        quality_engine = _quality_engine(request)
         if tracking is not None:
             try:
                 tracking.reset_camera(camera_id)  # type: ignore[union-attr]
@@ -242,12 +300,14 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             except Exception:
                 logger.debug("safety reset failed for %s", camera_id, exc_info=True)
         _reset_spatial(request, camera_id)
+        _reset_quality(request, camera_id)
         worker = supervisor.attach(  # type: ignore[arg-type]
             camera_id,
             model_manager,
             frame_source,
             tracking_manager=tracking,
             safety_engine=safety_engine,
+            quality_engine=quality_engine,
         )
         worker.start()
     except Exception:
@@ -296,6 +356,7 @@ def stop_stream(
     # Stopping invalidates every track ID: drop spatial runtime state but keep
     # the stored zone configuration loaded for the next start.
     _reset_spatial(request, camera_id)
+    _reset_quality(request, camera_id)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 

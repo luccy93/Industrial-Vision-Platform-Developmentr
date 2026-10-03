@@ -70,6 +70,7 @@ async def camera_stream_socket(
     supervisor = getattr(websocket.app.state, "supervisor", None) or _fallback_supervisor
     inference_supervisor = getattr(websocket.app.state, "inference_supervisor", None)
     safety_engine = getattr(websocket.app.state, "safety_engine", None)
+    quality_engine = getattr(websocket.app.state, "quality_engine", None)
     camera = repository.get(camera_id)
     if camera is None:
         await websocket.send_text(
@@ -90,6 +91,8 @@ async def camera_stream_socket(
     last_detection_id: str | None = None
     last_tracked_id: str | None = None
     sent_safety: dict[str, str] = {}
+    sent_quality: dict[str, str] = {}
+    sent_results: set[str] = set()
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -135,6 +138,24 @@ async def camera_stream_socket(
                         # V06 keeps V05 payloads intact and adds typed channels.
                         message["spatial"] = event.evidence
                     await websocket.send_text(json.dumps(message))
+            if quality_engine is not None:
+                # V07: quality events (delta-only) + one message per inspection.
+                from backend.app.quality.ws import quality_event_message, quality_result_message
+
+                for event in quality_engine.active_events(camera_id, 50) + quality_engine.recent_events(
+                    camera_id, 10
+                ):
+                    key = str(event.event_id)
+                    if sent_quality.get(key) == event.status.value:
+                        continue
+                    sent_quality[key] = event.status.value
+                    await websocket.send_text(json.dumps(quality_event_message(camera_id, event)))
+                for result in quality_engine.recent_results(camera_id, 5):
+                    key = str(result.inspection_id)
+                    if key in sent_results:
+                        continue
+                    sent_results.add(key)
+                    await websocket.send_text(json.dumps(quality_result_message(camera_id, result)))
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(

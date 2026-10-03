@@ -56,6 +56,37 @@ def _load_spatial_configuration(app: FastAPI, logger: Any) -> None:
         logger.warning("zone configuration load skipped", exc_info=True)
 
 
+def _load_quality_configuration(app: FastAPI, logger: Any) -> None:
+    """Warm the V07 quality runtime from stored configuration (best-effort).
+
+    Profile/region/category configuration lives in PostgreSQL; the runtime
+    holds a snapshot so the worker thread never touches the database.
+    """
+    try:
+        from backend.app.api.v1.quality import sync_camera_quality
+        from backend.app.ingestion.repository import CameraRepository
+        from backend.app.quality.engine import QualityInspectionEngine
+        from backend.app.quality.repository import (
+            DefectCategoryRepository,
+            InspectionProfileRepository,
+        )
+
+        quality = getattr(app.state, "quality_engine", None)
+        factory = getattr(app.state, "session_factory", None)
+        if not isinstance(quality, QualityInspectionEngine) or factory is None:
+            return
+        cameras = CameraRepository(factory).list()
+        profiles = InspectionProfileRepository(factory)
+        categories = DefectCategoryRepository(factory)
+        catalog = categories.list_all()
+        for camera in cameras:
+            loaded = sync_camera_quality(quality, profiles, categories, camera.camera_id, catalog)
+            if loaded:
+                logger.info("loaded %s inspection profile(s) for camera %s", len(loaded), camera.camera_id)
+    except Exception:
+        logger.warning("quality configuration load skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
@@ -69,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("database init skipped (unreachable?)", exc_info=True)
     _load_spatial_configuration(app, logger)
+    _load_quality_configuration(app, logger)
     yield
     for key in ("inference_supervisor", "supervisor"):
         try:
@@ -116,6 +148,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings, default_rules(settings) + spatial_rules(app.state.spatial_engine)
     )
 
+    # V07: quality inspection runtime (configuration snapshot + events +
+    # sessions). The model resolves honestly from QUALITY_INSPECTION_MODEL.
+    from backend.app.quality.engine import QualityInspectionEngine
+    from backend.app.quality.registry import resolve_inspection_model
+
+    app.state.quality_engine = QualityInspectionEngine(settings, resolve_inspection_model(settings))
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -146,6 +185,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.spatial import router as spatial_router
 
     app.include_router(spatial_router)
+    from backend.app.api.v1.quality import router as quality_router
+
+    app.include_router(quality_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

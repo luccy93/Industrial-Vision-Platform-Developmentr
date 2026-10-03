@@ -78,7 +78,7 @@ export function RegionEditor({ initial, onChange }: Props) {
       : []
   );
   const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number }>(
-    initial?.region_type === "RECTANGLE"
+    initial?.region_type === "RECTANGLE" && typeof initial.geometry.x === "number"
       ? (initial.geometry as { x: number; y: number; width: number; height: number })
       : { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }
   );

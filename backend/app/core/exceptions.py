@@ -99,11 +99,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _handle_validation(request: Request, exc: RequestValidationError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:12]
+        # Model-level validators embed the raw exception in `ctx`, which is
+        # not JSON-serializable — stringify fallbacks without changing
+        # serializable values.
+        import json
+
+        details = json.loads(json.dumps({"errors": exc.errors()}, default=str))
         return JSONResponse(
             status_code=422,
-            content=error_envelope(
-                "validation_error", "Request validation failed.", request_id, {"errors": exc.errors()}
-            ),
+            content=error_envelope("validation_error", "Request validation failed.", request_id, details),
         )
 
     @app.exception_handler(StarletteHTTPException)

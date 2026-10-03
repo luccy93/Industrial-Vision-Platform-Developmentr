@@ -16,6 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from typing import Any
 
 from backend.app.domain.frame import IngestionFrame
 from backend.app.inference.base import ModelError
@@ -48,12 +49,14 @@ class InferenceWorker:
         results_size: int = 30,
         tracking_manager: TrackingManager | None = None,
         safety_engine: SafetyEngine | None = None,
+        quality_engine: Any = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
         self._frame_source = frame_source
         self._tracking_manager = tracking_manager
         self._safety_engine = safety_engine
+        self._quality_engine = quality_engine
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
@@ -63,6 +66,9 @@ class InferenceWorker:
         self._frame_height: float = 0.0
         self._safety_new: list = []
         self._safety_active: list = []
+        self._quality_latest: list = []
+        self._quality_frames = 0
+        self._quality_skipped = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -180,6 +186,7 @@ class InferenceWorker:
             self._frame_width = float(width)
             self._frame_height = float(height)
         self._analyze_safety(tracks, result)
+        self._analyze_quality(frame, result)
 
     def _analyze_safety(self, tracks: list, result: InferenceResult) -> None:
         """V05 stage: tracking output → safety events (isolated failures)."""
@@ -199,6 +206,34 @@ class InferenceWorker:
             self._safety_new = list(analysis.new_events)
             self._safety_active = list(analysis.active_events)
 
+    def _analyze_quality(self, frame: IngestionFrame, result: InferenceResult) -> None:
+        """V07 stage: frame → quality inspection (sampled, isolated failures).
+
+        Inspection runs on the same worker thread as tracking/safety but only
+        every Nth frame (``QUALITY_INSPECTION_INTERVAL_FRAMES``) so it can
+        never block the pipeline; skipped frames are counted, never queued.
+        """
+        engine = self._quality_engine
+        if engine is None:
+            return
+        try:
+            with self._lock:
+                self._quality_frames += 1
+                interval = engine.inspection_interval
+                due = self._quality_frames % interval == 0
+            if not due:
+                with self._lock:
+                    self._quality_skipped += 1
+                engine.note_skipped(self.camera_id)
+                return
+            results = engine.process(self.camera_id, frame, result.timestamp, frame.frame_id)
+            engine.note_queue_depth(self.camera_id, self._queue.qsize())
+        except Exception as exc:
+            logger.warning("quality inspection failed for %s: %s", self.camera_id, exc)
+            return
+        with self._lock:
+            self._quality_latest = list(results)
+
     def _sleep(self, seconds: float) -> None:
         self._stop_event.wait(seconds)
 
@@ -216,6 +251,11 @@ class InferenceWorker:
         with self._lock:
             return list(self._safety_new), list(self._safety_active)
 
+    def latest_quality(self) -> list:
+        """Inspection results from the latest quality pass."""
+        with self._lock:
+            return list(self._quality_latest)
+
     def recent(self, limit: int = 10) -> list[InferenceResult]:
         with self._lock:
             items = list(self._results)[-max(1, limit) :]
@@ -231,6 +271,9 @@ class InferenceWorker:
                 "errors": self._errors,
                 "results_held": len(self._results),
                 "last_error": self._last_error,
+                "quality_frames": self._quality_frames,
+                "quality_skipped": self._quality_skipped,
+                "quality_results_held": len(self._quality_latest),
             }
 
 
