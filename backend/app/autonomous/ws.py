@@ -17,14 +17,18 @@ from backend.app.autonomous.schemas import AutonomousPerceptionEvent, Autonomous
 
 
 def autonomous_perception_message(camera_id: str, result: AutonomousPerceptionResult) -> dict[str, Any]:
+    payload = result.to_websocket()
     return {
         "type": "autonomous_perception",
         "camera_id": camera_id,
         "frame_id": result.frame_id,
         "timestamp": result.timestamp.isoformat(),
-        "objects": result.to_websocket()["objects"],
-        "lanes": result.to_websocket()["lanes"],
-        "scene_type": result.to_websocket()["scene_type"],
+        "objects": payload["objects"],
+        "lanes": payload["lanes"],
+        "scene_type": payload["scene_type"],
+        "trajectories": payload["trajectories"],
+        "collision_risks": payload["collision_risks"],
+        "processing_time_ms": payload["processing_time_ms"],
     }
 
 

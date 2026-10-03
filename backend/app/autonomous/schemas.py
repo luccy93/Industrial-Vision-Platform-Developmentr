@@ -359,8 +359,29 @@ class AutonomousPerceptionResult(BaseModel):
             "scene_type": self.scene.scene_type.value if self.scene else SceneType.UNKNOWN.value,
             "objects": scene["objects"] if scene else [],
             "lanes": scene["lanes"] if scene else [],
-            "trajectories": len(self.trajectories),
-            "collision_risks": len(self.collision_risks),
+            "trajectories": [
+                {
+                    "object_id": t.object_id,
+                    "points": [{"x": p.x, "y": p.y} for p in t.points],
+                    "horizon_seconds": t.horizon_seconds,
+                    "confidence": t.confidence,
+                }
+                for t in self.trajectories
+            ],
+            # Only actionable risks travel on the wire; NONE/UNKNOWN pairs
+            # are noise. The full assessment lives in the engine state.
+            "collision_risks": [
+                {
+                    "object_ids": list(r.object_ids),
+                    "risk_level": r.risk_level.value,
+                    "risk_score": r.risk_score,
+                    "time_to_collision": r.time_to_collision,
+                    "confidence": r.confidence,
+                    "reason": r.reason,
+                }
+                for r in self.collision_risks
+                if r.risk_level.value not in ("NONE", "UNKNOWN")
+            ],
             "processing_time_ms": self.processing_time_ms,
         }
         return payload

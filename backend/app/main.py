@@ -87,6 +87,35 @@ def _load_quality_configuration(app: FastAPI, logger: Any) -> None:
         logger.warning("quality configuration load skipped", exc_info=True)
 
 
+def _load_autonomous_configuration(app: FastAPI, logger: Any) -> None:
+    """Warm the V08 perception runtime from stored profiles (best-effort).
+
+    Perception profiles live in PostgreSQL; the runtime holds a snapshot so
+    the worker thread never touches the database. An unreachable database
+    must not block startup — perception simply starts on global defaults.
+    """
+    try:
+        from backend.app.api.v1.autonomous import sync_camera_perception
+        from backend.app.autonomous.engine import AutonomousPerceptionEngine
+        from backend.app.autonomous.repository import AutonomousProfileRepository
+        from backend.app.ingestion.repository import CameraRepository
+
+        autonomous = getattr(app.state, "autonomous_engine", None)
+        factory = getattr(app.state, "session_factory", None)
+        if not isinstance(autonomous, AutonomousPerceptionEngine) or factory is None:
+            return
+        cameras = CameraRepository(factory).list()
+        profiles = AutonomousProfileRepository(factory)
+        for camera in cameras:
+            loaded = sync_camera_perception(autonomous, profiles, camera.camera_id)
+            if loaded:
+                logger.info(
+                    "loaded %s perception profile(s) for camera %s", len(loaded), camera.camera_id
+                )
+    except Exception:
+        logger.warning("autonomous configuration load skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
@@ -101,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("database init skipped (unreachable?)", exc_info=True)
     _load_spatial_configuration(app, logger)
     _load_quality_configuration(app, logger)
+    _load_autonomous_configuration(app, logger)
     yield
     for key in ("inference_supervisor", "supervisor"):
         try:
@@ -155,6 +185,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.quality_engine = QualityInspectionEngine(settings, resolve_inspection_model(settings))
 
+    # V08: autonomous perception runtime (profile snapshots + relative scene
+    # understanding). Model adapters resolve honestly from AUTONOMOUS_* names;
+    # empty names degrade that subsystem to unavailable, never to fake output.
+    from backend.app.autonomous.engine import AutonomousPerceptionEngine
+    from backend.app.autonomous.registry import (
+        resolve_depth_estimator,
+        resolve_lane_detector,
+        resolve_scene_classifier,
+    )
+
+    app.state.autonomous_engine = AutonomousPerceptionEngine(
+        settings,
+        scene_classifier=resolve_scene_classifier(settings),
+        lane_detector=resolve_lane_detector(settings),
+        depth_estimator=resolve_depth_estimator(settings),
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -188,6 +235,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.quality import router as quality_router
 
     app.include_router(quality_router)
+    from backend.app.api.v1.autonomous import router as autonomous_router
+
+    app.include_router(autonomous_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

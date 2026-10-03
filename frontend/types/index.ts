@@ -418,8 +418,13 @@ export type AutonomousResult = {
   scene_type: SceneType;
   objects: PerceivedObject[];
   lanes: LaneItem[];
-  trajectories: number;
-  collision_risks: number;
+  trajectories: Array<{
+    object_id: string;
+    points: Array<{ x: number; y: number }>;
+    horizon_seconds: number;
+    confidence: number;
+  }>;
+  collision_risks: CollisionRiskItem[];
   processing_time_ms: number;
 };
 

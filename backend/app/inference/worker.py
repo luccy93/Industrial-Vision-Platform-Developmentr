@@ -50,6 +50,7 @@ class InferenceWorker:
         tracking_manager: TrackingManager | None = None,
         safety_engine: SafetyEngine | None = None,
         quality_engine: Any = None,
+        autonomous_engine: Any = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
@@ -57,6 +58,7 @@ class InferenceWorker:
         self._tracking_manager = tracking_manager
         self._safety_engine = safety_engine
         self._quality_engine = quality_engine
+        self._autonomous_engine = autonomous_engine
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
@@ -69,6 +71,9 @@ class InferenceWorker:
         self._quality_latest: list = []
         self._quality_frames = 0
         self._quality_skipped = 0
+        self._autonomous_latest: object = None
+        self._autonomous_frames = 0
+        self._autonomous_skipped = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -187,6 +192,7 @@ class InferenceWorker:
             self._frame_height = float(height)
         self._analyze_safety(tracks, result)
         self._analyze_quality(frame, result)
+        self._analyze_autonomous(tracks, frame, result)
 
     def _analyze_safety(self, tracks: list, result: InferenceResult) -> None:
         """V05 stage: tracking output → safety events (isolated failures)."""
@@ -234,6 +240,39 @@ class InferenceWorker:
         with self._lock:
             self._quality_latest = list(results)
 
+    def _analyze_autonomous(
+        self, tracks: list, frame: IngestionFrame, result: InferenceResult
+    ) -> None:
+        """V08 stage: tracks + frame → autonomous perception (sampled, isolated).
+
+        Perception runs on the same worker thread but only every Nth frame
+        (``AUTONOMOUS_PERCEPTION_INTERVAL_FRAMES``); skipped frames are
+        counted, never queued. A failed subsystem degrades inside the engine —
+        this stage only isolates engine-level failures from the pipeline.
+        """
+        engine = self._autonomous_engine
+        if engine is None or not engine.enabled:
+            return
+        try:
+            with self._lock:
+                self._autonomous_frames += 1
+                interval = engine.inspection_interval
+                due = self._autonomous_frames % interval == 0
+            if not due:
+                with self._lock:
+                    self._autonomous_skipped += 1
+                engine.note_skipped(self.camera_id)
+                return
+            perceived = engine.process(
+                self.camera_id, tracks, frame, result.timestamp, frame.frame_id
+            )
+            engine.note_queue_depth(self.camera_id, self._queue.qsize())
+        except Exception as exc:
+            logger.warning("autonomous perception failed for %s: %s", self.camera_id, exc)
+            return
+        with self._lock:
+            self._autonomous_latest = perceived
+
     def _sleep(self, seconds: float) -> None:
         self._stop_event.wait(seconds)
 
@@ -256,6 +295,11 @@ class InferenceWorker:
         with self._lock:
             return list(self._quality_latest)
 
+    def latest_perception(self) -> object:
+        """Perception result from the latest autonomous pass (or None)."""
+        with self._lock:
+            return self._autonomous_latest
+
     def recent(self, limit: int = 10) -> list[InferenceResult]:
         with self._lock:
             items = list(self._results)[-max(1, limit) :]
@@ -274,6 +318,9 @@ class InferenceWorker:
                 "quality_frames": self._quality_frames,
                 "quality_skipped": self._quality_skipped,
                 "quality_results_held": len(self._quality_latest),
+                "autonomous_frames": self._autonomous_frames,
+                "autonomous_skipped": self._autonomous_skipped,
+                "autonomous_result_held": self._autonomous_latest is not None,
             }
 
 

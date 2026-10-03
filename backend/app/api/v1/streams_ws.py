@@ -71,6 +71,7 @@ async def camera_stream_socket(
     inference_supervisor = getattr(websocket.app.state, "inference_supervisor", None)
     safety_engine = getattr(websocket.app.state, "safety_engine", None)
     quality_engine = getattr(websocket.app.state, "quality_engine", None)
+    autonomous_engine = getattr(websocket.app.state, "autonomous_engine", None)
     camera = repository.get(camera_id)
     if camera is None:
         await websocket.send_text(
@@ -93,6 +94,8 @@ async def camera_stream_socket(
     sent_safety: dict[str, str] = {}
     sent_quality: dict[str, str] = {}
     sent_results: set[str] = set()
+    sent_perception: dict[str, str] = {}
+    last_perception_id: str | None = None
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -156,6 +159,36 @@ async def camera_stream_socket(
                         continue
                     sent_results.add(key)
                     await websocket.send_text(json.dumps(quality_result_message(camera_id, result)))
+            if autonomous_engine is not None:
+                # V08: latest scene per frame + delta-only perception events.
+                # COLLISION_RISK travels on `collision_risk`; every other
+                # perception event (departure, approach, crossing, scene
+                # change) travels on `lane_event` — the embedded
+                # `event.event_type` always identifies the true kind.
+                from backend.app.autonomous.ws import (
+                    autonomous_perception_message,
+                    collision_risk_message,
+                    lane_event_message,
+                )
+
+                latest = autonomous_engine.latest_result(camera_id)
+                if latest is not None and str(latest.scene_id) != last_perception_id:
+                    last_perception_id = str(latest.scene_id)
+                    await websocket.send_text(
+                        json.dumps(autonomous_perception_message(camera_id, latest))
+                    )
+                for event in autonomous_engine.active_events(
+                    camera_id, 50
+                ) + autonomous_engine.recent_events(camera_id, 10):
+                    key = str(event.event_id)
+                    if sent_perception.get(key) == event.status.value:
+                        continue
+                    sent_perception[key] = event.status.value
+                    if event.event_type.value == "COLLISION_RISK":
+                        message = collision_risk_message(camera_id, event)
+                    else:
+                        message = lane_event_message(camera_id, event)
+                    await websocket.send_text(json.dumps(message))
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(

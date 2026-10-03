@@ -157,6 +157,7 @@ def delete_camera(
     _detach_inference(request, camera_id)
     _drop_spatial(request, camera_id)
     _drop_quality(request, camera_id)
+    _drop_autonomous(request, camera_id)
     if not repository.delete(camera_id):
         raise HTTPException(status_code=404, detail="camera not found")
     return {"deleted": camera_id}
@@ -279,6 +280,50 @@ def _drop_quality(request: Request, camera_id: str) -> None:
         logger.debug("quality cleanup failed for %s", camera_id, exc_info=True)
 
 
+def _autonomous_engine(request: Request) -> Any:
+    from backend.app.autonomous.engine import AutonomousPerceptionEngine
+
+    engine = getattr(request.app.state, "autonomous_engine", None)
+    return engine if isinstance(engine, AutonomousPerceptionEngine) else None
+
+
+def _reset_autonomous(request: Request, camera_id: str) -> None:
+    """Drop per-camera perception runtime state and reload stored profiles.
+
+    A restarted stream invalidates track history and pair state; the
+    perception profile configuration is reloaded from PostgreSQL.
+    """
+    engine = _autonomous_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.api.v1.autonomous import sync_camera_perception
+            from backend.app.autonomous.repository import AutonomousProfileRepository
+
+            sync_camera_perception(engine, AutonomousProfileRepository(factory), camera_id)
+    except Exception:
+        logger.debug("autonomous reset failed for %s", camera_id, exc_info=True)
+
+
+def _drop_autonomous(request: Request, camera_id: str) -> None:
+    """Delete a camera's perception profiles and forget its runtime state."""
+    engine = _autonomous_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+        factory = getattr(request.app.state, "session_factory", None)
+        if factory is not None:
+            from backend.app.autonomous.repository import AutonomousProfileRepository
+
+            AutonomousProfileRepository(factory).delete_for_camera(camera_id)
+    except Exception:
+        logger.debug("autonomous cleanup failed for %s", camera_id, exc_info=True)
+
+
 def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
     """Best-effort: inference problems must never fail stream startup."""
     try:
@@ -289,6 +334,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
         tracking = _tracking_manager(request)
         safety_engine = getattr(request.app.state, "safety_engine", None)
         quality_engine = _quality_engine(request)
+        autonomous_engine = _autonomous_engine(request)
         if tracking is not None:
             try:
                 tracking.reset_camera(camera_id)  # type: ignore[union-attr]
@@ -301,6 +347,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
                 logger.debug("safety reset failed for %s", camera_id, exc_info=True)
         _reset_spatial(request, camera_id)
         _reset_quality(request, camera_id)
+        _reset_autonomous(request, camera_id)
         worker = supervisor.attach(  # type: ignore[arg-type]
             camera_id,
             model_manager,
@@ -308,6 +355,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             tracking_manager=tracking,
             safety_engine=safety_engine,
             quality_engine=quality_engine,
+            autonomous_engine=autonomous_engine,
         )
         worker.start()
     except Exception:
@@ -357,6 +405,7 @@ def stop_stream(
     # the stored zone configuration loaded for the next start.
     _reset_spatial(request, camera_id)
     _reset_quality(request, camera_id)
+    _reset_autonomous(request, camera_id)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 
