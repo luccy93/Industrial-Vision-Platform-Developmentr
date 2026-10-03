@@ -55,6 +55,21 @@ latency budget, concurrency). Test timestamps come from
 `backend/tests/safety_helpers.utc()` — a **fixed synthetic epoch**, so duration
 assertions never depend on how fast the machine runs.
 
+V07 tests are grouped by intent: `unit/test_quality_schemas.py` (enums,
+validation, config), `unit/test_quality_policy.py` (decision precedence,
+boundaries, missing evidence), `unit/test_quality_regions.py` (ROI geometry),
+`unit/test_quality_fixture_model.py` (scripted adapter + registry),
+`unit/test_quality_repository.py` (PG contract),
+`integration/test_quality_engine.py` (decisions, continuity, isolation,
+honest errors), `integration/test_quality_api.py` (CRUD/status/latest,
+404/409/422), `integration/test_quality_ws.py` (V02–V06 compatibility + new
+messages), `integration/test_quality_integration.py` (startup warm-up, stream
+lifecycle), and `performance/test_quality_perf.py` (latency, bounds,
+concurrency). Test timestamps come from `backend/tests/quality_helpers.utc()`
+— the same fixed-epoch pattern. The optional real-model check
+(`python -m backend.app.quality.smoke_test`) reports READY only for a
+loadable configured model, else honest SKIPPED; it is never in the suite.
+
 ## Model weights (V03)
 
 Weights are external: `MODEL_PATH=models/yolo11n.pt` (gitignored). Fetch
@@ -90,6 +105,18 @@ space, so thresholds are resolution-independent but **not** comparable across
 cameras with different viewpoints, and never meters. `zone_type`/`severity`
 inputs are case-insensitive; stored/serialized values are always uppercase.
 Full guide: `docs/SPATIAL_SAFETY.md`.
+
+## Quality tuning (V07)
+
+`QUALITY_*` in `.env.example`: enable flag, inspection model name (empty =
+honest ERROR), inspection sampling interval, per-camera profile cap,
+per-profile region cap, observation/result/event caps, resolution grace,
+default fail/review thresholds and severities, missing-evidence and error
+behaviors. Region geometry is normalized `[0,1]` image space, reusing the V06
+primitives. `inspection_type`/`severity` inputs are case-insensitive;
+stored/serialized values are always uppercase. Tune the decision policy
+against scripted fixture observations in `backend/tests/quality_helpers.py`.
+Full guide: `docs/QUALITY_INSPECTION.md`.
 
 ## Docker
 

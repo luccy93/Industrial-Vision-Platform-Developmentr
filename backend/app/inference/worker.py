@@ -214,7 +214,7 @@ class InferenceWorker:
         never block the pipeline; skipped frames are counted, never queued.
         """
         engine = self._quality_engine
-        if engine is None:
+        if engine is None or not engine.enabled:
             return
         try:
             with self._lock:

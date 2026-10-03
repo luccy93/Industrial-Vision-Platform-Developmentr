@@ -22,8 +22,29 @@ relationships (person/vehicle, person/person, vehicle/vehicle) with
 `CENTER_DISTANCE`/`IOU`/`HYBRID` strategies, spatial API + WebSocket
 `zone_event`/`proximity_event`, and a Zones page with a polygon editor. Zone
 membership and proximity are **image-space approximations, never meters**.
+V07 adds the **quality inspection framework** — PG-persisted inspection
+profiles, normalized inspection regions (rectangle/polygon), a reusable defect
+category catalog with per-profile associations, a configurable decision policy
+(`PASS`/`FAIL`/`REVIEW`/`ERROR` — never a silent PASS), in-memory sessions and
+quality events (inspection-level + observation-level `DEFECT_DETECTED`), quality
+API + WebSocket `quality_event`/`quality_result`, and a Quality page with a
+region editor. V07 is the **framework, not a trained defect model**: no
+specialized weights are required or downloaded.
 **V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.
-V06 = Restricted Zones & Advanced Proximity.**
+V06 = Restricted Zones & Advanced Proximity. V07 = Quality Inspection.**
+
+## Features (V07)
+
+- Camera-scoped profiles in PostgreSQL (`inspection_profiles`, `inspection_regions`, `defect_categories`, `inspection_profile_defect_categories`; Alembic `003_create_quality_inspection`)
+- `InspectionModel` ABC + scripted fixture adapter (explicit test observations, never random, never a real model; refused in production)
+- Honest no-model behavior: an inspection attempt without a configured model decides `ERROR` (`INSPECTION_MODEL_NOT_CONFIGURED`), never PASS
+- `DecisionPolicy` with configurable fail/review thresholds, fail severities, required regions, and missing-evidence behavior; every decision carries a human-readable reason
+- Observation filtering: model capability set, per-profile category allowlist, category review thresholds, uncatalogued-code placeholders, bounded observation count
+- Quality events with V05-style lifecycle (dedupe, stable IDs, grace resolution, suppression) in a separate domain: `QUALITY_FAIL`/`QUALITY_REVIEW`/`QUALITY_ERROR` + per-defect `DEFECT_DETECTED`
+- `GET /api/v1/quality/status`, profile + category CRUD, bounded latest/results/events endpoints; runtime results never touch PostgreSQL
+- WS `quality_event` / `quality_result` added without changing any V02–V06 message
+- Quality page: profile management, defect-category selection, normalized region editor, latest decision with observations, event list with suppression
+- Documented non-claims: framework only (no defect-detection claims), uncalibrated confidence scores, no image storage, operator-supplied product IDs only
 
 ## Features (V06)
 
@@ -163,5 +184,6 @@ docker compose up --build
 - **V03** — AI inference & detection (V03 = detection, V04 = tracking)
 - **V04** — multi-object tracking
 - **V05** — safety intelligence foundations
-- **V06** — restricted zones & advanced proximity (this release)
-- **V07+** — quality/perception, risk, incidents, analytics
+- **V06** — restricted zones & advanced proximity
+- **V07** — quality inspection framework (this release)
+- **V08+** — trained defect models, perception, risk, incidents, analytics

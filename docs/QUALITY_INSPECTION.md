@@ -79,8 +79,7 @@ threshold overrides.
 
 ```text
 confidence >= fail_threshold and severity in fail_severities        → FAIL
-review_threshold <= confidence < fail_threshold
-    and severity in review_severities                               → REVIEW
+confidence >= review_threshold without meeting fail criteria       → REVIEW
 no qualifying defect                                               → PASS
 required region produced no evidence                               → REVIEW (default) | FAIL | IGNORE
 model missing / not ready / raised / invalid config                → ERROR
@@ -89,7 +88,24 @@ model missing / not ready / raised / invalid config                → ERROR
 Thresholds are always read from configuration — no production values are
 hard-coded. `decision_reason` explains every decision, e.g.
 `FAIL: HIGH severity CRACK observation (confidence 0.97) exceeded fail
-threshold 0.60`.
+threshold 0.60`. ERROR reasons are prefixed with the stable error code, e.g.
+`INSPECTION_MODEL_NOT_CONFIGURED: no inspection model configured ...`.
+
+## Observation filtering
+
+Before the policy runs, the engine filters raw model output:
+
+- Codes outside the model's declared `supports()` set are dropped.
+- A profile with explicit category associations is an allowlist: unassociated
+  codes are dropped. A profile with no associations inspects every category
+  the model reports.
+- Associations marked `enabled: false` are skipped.
+- Observations below the category's effective review threshold (catalog
+  default or profile override) are dropped as informational noise.
+- Codes with no catalog entry map to an explicit `UNKNOWN_DEFECT`-style
+  placeholder (`"<Code> (uncatalogued)"`) — never a silent drop, never a
+  fabricated category.
+- Observations are capped at `QUALITY_MAX_OBSERVATIONS_PER_INSPECTION`.
 
 ## No-model behavior
 

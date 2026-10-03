@@ -217,8 +217,12 @@ def sync_camera_quality(
 
 def _build_regions(camera_id: str, profile_id: str, items: list[RegionCreate]) -> list[InspectionRegion]:
     regions: list[InspectionRegion] = []
+    seen: set[str] = set()
     for item in items:
         region_id = item.region_id or f"region-{uuid.uuid4().hex[:8]}"
+        if region_id in seen:
+            raise HTTPException(status_code=422, detail=f"duplicate region_id: {region_id}")
+        seen.add(region_id)
         geometry = item.geometry
         if item.region_type is RegionType.POLYGON and "points" not in geometry:
             geometry = {"points": []}
@@ -245,8 +249,13 @@ def _build_associations(
     catalog: dict[str, DefectCategory],
 ) -> list[ProfileDefectCategory]:
     associations: list[ProfileDefectCategory] = []
+    seen: set[str] = set()
     for code in defect_codes:
-        category = catalog.get(code.strip().upper())
+        normalized = code.strip().upper()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        category = catalog.get(normalized)
         if category is None:
             raise HTTPException(status_code=422, detail=f"unknown defect category code: {code}")
         associations.append(

@@ -97,7 +97,30 @@ Dashboard
   ratio/IoU thresholds. No calibration, depth, or metric distance.
 - See `docs/SPATIAL_SAFETY.md`.
 
-## Future volumes (explicitly NOT in V01–V06)
+## V07 — Implemented (quality inspection framework)
+
+- `backend/app/quality/`: `schemas.py` (profiles, regions, categories,
+  observations, decisions, events, sessions), `policy.py` (pure decision
+  functions), `regions.py` (ROI extraction + coordinate mapping, reuses V06
+  geometry), `inspection.py` (model ABC + error codes), `fixture.py`
+  (scripted test double), `registry.py` (honest model resolution),
+  `engine.py` (inspection, decisions, events, sessions, metrics),
+  `repository.py` (PG configuration), `ws.py` (message builders).
+- Configuration is persisted per camera (Alembic
+  `003_create_quality_inspection`); results, observations, events, and
+  sessions are runtime-only and never written to PG.
+- A missing model decides `ERROR` (`INSPECTION_MODEL_NOT_CONFIGURED`), never
+  PASS; the fixture adapter resolves only outside production.
+- Quality events (`QUALITY_FAIL`/`QUALITY_REVIEW`/`QUALITY_ERROR` +
+  observation-level `DEFECT_DETECTED`) reuse the V05 lifecycle pattern in a
+  separate domain — no safety-domain coupling.
+- Worker integration: sampled (`QUALITY_INSPECTION_INTERVAL_FRAMES`),
+  exception-isolated `_analyze_quality` stage; WS `quality_event` /
+  `quality_result`; `/quality` page with profile management + region editor.
+- Framework only — no claim that generic detectors find defects. See
+  `docs/QUALITY_INSPECTION.md`.
+
+## Future volumes (explicitly NOT in V01–V07)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -107,8 +130,9 @@ Dashboard
 | Multi-object tracking | done (V04) | native ByteTrack-compatible |
 | Safety detection | partial (V05) | geometry foundations |
 | Zones & advanced proximity | done (V06) | restricted-zone entry/exit/dwell, 3 relationships, image-space only |
-| PPE detection | planned (V07+) | helmet/vest — no V06 equivalent |
-| Quality inspection | planned | defect/anomaly |
+| Quality inspection framework | done (V07) | profiles/regions/categories/policy/events — no trained defect model |
+| Trained defect models | planned (V08+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
+| PPE detection | planned (V08+) | helmet/vest — no V07 equivalent |
 | Autonomous perception | planned | scene graph |
 | Risk engine | planned | scoring/thresholds |
 | Incident intelligence | planned | lifecycle/notifications |
