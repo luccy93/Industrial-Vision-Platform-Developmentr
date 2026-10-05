@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -198,6 +198,38 @@ class Settings(BaseSettings):
     autonomous_motion_speed_threshold: float = Field(default=0.02, ge=0.0, le=2.0)
     # Fractional bbox-area growth per second that counts as approaching.
     autonomous_approach_area_ratio: float = Field(default=0.02, ge=0.0, le=2.0)
+
+    # --- V09 event & risk intelligence (operational heuristics, not probabilities) ---
+    intelligence_enabled: bool = Field(default=True)
+    risk_low_threshold: float = Field(default=0.20, ge=0.0, le=1.0)
+    risk_medium_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    risk_high_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    risk_critical_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    event_correlation_window_seconds: float = Field(default=5.0, ge=0.0, le=300.0)
+    event_resolution_grace_seconds: float = Field(default=2.0, ge=0.0, le=300.0)
+    risk_base_score: float = Field(default=0.10, ge=0.0, le=1.0)
+    risk_severity_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    risk_persistence_weight: float = Field(default=0.15, ge=0.0, le=1.0)
+    risk_correlation_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    risk_confidence_weight: float = Field(default=0.15, ge=0.0, le=1.0)
+    intelligence_max_events_per_camera: int = Field(default=200, ge=1, le=10000)
+    intelligence_max_clusters_per_camera: int = Field(default=50, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def _validate_risk_threshold_order(self) -> Settings:
+        ordered = [
+            self.risk_low_threshold,
+            self.risk_medium_threshold,
+            self.risk_high_threshold,
+            self.risk_critical_threshold,
+        ]
+        if not (ordered[0] < ordered[1] < ordered[2] < ordered[3]):
+            raise ValueError(
+                "risk thresholds must be strictly ordered: "
+                "RISK_LOW_THRESHOLD < RISK_MEDIUM_THRESHOLD < "
+                "RISK_HIGH_THRESHOLD < RISK_CRITICAL_THRESHOLD"
+            )
+        return self
 
     @field_validator("spatial_proximity_strategy")
     @classmethod

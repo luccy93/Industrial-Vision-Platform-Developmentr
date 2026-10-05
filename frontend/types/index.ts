@@ -334,6 +334,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/zones", label: "Zones", note: "V06 spatial engine" },
   { href: "/quality", label: "Quality", note: "V07 inspection" },
   { href: "/autonomous", label: "Autonomous", note: "V08 perception" },
+  { href: "/intelligence", label: "Intelligence", note: "V09 event & risk" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -474,4 +475,68 @@ export type AutonomousStatus = {
       last_perception_at: string | null;
     }
   >;
+};
+
+// --- V09 event & risk intelligence ---
+
+export type UnifiedEvent = {
+  event_id: string;
+  source_event_id: string;
+  camera_id: string;
+  source_domain: string;
+  event_type: string;
+  severity: string;
+  status: string;
+  confidence: number;
+  risk_score: number;
+  priority: string;
+  timestamp: string;
+  first_seen: string;
+  last_seen: string;
+  track_ids: number[];
+  object_ids: string[];
+  related_event_ids: string[];
+  location: string | null;
+  message: string;
+  reason: string;
+};
+
+export type RiskFactorView = {
+  name: string;
+  value: number;
+  weight: number;
+  contribution: number;
+  reason: string;
+};
+
+export type RiskClusterView = {
+  cluster_id: string;
+  camera_id: string;
+  event_ids: string[];
+  track_ids: number[];
+  object_ids: string[];
+  source_domains: string[];
+  first_seen: string;
+  last_seen: string;
+  event_count: number;
+  risk_level: string;
+  risk_score: number;
+  priority: string;
+  status: string;
+  factors: RiskFactorView[];
+};
+
+export type IntelligenceStatus = {
+  engine_status: string;
+  active_events: number;
+  active_clusters: number;
+  highest_risk: {
+    risk_score: number;
+    risk_level: string;
+    confidence: number;
+  };
+  highest_priority: string;
+  metrics: Record<string, number>;
+  configuration: Record<string, number | string | boolean>;
+  domains: Record<string, { available: boolean; active_events: number }>;
 };
