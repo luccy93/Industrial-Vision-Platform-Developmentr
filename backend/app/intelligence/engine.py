@@ -350,6 +350,11 @@ class IntelligenceEngine:
 
     def _refresh_cluster(self, state: _CameraIntelState, cluster: RiskCluster, timestamp: datetime) -> None:
         members = self._cluster_members(state, cluster)
+        if not members:
+            # No touch: an emptied cluster must keep its last active time so
+            # the grace-based resolver can retire it instead of refreshing
+            # it alive forever.
+            return
         assessment = self._risk.assess_cluster(members, cluster.first_seen, timestamp=timestamp)
         cluster.risk_assessment = assessment
         worst_severity = UnifiedSeverity.INFO
@@ -399,7 +404,10 @@ class IntelligenceEngine:
                 state.clusters.items(),
                 key=lambda kv: (kv[1].status is UnifiedEventStatus.ACTIVE, kv[1].last_seen),
             )[0][0]
-            del state.clusters[victim]
+            evicted = state.clusters.pop(victim)
+            # Cap eviction preserves visibility: the cluster leaves the
+            # active set but stays readable in the recent ring.
+            state.recent_clusters.append(evicted)
 
     # ------------------------------------------------------------------
     # Reads
