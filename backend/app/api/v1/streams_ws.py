@@ -72,6 +72,7 @@ async def camera_stream_socket(
     safety_engine = getattr(websocket.app.state, "safety_engine", None)
     quality_engine = getattr(websocket.app.state, "quality_engine", None)
     autonomous_engine = getattr(websocket.app.state, "autonomous_engine", None)
+    intelligence_engine = getattr(websocket.app.state, "intelligence_engine", None)
     camera = repository.get(camera_id)
     if camera is None:
         await websocket.send_text(
@@ -96,6 +97,9 @@ async def camera_stream_socket(
     sent_results: set[str] = set()
     sent_perception: dict[str, str] = {}
     last_perception_id: str | None = None
+    sent_intelligence: dict[str, str] = {}
+    sent_clusters: dict[str, str] = {}
+    sent_risk: dict[str, tuple[str, str]] = {}
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -187,6 +191,50 @@ async def camera_stream_socket(
                     else:
                         message = lane_event_message(camera_id, event)
                     await websocket.send_text(json.dumps(message))
+            if intelligence_engine is not None:
+                # V09: unified-event deltas, cluster deltas (status or risk
+                # level changes re-publish so escalation is visible), and a
+                # per-camera highest-risk summary whenever it changes.
+                from backend.app.intelligence.ws import (
+                    intelligence_event_message,
+                    risk_cluster_message,
+                    risk_update_message,
+                )
+
+                for event in intelligence_engine.active_events(
+                    camera_id, 50
+                ) + intelligence_engine.recent_events(camera_id, 10):
+                    key = str(event.event_id)
+                    if sent_intelligence.get(key) == event.status.value:
+                        continue
+                    sent_intelligence[key] = event.status.value
+                    await websocket.send_text(json.dumps(intelligence_event_message(camera_id, event)))
+                clusters = list(intelligence_engine.active_clusters(camera_id, 50))
+                clusters += list(intelligence_engine.recent_clusters(camera_id, 10))
+                for cluster in clusters:
+                    key = (
+                        f"{cluster.cluster_id}:{cluster.status.value}:"
+                        f"{cluster.risk_assessment.risk_level.value}"
+                    )
+                    if sent_clusters.get(str(cluster.cluster_id)) == key:
+                        continue
+                    sent_clusters[str(cluster.cluster_id)] = key
+                    await websocket.send_text(json.dumps(risk_cluster_message(camera_id, cluster)))
+                latest = intelligence_engine.latest(camera_id)
+                if latest is not None:
+                    signature = (latest.highest_risk.risk_level.value, latest.highest_priority.value)
+                    if sent_risk.get(camera_id) != signature:
+                        sent_risk[camera_id] = signature
+                        await websocket.send_text(
+                            json.dumps(
+                                risk_update_message(
+                                    camera_id,
+                                    latest.highest_risk,
+                                    latest.highest_priority,
+                                    latest.timestamp.isoformat(),
+                                )
+                            )
+                        )
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(

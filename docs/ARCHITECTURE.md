@@ -145,7 +145,23 @@ Dashboard
 - Foundation only — no certified driving/ADAS safety, no meters. See
   `docs/AUTONOMOUS_PERCEPTION.md`.
 
-## Future volumes (explicitly NOT in V01–V08)
+## V09 — Implemented (event & risk intelligence)
+
+- `backend/app/intelligence/`: `schemas.py` (unified events, clusters,
+  assessments, taxonomy), `normalize.py` (4 active domain adapters, 3
+  reserved domains), `risk.py` (deterministic scoring, thresholds, priority),
+  `correlate.py` (link predicates, affinity groups), `engine.py`
+  (pull → normalize → dedupe → correlate → score), `ws.py` (message builders).
+- Reads V05/V06/V07/V08 event outputs; owns no detectors, trackers, geometry,
+  or models. No tables, no migration — all state in memory, bounded.
+- Unified identity `(camera, domain, source event)`; per-camera clusters on
+  shared identity/location/time; grace lifecycle with de-escalation.
+- Worker integration: `_analyze_intelligence` stage; WS `intelligence_event` /
+  `risk_cluster` / `risk_update`; `/intelligence` dashboard with live feed.
+- Heuristic scores only — no probabilities, no incident management. See
+  `docs/EVENT_RISK_INTELLIGENCE.md`.
+
+## Future volumes (explicitly NOT in V01–V09)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -157,11 +173,11 @@ Dashboard
 | Zones & advanced proximity | done (V06) | restricted-zone entry/exit/dwell, 3 relationships, image-space only |
 | Quality inspection framework | done (V07) | profiles/regions/categories/policy/events — no trained defect model |
 | Autonomous perception foundation | done (V08) | relative scene/motion/lanes/risk/BEV — no metric claims |
-| Trained defect models | planned (V09+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
-| Trained perception models | planned (V09+) | learned scene/lane/depth via V08 adapter boundaries |
-| PPE detection | planned (V09+) | helmet/vest |
-| Risk engine | planned | scoring/thresholds |
-| Incident intelligence | planned | lifecycle/notifications |
+| Event & risk intelligence | done (V09) | unified events, correlated clusters, explainable scores — no incident mgmt |
+| Trained defect models | planned (V10+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
+| Trained perception models | planned (V10+) | learned scene/lane/depth via V08 adapter boundaries |
+| PPE detection | planned (V10+) | helmet/vest |
+| Incident intelligence | planned (V10) | lifecycle/assignment/acknowledgement/notifications |
 | Full dashboard analytics | planned | live grid, overlays, charts |
 | AuthN/Z, multi-tenancy | planned | later hardening |
 | Metrics/tracing | planned | Prometheus/OTel |

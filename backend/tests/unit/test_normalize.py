@@ -125,8 +125,6 @@ def test_quality_result_pass_yields_none() -> None:
         profile_id="p-1",
         decision=QualityDecision.PASS,
         timestamp=utc(0),
-        first_seen=utc(0),
-        last_seen=utc(0),
     )
     assert QualityEventAdapter().normalize_result(result) is None
 
@@ -140,8 +138,6 @@ def test_quality_result_fail_normalizes() -> None:
         decision=QualityDecision.FAIL,
         decision_reason="crack found",
         timestamp=utc(0),
-        first_seen=utc(0),
-        last_seen=utc(0),
         regions_evaluated=["region-1"],
     )
     unified = QualityEventAdapter().normalize_result(result)

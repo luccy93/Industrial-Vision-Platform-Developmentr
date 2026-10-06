@@ -118,6 +118,16 @@ stored/serialized values are always uppercase. Tune the decision policy
 against scripted fixture observations in `backend/tests/quality_helpers.py`.
 Full guide: `docs/QUALITY_INSPECTION.md`.
 
+## Intelligence tuning (V09)
+
+`INTELLIGENCE_*` / `RISK_*` / `EVENT_*` in `.env.example`: enable flag, four
+ordered risk thresholds, correlation window, resolution grace, base score plus
+four documented factor weights (severity, persistence, correlation,
+confidence), per-camera event/cluster caps. Scores are deterministic functions
+of these values — tune against real domain engines driven with synthetic
+tracks and scripted fixtures in `backend/tests/intelligence_helpers.py`
+(fixed-epoch clock). Full guide: `docs/EVENT_RISK_INTELLIGENCE.md`.
+
 ## Autonomous tuning (V08)
 
 `AUTONOMOUS_*` in `.env.example`: enable flag, model-adapter names (empty =

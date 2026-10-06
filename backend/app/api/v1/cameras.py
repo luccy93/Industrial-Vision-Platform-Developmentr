@@ -158,6 +158,7 @@ def delete_camera(
     _drop_spatial(request, camera_id)
     _drop_quality(request, camera_id)
     _drop_autonomous(request, camera_id)
+    _drop_intelligence(request, camera_id)
     if not repository.delete(camera_id):
         raise HTTPException(status_code=404, detail="camera not found")
     return {"deleted": camera_id}
@@ -324,6 +325,40 @@ def _drop_autonomous(request: Request, camera_id: str) -> None:
         logger.debug("autonomous cleanup failed for %s", camera_id, exc_info=True)
 
 
+def _intelligence_engine(request: Request) -> Any:
+    from backend.app.intelligence.engine import IntelligenceEngine
+
+    engine = getattr(request.app.state, "intelligence_engine", None)
+    return engine if isinstance(engine, IntelligenceEngine) else None
+
+
+def _reset_intelligence(request: Request, camera_id: str) -> None:
+    """Drop per-camera intelligence state (unified events and clusters).
+
+    A restarted stream invalidates the source events V09 correlates, so
+    derived intelligence must not survive; there is no stored configuration
+    to reload.
+    """
+    engine = _intelligence_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+    except Exception:
+        logger.debug("intelligence reset failed for %s", camera_id, exc_info=True)
+
+
+def _drop_intelligence(request: Request, camera_id: str) -> None:
+    """Forget a camera's intelligence state (memory-only, nothing to delete)."""
+    engine = _intelligence_engine(request)
+    if engine is None:
+        return
+    try:
+        engine.reset_camera(camera_id)
+    except Exception:
+        logger.debug("intelligence cleanup failed for %s", camera_id, exc_info=True)
+
+
 def _attach_inference(request: Request, camera_id: str, frame_source: object) -> None:
     """Best-effort: inference problems must never fail stream startup."""
     try:
@@ -348,6 +383,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
         _reset_spatial(request, camera_id)
         _reset_quality(request, camera_id)
         _reset_autonomous(request, camera_id)
+        _reset_intelligence(request, camera_id)
         worker = supervisor.attach(  # type: ignore[arg-type]
             camera_id,
             model_manager,
@@ -356,6 +392,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             safety_engine=safety_engine,
             quality_engine=quality_engine,
             autonomous_engine=autonomous_engine,
+            intelligence_engine=_intelligence_engine(request),
         )
         worker.start()
     except Exception:
@@ -406,6 +443,7 @@ def stop_stream(
     _reset_spatial(request, camera_id)
     _reset_quality(request, camera_id)
     _reset_autonomous(request, camera_id)
+    _reset_intelligence(request, camera_id)
     return {"camera_id": camera_id, "state": manager.state.value}
 
 

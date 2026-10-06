@@ -42,6 +42,31 @@ and estimates, never meters or certified collision times**.
 **V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.
 V06 = Restricted Zones & Advanced Proximity. V07 = Quality Inspection.
 V08 = Autonomous Perception.**
+V09 adds the **event & risk intelligence engine** — an orchestration layer
+above V05/V06/V07/V08 that normalizes domain events into canonical
+`UnifiedEvent`s, correlates them into `RiskCluster`s on shared
+identity/location/time, and scores everything with explainable risk factors
+(`severity`, `persistence`, `correlation`, `confidence`). Scores are
+normalized operational heuristics, never probabilities; there are no
+suppression or incident-management endpoints (V10 owns those). Read-only
+intelligence APIs + WebSocket `intelligence_event`/`risk_cluster`/
+`risk_update`, and an Intelligence dashboard with timeline, cluster cards,
+and live feed.
+**V09 = Event & Risk Intelligence.**
+
+## Features (V09)
+
+- Canonical `UnifiedEvent` model (source-preserving IDs, camera, domain, taxonomy type, severity, lifecycle, tracks/objects, location, evidence)
+- Seven-domain taxonomy (SAFETY/SPATIAL/QUALITY/AUTONOMOUS active; TRACKING/PERCEPTION/SYSTEM reserved, never synthesized)
+- Deterministic adapters per active domain (SPATIAL split by rule metadata, V06 precedent); PASS results and missing identity handled honestly
+- Deterministic `RiskEngine`: documented formula, clamped scores, named factors with contributions, configurable ordered thresholds
+- Priority mapping (`NONE→P4 … CRITICAL→P0`) with HIGH/CRITICAL severity floor
+- Correlation on shared identity or co-located affinity inside the time window — same camera alone never links; per-camera clusters only
+- Lifecycle with grace (ACTIVE→RESOLVED, passive SUPPRESSED mirror, no oscillation); bounded memory with deterministic eviction
+- `GET /api/v1/intelligence/status` (dependency availability, totals, config), per-camera events/clusters/risk endpoints — read-only, bounded
+- WS `intelligence_event` / `risk_cluster` / `risk_update` added without changing any V01–V08 message
+- Intelligence page: engine status, highest-risk banner, domain filter, cluster cards with factors, timeline, live feed with reconnect + polling fallback
+- Documented non-claims: heuristic scores (not probabilities/forecasts), no incident management, no cross-camera identity
 
 ## Features (V08)
 
@@ -210,5 +235,6 @@ docker compose up --build
 - **V05** — safety intelligence foundations
 - **V06** — restricted zones & advanced proximity
 - **V07** — quality inspection framework
-- **V08** — autonomous perception foundation (this release)
-- **V09+** — trained perception models, risk, incidents, analytics
+- **V08** — autonomous perception foundation
+- **V09** — event & risk intelligence (this release)
+- **V10+** — incident management, trained models, analytics

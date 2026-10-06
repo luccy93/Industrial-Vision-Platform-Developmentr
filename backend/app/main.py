@@ -202,6 +202,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         depth_estimator=resolve_depth_estimator(settings),
     )
 
+    # V09: event & risk intelligence orchestration over the V05/V06 safety,
+    # V07 quality, and V08 autonomous engines. Reads their event outputs;
+    # owns no detectors, trackers, or models.
+    from backend.app.intelligence.engine import IntelligenceEngine
+
+    app.state.intelligence_engine = IntelligenceEngine(
+        settings,
+        safety_engine=app.state.safety_engine,
+        quality_engine=app.state.quality_engine,
+        autonomous_engine=app.state.autonomous_engine,
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -238,6 +250,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.autonomous import router as autonomous_router
 
     app.include_router(autonomous_router)
+    from backend.app.api.v1.intelligence import router as intelligence_router
+
+    app.include_router(intelligence_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:
