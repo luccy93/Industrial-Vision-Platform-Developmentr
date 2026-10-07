@@ -215,6 +215,21 @@ class Settings(BaseSettings):
     intelligence_max_events_per_camera: int = Field(default=200, ge=1, le=10000)
     intelligence_max_clusters_per_camera: int = Field(default=50, ge=1, le=1000)
 
+    # --- V10 incident management (operational records, PostgreSQL-backed) ---
+    incidents_enabled: bool = Field(default=True)
+    incident_min_priority: str = Field(default="P2")
+    incident_auto_resolve_enabled: bool = Field(default=True)
+    incident_auto_resolve_grace_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
+    incident_timeline_update_threshold_seconds: float = Field(default=5.0, ge=0.0, le=3600.0)
+
+    @field_validator("incident_min_priority")
+    @classmethod
+    def _normalize_incident_min_priority(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in ("P0", "P1", "P2", "P3", "P4"):
+            raise ValueError("INCIDENT_MIN_PRIORITY must be one of P0|P1|P2|P3|P4")
+        return normalized
+
     @model_validator(mode="after")
     def _validate_risk_threshold_order(self) -> Settings:
         ordered = [

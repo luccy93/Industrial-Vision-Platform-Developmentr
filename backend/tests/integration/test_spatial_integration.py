@@ -40,7 +40,7 @@ def _spatial(client: Any) -> SpatialEngine:
 
 
 def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """The migration chain applies and reverses cleanly (002 zones, 003 quality, 004 autonomous)."""
+    """The migration chain applies and reverses cleanly (002 zones, 003 quality, 004 autonomous, 005 incidents)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -48,9 +48,27 @@ def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  
     config.set_main_option("script_location", str(_REPO_ROOT / "backend" / "alembic"))
 
     command.upgrade(config, "head")
-    assert {"cameras", "zones", "inspection_profiles", "autonomous_perception_profiles"} <= _tables(url)
+    assert {
+        "cameras",
+        "zones",
+        "inspection_profiles",
+        "autonomous_perception_profiles",
+        "incidents",
+        "incident_events",
+        "incident_timeline",
+        "incident_evidence",
+        "incident_assignments",
+        "incident_counters",
+    } <= _tables(url)
 
-    # V08 (004) reverses first: autonomous tables go, quality stays.
+    # V10 (005) reverses first: incident tables go, autonomous stays.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "incidents" not in remaining
+    assert "incident_timeline" not in remaining
+    assert "autonomous_perception_profiles" in remaining
+
+    # V08 (004) reverses next: autonomous tables go, quality stays.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "autonomous_perception_profiles" not in remaining
@@ -69,7 +87,7 @@ def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  
     assert "cameras" in remaining
 
     command.upgrade(config, "head")
-    assert {"zones", "inspection_profiles", "autonomous_perception_profiles"} <= _tables(url)
+    assert {"zones", "inspection_profiles", "autonomous_perception_profiles", "incidents"} <= _tables(url)
 
 
 def _seed_camera_and_zone(test_settings: Any, camera_id: str = "cam-lifecycle") -> None:

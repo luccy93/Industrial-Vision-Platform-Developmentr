@@ -335,6 +335,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/quality", label: "Quality", note: "V07 inspection" },
   { href: "/autonomous", label: "Autonomous", note: "V08 perception" },
   { href: "/intelligence", label: "Intelligence", note: "V09 event & risk" },
+  { href: "/incidents", label: "Incidents", note: "V10 management" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -539,4 +540,114 @@ export type IntelligenceStatus = {
   metrics: Record<string, number>;
   configuration: Record<string, number | string | boolean>;
   domains: Record<string, { available: boolean; active_events: number }>;
+};
+
+// --- V10 incident management ---
+
+export type IncidentStatus =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "INVESTIGATING"
+  | "MITIGATED"
+  | "RESOLVED"
+  | "CLOSED";
+
+export type IncidentCategory =
+  | "SAFETY"
+  | "SECURITY"
+  | "QUALITY"
+  | "COLLISION"
+  | "SPATIAL"
+  | "OPERATIONAL"
+  | "SYSTEM"
+  | "UNKNOWN";
+
+export type IncidentPriority = "P0" | "P1" | "P2" | "P3" | "P4";
+
+export type IncidentSummary = {
+  id: string;
+  incident_number: string;
+  camera_id: string;
+  title: string;
+  status: IncidentStatus;
+  category: IncidentCategory;
+  priority: IncidentPriority;
+  severity: string;
+  risk_level: string;
+  risk_score: number;
+  assigned_to: string | null;
+  source: string;
+  first_seen: string;
+  last_seen: string;
+  created_at: string;
+};
+
+export type TimelineEntryView = {
+  id: string;
+  event_type: string;
+  actor_id: string | null;
+  actor_type: string;
+  message: string;
+  previous_state: string | null;
+  new_state: string | null;
+  timestamp: string;
+};
+
+export type EvidenceView = {
+  id: string;
+  camera_id: string;
+  evidence_type: string;
+  uri: string;
+  timestamp: string;
+  frame_id: string | null;
+  description: string;
+  checksum: string | null;
+  created_at: string;
+};
+
+export type LinkedEventView = {
+  event_id: string;
+  event_type: string;
+  source_domain: string;
+  is_primary: boolean;
+  created_at: string;
+};
+
+export type IncidentDetail = {
+  incident: IncidentSummary & {
+    description: string;
+    source_cluster_id: string | null;
+    primary_event_id: string | null;
+    updated_at: string;
+    acknowledged_at: string | null;
+    resolved_at: string | null;
+    closed_at: string | null;
+    metadata: Record<string, unknown>;
+  };
+  timeline: TimelineEntryView[];
+  linked_events: LinkedEventView[];
+  evidence: EvidenceView[];
+  assignment: {
+    assigned_to: string | null;
+    history: Array<{
+      assignee: string | null;
+      previous_assignee: string | null;
+      actor_id: string | null;
+      timestamp: string;
+    }>;
+  };
+  risk_summary: {
+    risk_level: string;
+    risk_score: number;
+    priority: string;
+    severity: string;
+  };
+  allowed_actions: string[];
+};
+
+export type IncidentListResponse = {
+  incidents: IncidentSummary[];
+  total: number;
+  page: number;
+  page_size: number;
 };

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.core.config import get_settings
 from backend.app.models import (
     autonomous_orm,  # noqa: F401 (registers the autonomous profiles table)
+    incident_orm,  # noqa: F401 (registers the incident tables)
     quality_orm,  # noqa: F401 (registers the quality tables)
     zone_orm,  # noqa: F401 (registers the zones table)
 )
