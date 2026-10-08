@@ -53,6 +53,33 @@ intelligence APIs + WebSocket `intelligence_event`/`risk_cluster`/
 `risk_update`, and an Intelligence dashboard with timeline, cluster cards,
 and live feed.
 **V09 = Event & Risk Intelligence.**
+**V03 = Detection. V04 = Tracking. V05 = Industrial Safety Intelligence.
+V06 = Restricted Zones & Advanced Proximity. V07 = Quality Inspection.
+V08 = Autonomous Perception. V09 = Event & Risk Intelligence.**
+V10 adds the **incident management layer** — an operational layer above V09
+that turns eligible risk clusters into tracked incidents (`INC-YYYY-XXXXXX`)
+with an explicit lifecycle (OPEN → ACKNOWLEDGED/INVESTIGATING → MITIGATED →
+RESOLVED → CLOSED, terminal; no reopen, never auto-close), operator
+assignment/escalation/notes, resolution reasons, evidence metadata, and an
+append-only timeline. Automatic creation dedupes on
+`(camera_id, source_cluster_id)`; quiet OPEN incidents auto-resolve after a
+configurable grace. Six PostgreSQL tables (Alembic `005`), 16 REST endpoints
++ 7 WebSocket message types, and filterable `/incidents` + `/incidents/[id]`
+pages with state-gated actions. No authentication/RBAC (V16 owns that).
+**V10 = Incident Management.**
+
+## Features (V10)
+
+- Operational incidents from V09 risk clusters: `INC-YYYY-XXXXXX` numbering (atomic counter), category precedence (AUTONOMOUS→COLLISION, QUALITY→QUALITY, SPATIAL→SPATIAL, SAFETY→SAFETY), priority inherited from cluster, dedupe on `(camera_id, source_cluster_id)` backed by a partial unique index
+- Explicit lifecycle OPEN → ACKNOWLEDGED/INVESTIGATING → MITIGATED → RESOLVED → CLOSED (terminal; no REOPENED, never auto-close); violations are HTTP 409 with structured `{code, current_status, attempted_status}`
+- Operator actions: assignment with history, escalation to any priority with mandatory reason (up or down), notes/findings/actions/observations, mitigation and resolution reasons, terminal closure with reason
+- Auto-resolve only for OPEN incidents after a configurable grace once the cluster goes quiet; acknowledgement and investigation are operator-owned
+- Evidence metadata only (type/URI/frame/description/checksum) — V10 uploads nothing; deletion leaves a timeline entry; timeline is append-only across 14 event types
+- 16 REST endpoints (list with status/priority/severity/category/camera/assignee/risk/time filters + pagination, manual create, detail, PATCH title/description/metadata, 9 actions, evidence CRUD) under `/api/v1/incidents`
+- WS `incident_created` / `incident_updated` / `incident_status_changed` / `incident_assigned` / `incident_resolved` / `incident_closed` / `incident_evidence_added` with bounded payloads; all V01–V09 channels preserved
+- Incidents pages: filterable paginated queue with manual creation, detail with summary/risk/timeline/linked events/evidence/assignment and state-gated action buttons
+- Six PostgreSQL tables (`incidents`, `incident_events`, `incident_timeline`, `incident_evidence`, `incident_assignments`, `incident_counters`); Alembic `005_create_incident_management`; `INCIDENTS_*` config in `.env.example`
+- Documented non-claims: no auth/RBAC (V16), no risk re-scoring, no cross-camera identity
 
 ## Features (V09)
 
@@ -236,5 +263,6 @@ docker compose up --build
 - **V06** — restricted zones & advanced proximity
 - **V07** — quality inspection framework
 - **V08** — autonomous perception foundation
-- **V09** — event & risk intelligence (this release)
-- **V10+** — incident management, trained models, analytics
+- **V09** — event & risk intelligence
+- **V10** — incident management (this release)
+- **V11+** — trained models, analytics

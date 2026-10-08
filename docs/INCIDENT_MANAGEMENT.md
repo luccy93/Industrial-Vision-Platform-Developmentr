@@ -92,10 +92,44 @@ priority, auto-resolve toggle and grace, timeline update threshold.
 
 ## API & WebSocket
 
-Read `docs/ARCHITECTURE.md` for route inventory. Lifecycle violations return
-HTTP 409 with `{current_status, attempted_status}`; unknown incidents 404;
-validation failures 422. WebSocket carries seven incident message types with
-bounded payloads; all V01–V09 channels are preserved.
+```text
+GET    /api/v1/incidents                        filterable, paginated list
+POST   /api/v1/incidents                        manual create (201)
+GET    /api/v1/incidents/{id}                   detail (summary, timeline,
+                                                  linked events, evidence,
+                                                  assignment, risk, actions)
+PATCH  /api/v1/incidents/{id}                   title/description/metadata
+                                                  (priority/category excluded)
+POST   /api/v1/incidents/{id}/acknowledge
+POST   /api/v1/incidents/{id}/investigate
+POST   /api/v1/incidents/{id}/mitigate          reason required
+POST   /api/v1/incidents/{id}/resolve           reason enum required
+POST   /api/v1/incidents/{id}/close             closure reason required
+POST   /api/v1/incidents/{id}/assign            assignee required
+POST   /api/v1/incidents/{id}/unassign
+POST   /api/v1/incidents/{id}/escalate          target priority + reason
+                                                  required (up or down)
+POST   /api/v1/incidents/{id}/notes             message + kind
+GET    /api/v1/incidents/{id}/evidence
+POST   /api/v1/incidents/{id}/evidence          uri required (201)
+DELETE /api/v1/incidents/{id}/evidence/{eid}    metadata only; NOTE_ADDED row
+```
+
+List filters: `status`, `priority`, `severity`, `category`, `camera_id`,
+`assigned_to`, `risk_level`, `created_from`, `created_to`, `page`,
+`page_size` (comma-separated multi-values accepted). Unknown filter values
+are HTTP 422, never silently ignored. Lifecycle violations return HTTP 409
+with `{code: "invalid_transition", current_status, attempted_status}`
+(operations on CLOSED incidents use `code: "invalid_state"`); unknown
+incidents 404; validation failures 422. Structured 409 details travel inside
+the platform error envelope under `error.details`.
+
+WebSocket (`/ws/cameras/{id}`) carries seven incident message types with
+bounded summary payloads (never timelines/evidence arrays), drained from the
+manager's change feed per connection cursor: `incident_created`,
+`incident_updated`, `incident_status_changed`, `incident_assigned`,
+`incident_resolved`, `incident_closed`, `incident_evidence_added`. All
+V01–V09 channels are preserved.
 
 ## Frontend
 

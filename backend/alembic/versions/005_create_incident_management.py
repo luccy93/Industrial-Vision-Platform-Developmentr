@@ -142,9 +142,7 @@ def downgrade() -> None:
     op.drop_table("incident_assignments")
     op.drop_index("ix_incident_evidence_incident_id", table_name="incident_evidence")
     op.drop_table("incident_evidence")
-    op.drop_index(
-        "ix_incident_timeline_incident_timestamp", table_name="incident_timeline"
-    )
+    op.drop_index("ix_incident_timeline_incident_timestamp", table_name="incident_timeline")
     op.drop_index("ix_incident_timeline_incident_id", table_name="incident_timeline")
     op.drop_table("incident_timeline")
     op.drop_index("ix_incident_events_incident_id", table_name="incident_events")

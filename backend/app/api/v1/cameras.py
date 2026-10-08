@@ -393,6 +393,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             quality_engine=quality_engine,
             autonomous_engine=autonomous_engine,
             intelligence_engine=_intelligence_engine(request),
+            incident_manager=getattr(request.app.state, "incident_manager", None),
         )
         worker.start()
     except Exception:

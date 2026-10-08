@@ -113,10 +113,20 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _handle_http(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:12]
+        detail = exc.detail
+        if isinstance(detail, dict):
+            # Structured details (e.g. invalid_transition) are preserved
+            # verbatim under `details` instead of being stringified.
+            code = "not_found" if exc.status_code == 404 else str(detail.get("code") or "http_error")
+            message = str(detail.get("message") or detail)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=error_envelope(code, message, request_id, detail),
+            )
         code = "not_found" if exc.status_code == 404 else "http_error"
         return JSONResponse(
             status_code=exc.status_code,
-            content=error_envelope(code, str(exc.detail), request_id),
+            content=error_envelope(code, str(detail), request_id),
         )
 
     @app.exception_handler(Exception)

@@ -129,7 +129,6 @@ tracks and scripted fixtures in `backend/tests/intelligence_helpers.py`
 (fixed-epoch clock). Full guide: `docs/EVENT_RISK_INTELLIGENCE.md`.
 
 ## Autonomous tuning (V08)
-
 `AUTONOMOUS_*` in `.env.example`: enable flag, model-adapter names (empty =
 honest `NOT_CONFIGURED`), per-subsystem feature flags, perception sampling
 interval, trajectory horizon/history, collision threshold/grace, object/event/
@@ -138,6 +137,18 @@ trajectory quantities are normalized image units per second — tune against
 synthetic V04 tracks with exact histories in
 `backend/tests/autonomous_helpers.py` (fixed-epoch clock, OpenCV-drawn lane
 frames). Full guide: `docs/AUTONOMOUS_PERCEPTION.md`.
+
+## Incident tuning (V10)
+
+`INCIDENTS_*` in `.env.example`: enable flag, minimum auto-create priority
+(`incident_min_priority`, P0–P4), auto-resolve toggle and grace seconds,
+timeline update threshold seconds. Raising the minimum priority shrinks the
+automatic queue to the most urgent clusters; lowering it admits P3/P4
+clusters. The grace only ever resolves `OPEN` incidents whose clusters went
+quiet — acknowledged/investigating work is operator-owned, and nothing is
+ever auto-closed. Manual incidents bypass the threshold entirely. Tune
+against real V09 engines driven with synthetic tracks in
+`backend/tests/incident_helpers.py` (fixed-epoch clock, in-process SQLite).
 
 ## Docker
 

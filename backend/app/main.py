@@ -214,6 +214,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         autonomous_engine=app.state.autonomous_engine,
     )
 
+    # V10: incident operations over V09 intelligence. Owns PostgreSQL-backed
+    # operational records; reads V09 public contracts, never private state.
+    from backend.app.incidents.manager import IncidentManager
+
+    app.state.incident_manager = IncidentManager(
+        settings,
+        app.state.session_factory,
+        intelligence_engine=app.state.intelligence_engine,
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -253,6 +263,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.intelligence import router as intelligence_router
 
     app.include_router(intelligence_router)
+    from backend.app.api.v1.incidents import router as incidents_router
+
+    app.include_router(incidents_router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict:

@@ -219,8 +219,10 @@ class IncidentRepository:
         metadata: dict[str, Any] | None = None,
         source_cluster_id: str | None = None,
         source_event_id: str | None = None,
+        source: str = "MANUAL",
     ) -> Incident:
-        """Create an operator-declared incident (``source = MANUAL``)."""
+        """Create an incident row. Manual incidents use ``source = MANUAL``;
+        the manager passes ``AUTOMATIC`` for V09-derived incidents."""
         incident = Incident(
             incident_number="TEMPORARY",
             camera_id=camera_id or "manual",
@@ -230,7 +232,7 @@ class IncidentRepository:
             priority=_coerce_enum(priority, EventPriority, "priority"),
             source_cluster_id=source_cluster_id,
             primary_event_id=source_event_id,
-            source="MANUAL",
+            source=source,
             metadata=dict(metadata or {}),
         )
         now = utcnow()
@@ -250,7 +252,7 @@ class IncidentRepository:
                 priority=incident.priority.value,
                 status=IncidentStatus.OPEN.value,
                 category=incident.category.value,
-                source="MANUAL",
+                source=source,
                 first_seen=now,
                 last_seen=now,
                 created_at=now,

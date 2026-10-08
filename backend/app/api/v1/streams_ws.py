@@ -100,6 +100,7 @@ async def camera_stream_socket(
     sent_intelligence: dict[str, str] = {}
     sent_clusters: dict[str, str] = {}
     sent_risk: dict[str, tuple[str, str]] = {}
+    sent_incidents: dict[str, int] = {}
     try:
         while True:
             manager = supervisor.get(camera_id)
@@ -235,6 +236,24 @@ async def camera_stream_socket(
                                 )
                             )
                         )
+            incident_manager = getattr(websocket.app.state, "incident_manager", None)
+            if incident_manager is not None:
+                # V10: incident change feed drained per connection cursor.
+                # Bounded payloads only; full detail stays behind the REST API.
+                from backend.app.incidents.ws import BUILDERS as _incident_builders
+
+                cursor = sent_incidents.get(camera_id, 0)
+                changes = incident_manager.recent_changes(cursor, limit=20)
+                for change in changes:
+                    cursor = max(cursor, int(change.get("seq", cursor)))
+                    builder = _incident_builders.get(str(change.get("kind", "")))
+                    if builder is None:
+                        continue
+                    incident = incident_manager.repository.get_incident(str(change.get("incident_id", "")))
+                    if incident is None:
+                        continue
+                    await websocket.send_text(json.dumps(builder(incident, change)))
+                sent_incidents[camera_id] = cursor
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
                     await websocket.send_text(

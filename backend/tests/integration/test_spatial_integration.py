@@ -39,8 +39,10 @@ def _spatial(client: Any) -> SpatialEngine:
     return _state(client).spatial_engine
 
 
-def test_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """The migration chain applies and reverses cleanly (002 zones, 003 quality, 004 autonomous, 005 incidents)."""
+def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
+    tmp_path, monkeypatch
+) -> None:
+    """The migration chain applies and reverses cleanly (002-005)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)

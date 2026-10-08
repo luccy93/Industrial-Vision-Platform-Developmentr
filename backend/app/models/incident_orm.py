@@ -13,13 +13,13 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from backend.app.domain.common import utcnow
+from backend.app.models.camera_orm import Base
+
 # Incident states that block automatic creation of a duplicate incident for
 # the same source cluster. Shared with the Alembic migration so both schema
 # paths enforce the identical predicate.
 _OPEN_CLUSTER_WHERE = "status IN ('OPEN', 'ACKNOWLEDGED', 'INVESTIGATING', 'MITIGATED')"
-
-from backend.app.domain.common import utcnow
-from backend.app.models.camera_orm import Base
 
 
 class IncidentORM(Base):

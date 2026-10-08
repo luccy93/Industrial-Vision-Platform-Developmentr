@@ -161,7 +161,28 @@ Dashboard
 - Heuristic scores only — no probabilities, no incident management. See
   `docs/EVENT_RISK_INTELLIGENCE.md`.
 
-## Future volumes (explicitly NOT in V01–V09)
+## V10 — Implemented (incident management)
+
+- `backend/app/incidents/`: `schemas.py` (incident/timeline/evidence/
+  assignment contracts, state machine-adjacent enums), `statemachine.py`
+  (explicit TRANSITIONS, allowed_actions, category precedence),
+  `repository.py` (6-table PostgreSQL access, atomic numbering, dedupe),
+  `manager.py` (single writer: V09 sync, lifecycle ops, change feed),
+  `ws.py` (7 message builders).
+- Six tables via Alembic `005_create_incident_management`
+  (`incidents`, `incident_events`, `incident_timeline`, `incident_evidence`,
+  `incident_assignments`, `incident_counters`); partial unique index
+  `(camera_id, source_cluster_id)` over open states in both ORM and
+  migration; incidents survive restarts (no reset/drop hooks).
+- Worker integration: exception-isolated `_sync_incidents` stage after
+  `_analyze_intelligence`; WS 7 incident messages on `/ws/cameras/{id}`;
+  `/incidents` (filterable, paginated, manual create) + `/incidents/[id]`
+  (summary, risk, timeline, linked events, evidence, assignment,
+  state-gated actions).
+- No auth/RBAC (V16); no auto-close; no reopen; no risk re-scoring. See
+  `docs/INCIDENT_MANAGEMENT.md`.
+
+## Future volumes (explicitly NOT in V01–V10)
 
 | Stage | Status | Notes |
 |---|---|---|
@@ -174,10 +195,11 @@ Dashboard
 | Quality inspection framework | done (V07) | profiles/regions/categories/policy/events — no trained defect model |
 | Autonomous perception foundation | done (V08) | relative scene/motion/lanes/risk/BEV — no metric claims |
 | Event & risk intelligence | done (V09) | unified events, correlated clusters, explainable scores — no incident mgmt |
+| Incident management | done (V10) | lifecycle/assignment/evidence/timeline, auto-create + auto-resolve, WS feed |
 | Trained defect models | planned (V10+) | specialized YOLO/segmentation/anomaly via `InspectionModel` |
 | Trained perception models | planned (V10+) | learned scene/lane/depth via V08 adapter boundaries |
 | PPE detection | planned (V10+) | helmet/vest |
-| Incident intelligence | planned (V10) | lifecycle/assignment/acknowledgement/notifications |
+| Incident intelligence | done (V10) | lifecycle/assignment/acknowledgement/timeline/evidence |
 | Full dashboard analytics | planned | live grid, overlays, charts |
 | AuthN/Z, multi-tenancy | planned | later hardening |
 | Metrics/tracing | planned | Prometheus/OTel |

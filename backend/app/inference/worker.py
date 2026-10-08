@@ -52,6 +52,7 @@ class InferenceWorker:
         quality_engine: Any = None,
         autonomous_engine: Any = None,
         intelligence_engine: Any = None,
+        incident_manager: Any = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
@@ -61,6 +62,7 @@ class InferenceWorker:
         self._quality_engine = quality_engine
         self._autonomous_engine = autonomous_engine
         self._intelligence_engine = intelligence_engine
+        self._incident_manager = incident_manager
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
@@ -77,6 +79,7 @@ class InferenceWorker:
         self._autonomous_frames = 0
         self._autonomous_skipped = 0
         self._intelligence_latest: object = None
+        self._incident_syncs = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -197,6 +200,7 @@ class InferenceWorker:
         self._analyze_quality(frame, result)
         self._analyze_autonomous(tracks, frame, result)
         self._analyze_intelligence(result)
+        self._sync_incidents(result)
 
     def _analyze_safety(self, tracks: list, result: InferenceResult) -> None:
         """V05 stage: tracking output → safety events (isolated failures)."""
@@ -290,6 +294,24 @@ class InferenceWorker:
         with self._lock:
             self._intelligence_latest = intel
 
+    def _sync_incidents(self, result: InferenceResult) -> None:
+        """V10 stage: V09 intelligence → incident sync (isolated failures).
+
+        IncidentManager debounces internally (skips cameras with no new
+        intelligence output) and writes only on meaningful change, so this
+        stage never becomes a high-frequency database writer.
+        """
+        manager = self._incident_manager
+        if manager is None or not manager.enabled:
+            return
+        try:
+            manager.sync_camera(self.camera_id, result.timestamp)
+        except Exception as exc:
+            logger.warning("incident sync failed for %s: %s", self.camera_id, exc)
+            return
+        with self._lock:
+            self._incident_syncs += 1
+
     def _sleep(self, seconds: float) -> None:
         self._stop_event.wait(seconds)
 
@@ -344,6 +366,7 @@ class InferenceWorker:
                 "autonomous_skipped": self._autonomous_skipped,
                 "autonomous_result_held": self._autonomous_latest is not None,
                 "intelligence_result_held": self._intelligence_latest is not None,
+                "incident_syncs": self._incident_syncs,
             }
 
 
