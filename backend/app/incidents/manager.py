@@ -432,6 +432,12 @@ class IncidentManager:
         from backend.app.incidents.schemas import IncidentCategory
         from backend.app.intelligence.schemas import EventPriority
 
+        clean_title = str(title or "").strip()
+        if not clean_title:
+            raise ValueError("incident title must not be empty")
+        if len(clean_title) > 256:
+            raise ValueError("incident title exceeds 256 characters")
+
         try:
             category_value = (
                 category
@@ -447,7 +453,7 @@ class IncidentManager:
         # request-scoped session); the manager never guesses databases.
         incident = self._repository.create_manual(
             camera_id=camera_id,
-            title=title,
+            title=clean_title,
             description=description,
             category=category_value,
             priority=priority_value,
