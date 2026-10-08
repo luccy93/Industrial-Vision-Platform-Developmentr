@@ -8,7 +8,66 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# ----------------------------------------------------------------------
+# Centralized error-code registry (§13). New infrastructure errors use
+# UPPER_SNAKE codes. Domain codes keep their established lowercase values
+# (notably V10 `invalid_transition` / `invalid_state`) for backward
+# compatibility — never renamed, never silently changed.
+# ----------------------------------------------------------------------
+ERROR_CODES: dict[str, dict[str, Any]] = {
+    "VALIDATION_ERROR": {"status_code": 422, "message": "Request validation failed."},
+    "NOT_FOUND": {"status_code": 404, "message": "Resource not found."},
+    "CONFLICT": {"status_code": 409, "message": "Conflicting state."},
+    "INVALID_STATE": {"status_code": 409, "message": "Operation not allowed in the current state."},
+    "INVALID_TRANSITION": {"status_code": 409, "message": "Lifecycle transition not allowed."},
+    "DEPENDENCY_UNAVAILABLE": {"status_code": 503, "message": "A required dependency is unavailable."},
+    "SERVICE_NOT_READY": {"status_code": 503, "message": "Service is not ready to serve traffic."},
+    "TIMEOUT": {"status_code": 504, "message": "An internal operation timed out."},
+    "INTERNAL_ERROR": {"status_code": 500, "message": "An unexpected error occurred."},
+    # Established domain codes (frozen for compatibility):
+    "invalid_transition": {"status_code": 409, "message": "Lifecycle transition not allowed."},
+    "invalid_state": {"status_code": 409, "message": "Operation not allowed in the current state."},
+    "not_found": {"status_code": 404, "message": "Resource not found."},
+    "http_error": {"status_code": 500, "message": "An unexpected error occurred."},
+    "validation_error": {"status_code": 422, "message": "Request validation failed."},
+    "internal_error": {"status_code": 500, "message": "An unexpected error occurred."},
+}
+
+
+class ErrorDetail(BaseModel):
+    """Structured per-error details (free-form, JSON-safe)."""
+
+    model_config = {"extra": "allow"}
+
+    code: str = Field(min_length=1, max_length=128)
+    message: str = Field(default="", max_length=4096)
+
+
+class APIError(BaseModel):
+    """The inner `error` object of the envelope (§12)."""
+
+    model_config = {"extra": "allow"}
+
+    code: str = Field(min_length=1, max_length=128)
+    message: str = Field(default="", max_length=4096)
+    details: dict[str, Any] | None = None
+    request_id: str = Field(min_length=1, max_length=128)
+
+
+class ErrorEnvelope(BaseModel):
+    """Stable API error shape: {"error": {...}} (§12).
+
+    Documents the wire contract; rendering stays in `error_envelope()`
+    so the V01–V10 byte shape (notably: `details` omitted when empty)
+    is preserved exactly.
+    """
+
+    model_config = {"extra": "allow"}
+
+    error: APIError
 
 
 class AppError(Exception):
@@ -76,6 +135,63 @@ class ServiceUnavailableError(AppError):
     code = "service_unavailable"
     message = "A required service is unavailable."
     status_code = 503
+
+
+# ----------------------------------------------------------------------
+# Domain exceptions (§18). Business logic raises these instead of bare
+# ValueError / try/except Exception; the central handler maps them to
+# HTTP responses consistently. Subclasses carry explicit wire codes so
+# established domain codes are never silently changed.
+# ----------------------------------------------------------------------
+class DomainError(AppError):
+    """Base for typed domain failures (mapped centrally to HTTP)."""
+
+
+class ValidationDomainError(DomainError):
+    code = "validation_error"
+    message = "Domain validation failed."
+    status_code = 422
+
+
+class NotFoundDomainError(DomainError):
+    code = "not_found"
+    message = "Resource not found."
+    status_code = 404
+
+
+class ConflictDomainError(DomainError):
+    code = "http_error"
+    message = "Conflicting state."
+    status_code = 409
+
+
+class InvalidStateDomainError(DomainError):
+    code = "invalid_state"
+    message = "Operation not allowed in the current state."
+    status_code = 409
+
+
+class DependencyUnavailableError(DomainError):
+    code = "service_not_ready"
+    message = "A required dependency is unavailable."
+    status_code = 503
+
+
+class ServiceNotReadyError(DomainError):
+    code = "service_not_ready"
+    message = "Service is not ready to serve traffic."
+    status_code = 503
+
+
+def http_status_for_code(code: str) -> int:
+    """Look up the canonical HTTP status for a registry code (§13)."""
+    entry = ERROR_CODES.get(str(code))
+    if entry is None:
+        return 500
+    try:
+        return int(entry.get("status_code", 500))
+    except (TypeError, ValueError):
+        return 500
 
 
 def error_envelope(

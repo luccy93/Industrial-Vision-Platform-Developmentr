@@ -10,7 +10,6 @@ Exposes:
 from __future__ import annotations
 
 import time
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -224,6 +223,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         intelligence_engine=app.state.intelligence_engine,
     )
 
+    # V11: central lifecycle owner. Construction stays here (the test suite
+    # builds apps without a lifespan context); the lifespan and endpoints
+    # drive its phases. Starts in CREATED; lifespan moves it to READY.
+    from backend.app.runtime.manager import ApplicationRuntime
+
+    app.state.runtime = ApplicationRuntime()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -234,9 +240,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
-        request.state.request_id = uuid.uuid4().hex[:12]
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.state.request_id
+        from backend.app.core.request_context import (
+            REQUEST_ID_HEADER,
+            RequestContext,
+            reset_request_context,
+            sanitize_request_id,
+            set_request_context,
+        )
+
+        request_id = sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
+        request.state.request_id = request_id
+        token = set_request_context(
+            RequestContext(
+                request_id=request_id, method=request.method, path=request.url.path
+            )
+        )
+        try:
+            response = await call_next(request)
+        except BaseException:
+            reset_request_context(token)
+            raise
+        reset_request_context(token)
+        response.headers[REQUEST_ID_HEADER] = request_id
         return response
 
     register_exception_handlers(app)

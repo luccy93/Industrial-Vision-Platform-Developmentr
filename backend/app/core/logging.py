@@ -52,3 +52,47 @@ def configure_logging(level: str = "INFO") -> logging.Logger:
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
+
+
+def log_api_error(
+    logger: logging.Logger,
+    *,
+    request_id: str,
+    method: str,
+    path: str,
+    status: int,
+    latency_ms: float,
+    code: str = "",
+    message: str = "",
+) -> None:
+    """Structured API-error line (§16): request_id/method/path/status/latency."""
+    logger.warning(
+        "api_error request_id=%s method=%s path=%s status=%s latency_ms=%.2f code=%s message=%s",
+        request_id,
+        method,
+        path,
+        status,
+        max(0.0, float(latency_ms)),
+        code,
+        redact(str(message))[:512],
+    )
+
+
+def log_worker_error(
+    logger: logging.Logger,
+    *,
+    worker: str,
+    component: str,
+    error_type: str,
+    message: str = "",
+    camera_id: str | None = None,
+) -> None:
+    """Structured background-worker error line (§16). Never logs payloads."""
+    logger.warning(
+        "worker_error worker=%s component=%s error_type=%s camera_id=%s message=%s",
+        worker,
+        component,
+        error_type,
+        camera_id or "-",
+        redact(str(message))[:512],
+    )

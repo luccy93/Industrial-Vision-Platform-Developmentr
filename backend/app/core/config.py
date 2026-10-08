@@ -246,6 +246,56 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_cors_policy(self) -> Settings:
+        """Enforce the CORS strictness table (§37, §40–§41).
+
+        - wildcard + credentials is rejected in EVERY environment;
+        - production rejects wildcard origins regardless of credentials;
+        - production requires at least one explicit origin.
+        Invalid security configuration fails startup, never degrades to a
+        permissive fallback.
+        """
+        from backend.app.core.exceptions import ConfigurationError
+
+        origins = [str(o).strip() for o in (self.cors_allowed_origins or []) if str(o).strip()]
+        wildcard = "*" in origins
+        production = self.app_env == AppEnv.production
+        if wildcard and self.cors_allow_credentials:
+            raise ConfigurationError(
+                "CORS_ALLOWED_ORIGINS=['*'] with CORS_ALLOW_CREDENTIALS=true is forbidden "
+                "in every environment; configure explicit origins."
+            )
+        if production and wildcard:
+            raise ConfigurationError(
+                "CORS_ALLOWED_ORIGINS=['*'] is forbidden in production; configure explicit origins."
+            )
+        if production and not origins:
+            raise ConfigurationError("production requires at least one CORS_ALLOWED_ORIGINS entry.")
+        return self
+
+    def validate_startup(self) -> list[str]:
+        """Fail-fast startup validation (§40). Returns human-readable notes.
+
+        Raises :class:`ConfigurationError` on the first invalid value —
+        invalid configuration must never be silently replaced by defaults.
+        """
+        from backend.app.core.exceptions import ConfigurationError
+
+        notes: list[str] = []
+        if not str(self.database_url or "").strip():
+            raise ConfigurationError("DATABASE_URL must not be empty.")
+        if self.worker_heartbeat_timeout_seconds <= 0:
+            raise ConfigurationError("WORKER_HEARTBEAT_TIMEOUT_SECONDS must be positive.")
+        if not 1 <= self.websocket_queue_max_size <= 10000:
+            raise ConfigurationError("WEBSOCKET_QUEUE_MAX_SIZE must be in [1, 10000].")
+        if self.max_request_body_bytes < 1024:
+            raise ConfigurationError("MAX_REQUEST_BODY_BYTES must be >= 1024.")
+        # CORS policy itself raises ConfigurationError when violated.
+        notes.append(f"env={self.app_env.value}")
+        notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
+        return notes
+
     @field_validator("spatial_proximity_strategy")
     @classmethod
     def _normalize_strategy(cls, value: str) -> str:
@@ -270,6 +320,15 @@ class Settings(BaseSettings):
 
     # --- Realtime ---
     websocket_enabled: bool = Field(default=True)
+
+    # --- V11 backend hardening ---
+    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = Field(default=False)
+    worker_heartbeat_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    websocket_queue_max_size: int = Field(default=100, ge=1, le=10000)
+    websocket_heartbeat_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    websocket_shutdown_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    max_request_body_bytes: int = Field(default=1048576, ge=1024)
 
     # --- V02 video ingestion ---
     target_processing_fps: float = Field(default=10.0, ge=0.0)
