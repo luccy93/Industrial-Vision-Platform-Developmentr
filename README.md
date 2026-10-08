@@ -67,6 +67,29 @@ configurable grace. Six PostgreSQL tables (Alembic `005`), 16 REST endpoints
 + 7 WebSocket message types, and filterable `/incidents` + `/incidents/[id]`
 pages with state-gated actions. No authentication/RBAC (V16 owns that).
 **V10 = Incident Management.**
+V11 hardens the **FastAPI + WebSocket backend**: central application
+lifecycle (`CREATED → INITIALIZING → READY → DRAINING → STOPPED`), real
+`/live` + `/ready` (200/503) + component `/health` diagnostics, a stable
+error envelope with a code registry, request IDs honored and echoed,
+structured logging, managed-worker supervision with heartbeats, a
+lifecycle-boundary WebSocket manager (subscriptions, bounded prioritized
+queues, heartbeat, graceful shutdown), settings-driven CORS with
+production fail-fast, JSON body caps, and atomic incident transactions.
+No Redis, no auth/RBAC, no new domain features — resilience only.
+**V11 = Backend Hardening.**
+
+## Features (V11)
+
+- Central `ApplicationRuntime` lifecycle with ordered startup/shutdown phases, invalid-transition rejection, and idempotent shutdown
+- `GET /live` (process alive), `GET /ready` (200 ready / 503 not-ready via required checks: runtime, database `SELECT 1`, workers), `GET /health` + `GET /api/v1/health` (12 lightweight component diagnostics, secret-free)
+- Stable `{"error": {...}}` envelope with a centralized code registry; V10 `invalid_transition`/`invalid_state` preserved byte-for-byte; domain exceptions mapped centrally (422/404/409/503/500, no stack-trace leaks)
+- Inbound `X-Request-ID` honored when sane (bounded, sanitized) else regenerated; echoed on every response including errors; per-request context for logging (no identity — V16)
+- Managed-worker contract (states, snapshots, heartbeats, stale detection, bounded supervision); per-camera workers report heartbeats without thread-loop rewrites
+- WebSocket lifecycle boundary: registration, opt-in subscriptions (default feed unchanged), bounded prioritized per-client queues (lifecycle messages never silently dropped), heartbeat, safe disconnect, bounded graceful shutdown; all 22 V01–V10 wire types unchanged
+- Settings-driven CORS (wildcard+credentials rejected everywhere; production requires explicit origins; violations fail startup), JSON body caps (413 + envelope), OpenAPI summaries
+- Single-transaction incident lifecycle moves (state + timeline commit together); request sessions commit/rollback/close correctly; workers use independent sessions
+- V10 pagination contract preserved byte-for-byte (`{incidents, total, page, page_size}` — no `has_next`)
+- Documented non-claims: no Redis broker, no auth/RBAC (V16), no production rate limiting, no K8s/observability deployment, no new domain models
 
 ## Features (V10)
 

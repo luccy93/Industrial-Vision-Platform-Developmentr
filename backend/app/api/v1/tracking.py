@@ -34,7 +34,7 @@ def get_inference_supervisor(request: Request) -> InferenceSupervisor:
     return supervisor
 
 
-@router.get("/api/v1/tracking/status")
+@router.get("/api/v1/tracking/status", summary="Tracking engine status")
 def tracking_status(manager: TrackingManager = Depends(get_tracking_manager)) -> dict[str, Any]:
     return manager.status()
 

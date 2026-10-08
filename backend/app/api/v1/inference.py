@@ -34,7 +34,7 @@ def get_inference_supervisor(request: Request) -> InferenceSupervisor:
     return supervisor
 
 
-@router.get("/api/v1/inference/status")
+@router.get("/api/v1/inference/status", summary="Inference engine status")
 def inference_status(
     manager: ModelManager = Depends(get_model_manager),
     supervisor: InferenceSupervisor = Depends(get_inference_supervisor),

@@ -150,6 +150,18 @@ ever auto-closed. Manual incidents bypass the threshold entirely. Tune
 against real V09 engines driven with synthetic tracks in
 `backend/tests/incident_helpers.py` (fixed-epoch clock, in-process SQLite).
 
+## Backend hardening (V11)
+
+`CORS_ALLOWED_ORIGINS` / `CORS_ALLOW_CREDENTIALS` in `.env.example`:
+explicit per-environment origins (dev: localhost entries). Wildcard +
+credentials is rejected in every environment; production rejects wildcard
+origins and requires at least one explicit origin — violations fail
+startup, never degrade silently. `WORKER_HEARTBEAT_TIMEOUT_SECONDS`,
+`WEBSOCKET_QUEUE_MAX_SIZE`, `WEBSOCKET_HEARTBEAT_TIMEOUT_SECONDS`,
+`WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS`, `MAX_REQUEST_BODY_BYTES` bound the
+supervision and socket layers; out-of-range values fail startup validation
+(`Settings.validate_startup()`). Full guide: `docs/BACKEND_HARDENING.md`.
+
 ## Docker
 
 ```powershell

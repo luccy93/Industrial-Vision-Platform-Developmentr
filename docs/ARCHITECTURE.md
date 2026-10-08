@@ -182,7 +182,31 @@ Dashboard
 - No auth/RBAC (V16); no auto-close; no reopen; no risk re-scoring. See
   `docs/INCIDENT_MANAGEMENT.md`.
 
-## Future volumes (explicitly NOT in V01–V10)
+## V11 — Implemented (backend hardening)
+
+- `backend/app/runtime/`: `manager.py` (`ApplicationRuntime`, 15 startup +
+  11 shutdown phases, idempotent), `health.py` (6 states, component model,
+  worst-state aggregation), `readiness.py` (`ReadinessManager`, required-set
+  policy, lightweight `SELECT 1` DB probe), `components.py` (12 cheap
+  probes — no inference, no camera dials, no secrets).
+- `backend/app/core/`: `APIError`/`ErrorDetail`/`ErrorEnvelope` models,
+  `ERROR_CODES` registry (V10 codes frozen), `DomainError` + 6 subclasses,
+  `RequestContext` + bounded request IDs, structured log helpers.
+- `backend/app/workers/base.py`: `ManagedWorker`/`WorkerState`/
+  `WorkerSnapshot`/`WorkerSupervisor` (heartbeats, staleness, bounded
+  restarts); per-camera workers expose `health_snapshot()` adapters.
+- `backend/app/websocket/manager.py`: lifecycle-boundary manager
+  (registration, subscriptions, bounded prioritized queues, heartbeat,
+  metrics, bounded shutdown) around the unchanged `streams_ws` delta loop.
+- Endpoints: `GET /live` (new), `GET /ready` (real 200/503 verdict, legacy
+  shape preserved), `GET /health` + `GET /api/v1/health` (component
+  diagnostics, additive). V10 pagination frozen byte-for-byte.
+- Settings-driven CORS (strict table, startup fail-fast),
+  `MAX_REQUEST_BODY_BYTES` (413 + envelope), OpenAPI summaries.
+  No Redis, no auth, no new domain features. See
+  `docs/BACKEND_HARDENING.md`.
+
+## Future volumes (explicitly NOT in V01–V11)
 
 | Stage | Status | Notes |
 |---|---|---|

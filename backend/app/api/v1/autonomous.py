@@ -110,7 +110,7 @@ def sync_camera_perception(engine: Any, profiles: Any, camera_id: str) -> list[A
     return profile_list
 
 
-@router.get("/api/v1/autonomous/status")
+@router.get("/api/v1/autonomous/status", summary="Autonomous engine status")
 def autonomous_status(engine: Any = Depends(get_autonomous_engine)) -> dict[str, Any]:
     if engine is None:
         return {

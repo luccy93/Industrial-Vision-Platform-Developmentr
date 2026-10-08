@@ -96,7 +96,7 @@ def sync_camera_zones(spatial: SpatialEngine, zones: ZoneRepository, camera_id: 
     return zones_list
 
 
-@router.get("/api/v1/spatial/status")
+@router.get("/api/v1/spatial/status", summary="Spatial engine status")
 def spatial_status(engine: SpatialEngine = Depends(get_spatial_engine)) -> dict[str, Any]:
     return engine.status()
 

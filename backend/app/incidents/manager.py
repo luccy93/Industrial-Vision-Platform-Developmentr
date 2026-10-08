@@ -883,10 +883,10 @@ class IncidentManager:
     ) -> Incident:
         incident = self._load_open(incident_id)
         previous = incident.status
-        moved = self._repository.transition(str(incident.id), new_status)
-        assert moved is not None
-        self._repository.add_timeline_entry(
+        # Single transaction for state + audit row: no partial updates (§20).
+        moved = self._repository.transition_with_timeline(
             str(incident.id),
+            new_status,
             timeline_type,
             message=message,
             actor_id=actor_id,
@@ -895,6 +895,7 @@ class IncidentManager:
             new_state=new_status.value,
             metadata=dict(extra or {}),
         )
+        assert moved is not None
         self._metrics["transitions_total"] += 1
         self._metrics["operations_total"] += 1
         self._record_change(

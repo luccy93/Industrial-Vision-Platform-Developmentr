@@ -99,8 +99,7 @@ def database_check_factory(session_factory: Any) -> CheckHandler:
         from sqlalchemy import text
 
         try:
-            factory = session_factory() if callable(session_factory) else session_factory
-            session = factory()
+            session = session_factory()
         except Exception as exc:
             return HealthStatus.NOT_READY, f"session acquisition failed: {exc}"
         try:

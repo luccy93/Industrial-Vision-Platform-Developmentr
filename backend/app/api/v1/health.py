@@ -5,7 +5,7 @@ from __future__ import annotations
 import socket
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from backend.app.api.deps import get_app_settings
 from backend.app.core.config import Settings
@@ -29,15 +29,28 @@ def _checks(settings: Settings) -> dict[str, Any]:
     }
 
 
-@router.get("/health")
-def v1_health(settings: Settings = Depends(get_app_settings)) -> dict[str, Any]:
-    return {
+@router.get("/health", summary="Versioned health diagnostics")
+def v1_health(request: Request, settings: Settings = Depends(get_app_settings)) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "status": "ok",
         "service": settings.app_name,
         "version": "v01",
         "env": settings.app_env.value,
         "checks": _checks(settings),
     }
+    # Component diagnostics are additive: legacy `status`/`checks` shape
+    # is preserved byte-for-byte for existing consumers.
+    try:
+        from backend.app.runtime.components import evaluate_components
+        from backend.app.runtime.health import summarize
+
+        components = evaluate_components(request.app.state, settings)
+        payload["components"] = [c.model_dump(mode="json") for c in components]
+        payload["summary"] = summarize(components).value
+    except Exception:
+        payload["components"] = []
+        payload["summary"] = "UNKNOWN"
+    return payload
 
 
 def _base_payload(settings: Settings) -> dict[str, Any]:

@@ -24,6 +24,7 @@ from backend.app.domain.common import utcnow
 from backend.app.domain.stream import StreamState
 from backend.app.ingestion.repository import CameraRepository
 from backend.app.safety.schemas import SafetyEvent
+from backend.app.websocket.manager import Subscription as _Subscription
 
 logger = logging.getLogger("industrial-vision.ws")
 
@@ -52,6 +53,41 @@ def _spatial_message_type(event: SafetyEvent) -> str:
     if rule == "proximity_relationships":
         return "proximity_event"
     return "safety_event"
+
+
+def _parse_subscription(websocket: WebSocket) -> _Subscription:
+    """Parse opt-in subscription filters from query params (§27).
+
+    ``?event_types=safety_event,tracking&domains=SAFETY``. Absent params
+    mean "no filter": the client receives today's full compatible feed.
+    """
+    try:
+        params = websocket.query_params
+    except Exception:
+        return _Subscription()
+    event_types = frozenset(
+        part.strip()
+        for value in params.getlist("event_types")
+        for part in str(value).split(",")
+        if part.strip()
+    )
+    domains = frozenset(
+        part.strip().upper()
+        for value in params.getlist("domains")
+        for part in str(value).split(",")
+        if part.strip()
+    )
+    cameras = [
+        part.strip()
+        for value in params.getlist("camera_id")
+        for part in str(value).split(",")
+        if part.strip()
+    ]
+    return _Subscription(
+        camera_id=cameras[0] if cameras else "",
+        event_types=event_types,
+        domains=domains,
+    )
 
 
 @router.websocket("/ws/cameras/{camera_id}")
@@ -101,32 +137,77 @@ async def camera_stream_socket(
     sent_clusters: dict[str, str] = {}
     sent_risk: dict[str, tuple[str, str]] = {}
     sent_incidents: dict[str, int] = {}
+
+    # V11: thin lifecycle-boundary integration (shallow by design). The
+    # delta computation, ordering, payloads, and scheduling below are
+    # unchanged; the manager owns registration, subscription metadata,
+    # bounded prioritized send accounting, heartbeat, and shutdown.
+    # The socket is send-only: protocol ping/pong is handled by the ASGI
+    # server, so there is nothing to parse and no malformed-input path.
+    import uuid as _uuid
+
+    ws_manager = getattr(websocket.app.state, "ws_manager", None)
+    subscription = _parse_subscription(websocket)
+    connection_id: str | None = None
+    if ws_manager is not None:
+        try:
+            connection = ws_manager.connect(
+                f"ws-{_uuid.uuid4().hex[:12]}",
+                camera_id=camera_id,
+                subscription=subscription,
+                websocket=websocket,
+            )
+            connection_id = connection.connection_id
+        except Exception:
+            logger.debug("ws connection registration failed", exc_info=True)
+            connection_id = None
+
+    async def _send(payload: dict) -> None:
+        """Send one message via the bounded manager path (or direct)."""
+        text = json.dumps(payload)
+        message_type = str(payload.get("type", ""))
+        if ws_manager is None or connection_id is None:
+            await websocket.send_text(text)
+            return
+        # Subscription filters are opt-in; the default feed is unchanged.
+        if not subscription.matches(message_type, camera_id):
+            return
+        if not ws_manager.enqueue(connection_id, text, message_type):
+            # Droppable message shed under backpressure (counted, §28).
+            return
+        try:
+            for item in ws_manager.drain(connection_id, limit=50):
+                await websocket.send_text(item)
+        except Exception:
+            ws_manager.record_failed(connection_id)
+            raise
+        ws_manager.record_sent(connection_id)
+        ws_manager.heartbeat(connection_id)
+
     try:
         while True:
             manager = supervisor.get(camera_id)
             state = manager.state if manager else StreamState.DISCONNECTED
             if state != last_state:
-                await websocket.send_text(json.dumps(_status_message(camera_id, state)))
+                await _send(_status_message(camera_id, state))
                 last_state = state
             if inference_supervisor is not None:
                 worker = inference_supervisor.get(camera_id)
                 latest = worker.latest() if worker else None
                 if latest is not None and str(latest.frame_id) != last_detection_id:
                     last_detection_id = str(latest.frame_id)
-                    await websocket.send_text(json.dumps(latest.to_websocket()))
+                    await _send(latest.to_websocket())
                 tracked_id, tracks = worker.latest_tracked() if worker else (None, [])
                 if tracked_id is not None and str(tracked_id) != last_tracked_id:
                     last_tracked_id = str(tracked_id)
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "tracking",
-                                "camera_id": camera_id,
-                                "frame_id": str(tracked_id),
-                                "timestamp": utcnow().isoformat(),
-                                "tracks": [track.to_websocket() for track in tracks],
-                            }
-                        )
+                    await _send(
+                        {
+                            "type": "tracking",
+                            "camera_id": camera_id,
+                            "frame_id": str(tracked_id),
+                            "timestamp": utcnow().isoformat(),
+                            "tracks": [track.to_websocket() for track in tracks],
+                        }
                     )
             if safety_engine is not None:
                 # First pass publishes current state; afterwards only deltas
@@ -145,7 +226,7 @@ async def camera_stream_socket(
                     if message["type"] != "safety_event":
                         # V06 keeps V05 payloads intact and adds typed channels.
                         message["spatial"] = event.evidence
-                    await websocket.send_text(json.dumps(message))
+                    await _send(message)
             if quality_engine is not None:
                 # V07: quality events (delta-only) + one message per inspection.
                 from backend.app.quality.ws import quality_event_message, quality_result_message
@@ -157,13 +238,13 @@ async def camera_stream_socket(
                     if sent_quality.get(key) == event.status.value:
                         continue
                     sent_quality[key] = event.status.value
-                    await websocket.send_text(json.dumps(quality_event_message(camera_id, event)))
+                    await _send(quality_event_message(camera_id, event))
                 for result in quality_engine.recent_results(camera_id, 5):
                     key = str(result.inspection_id)
                     if key in sent_results:
                         continue
                     sent_results.add(key)
-                    await websocket.send_text(json.dumps(quality_result_message(camera_id, result)))
+                    await _send(quality_result_message(camera_id, result))
             if autonomous_engine is not None:
                 # V08: latest scene per frame + delta-only perception events.
                 # COLLISION_RISK travels on `collision_risk`; every other
@@ -179,7 +260,7 @@ async def camera_stream_socket(
                 latest = autonomous_engine.latest_result(camera_id)
                 if latest is not None and str(latest.scene_id) != last_perception_id:
                     last_perception_id = str(latest.scene_id)
-                    await websocket.send_text(json.dumps(autonomous_perception_message(camera_id, latest)))
+                    await _send(autonomous_perception_message(camera_id, latest))
                 for event in autonomous_engine.active_events(camera_id, 50) + autonomous_engine.recent_events(
                     camera_id, 10
                 ):
@@ -191,7 +272,7 @@ async def camera_stream_socket(
                         message = collision_risk_message(camera_id, event)
                     else:
                         message = lane_event_message(camera_id, event)
-                    await websocket.send_text(json.dumps(message))
+                    await _send(message)
             if intelligence_engine is not None:
                 # V09: unified-event deltas, cluster deltas (status or risk
                 # level changes re-publish so escalation is visible), and a
@@ -209,7 +290,7 @@ async def camera_stream_socket(
                     if sent_intelligence.get(key) == event.status.value:
                         continue
                     sent_intelligence[key] = event.status.value
-                    await websocket.send_text(json.dumps(intelligence_event_message(camera_id, event)))
+                    await _send(intelligence_event_message(camera_id, event))
                 clusters = list(intelligence_engine.active_clusters(camera_id, 50))
                 clusters += list(intelligence_engine.recent_clusters(camera_id, 10))
                 for cluster in clusters:
@@ -220,20 +301,18 @@ async def camera_stream_socket(
                     if sent_clusters.get(str(cluster.cluster_id)) == key:
                         continue
                     sent_clusters[str(cluster.cluster_id)] = key
-                    await websocket.send_text(json.dumps(risk_cluster_message(camera_id, cluster)))
+                    await _send(risk_cluster_message(camera_id, cluster))
                 latest = intelligence_engine.latest(camera_id)
                 if latest is not None:
                     signature = (latest.highest_risk.risk_level.value, latest.highest_priority.value)
                     if sent_risk.get(camera_id) != signature:
                         sent_risk[camera_id] = signature
-                        await websocket.send_text(
-                            json.dumps(
-                                risk_update_message(
-                                    camera_id,
-                                    latest.highest_risk,
-                                    latest.highest_priority,
-                                    latest.timestamp.isoformat(),
-                                )
+                        await _send(
+                            risk_update_message(
+                                camera_id,
+                                latest.highest_risk,
+                                latest.highest_priority,
+                                latest.timestamp.isoformat(),
                             )
                         )
             incident_manager = getattr(websocket.app.state, "incident_manager", None)
@@ -252,20 +331,18 @@ async def camera_stream_socket(
                     incident = incident_manager.repository.get_incident(str(change.get("incident_id", "")))
                     if incident is None:
                         continue
-                    await websocket.send_text(json.dumps(builder(incident, change)))
+                    await _send(builder(incident, change))
                 sent_incidents[camera_id] = cursor
             if manager is not None:
                 if manager.last_error and state == StreamState.ERROR:
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "stream_error",
-                                "camera_id": camera_id,
-                                "code": "STREAM_DISCONNECTED",
-                                "message": "Camera stream disconnected",
-                                "timestamp": utcnow().isoformat(),
-                            }
-                        )
+                    await _send(
+                        {
+                            "type": "stream_error",
+                            "camera_id": camera_id,
+                            "code": "STREAM_DISCONNECTED",
+                            "message": "Camera stream disconnected",
+                            "timestamp": utcnow().isoformat(),
+                        }
                     )
                 frame = manager.latest_frame()
                 metrics = manager.status()
@@ -281,7 +358,7 @@ async def camera_stream_socket(
                             "stream_state": state.value,
                         }
                     )
-                    await websocket.send_text(json.dumps(payload))
+                    await _send(payload)
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         logger.info("ws closed for camera %s", camera_id)
@@ -291,3 +368,6 @@ async def camera_stream_socket(
             await websocket.close()
         except Exception:
             pass
+    finally:
+        if ws_manager is not None and connection_id is not None:
+            ws_manager.disconnect(connection_id)

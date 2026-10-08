@@ -115,9 +115,99 @@ def _load_autonomous_configuration(app: FastAPI, logger: Any) -> None:
         logger.warning("autonomous configuration load skipped", exc_info=True)
 
 
+def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
+    """Report create_app construction as runtime startup phases (§5).
+
+    Reporters are cheap and side-effect-free: construction already
+    happened inline above; the runtime records and orders it. Live probes
+    (SELECT 1, worker states) stay in readiness/health, not here.
+    """
+    from backend.app.runtime.manager import STARTUP_PHASES
+
+    runtime = app.state.runtime
+    state = app.state
+
+    def _reporters() -> dict[str, str]:
+        notes: dict[str, str] = {}
+        try:
+            notes["configuration"] = "; ".join(settings.validate_startup())
+        except Exception as exc:
+            notes["configuration"] = f"invalid: {exc}"
+            raise
+        notes["logging"] = f"level={settings.log_level}"
+        notes["database"] = "session factory ready (live probe in readiness)"
+        notes["repositories"] = "schema warm-up deferred to lifespan"
+        notes["camera_manager"] = "stream supervisor constructed"
+        notes["inference"] = "model manager + inference supervisor constructed"
+        notes["tracking"] = "tracking manager constructed"
+        notes["safety_spatial"] = "safety + spatial engines constructed"
+        notes["quality"] = "quality engine constructed"
+        notes["autonomous"] = "autonomous engine constructed"
+        notes["intelligence"] = "intelligence engine constructed"
+        notes["incidents"] = "incident manager constructed"
+        notes["workers"] = "worker supervision registry ready"
+        notes["websocket"] = "socket route mounted; manager registered"
+        notes["ready"] = "application READY"
+        return notes
+
+    reports = _reporters()
+    for phase in STARTUP_PHASES:
+        runtime.register_phase(phase, lambda p=phase: reports.get(p, "ok"))
+
+    # Shutdown phases (§6): best-effort, isolated, idempotent.
+    def _stop_all(supervisor: Any, label: str) -> str:
+        try:
+            supervisor.stop_all()
+        except Exception as exc:
+            return f"{label}: stop failed ({type(exc).__name__})"
+        return f"{label}: stopped"
+
+    runtime.register_phase(
+        "mark_draining", lambda: "draining: new background work refused", shutdown=True
+    )
+    runtime.register_phase(
+        "stop_background_work", lambda: "no standalone background pool", shutdown=True
+    )
+    runtime.register_phase(
+        "stop_camera_streams",
+        lambda: _stop_all(state.supervisor, "stream supervisor"),
+        shutdown=True,
+    )
+    runtime.register_phase(
+        "stop_inference_workers",
+        lambda: _stop_all(state.inference_supervisor, "inference supervisor"),
+        shutdown=True,
+    )
+    for _phase, _message in (
+        ("stop_perception_workers", "perception runs inline on inference workers"),
+        ("stop_intelligence_worker", "intelligence runs inline on inference workers"),
+        ("stop_incident_sync", "incident sync is an inference worker stage"),
+        ("flush_pending_work", "no unbounded pending queues"),
+        ("close_websockets", "websocket drain managed by lifespan (bounded)"),
+    ):
+        runtime.register_phase(_phase, lambda m=_message: m, shutdown=True)
+    runtime.register_phase(
+        "close_database", lambda: _dispose_engine(state), shutdown=True
+    )
+    runtime.register_phase("mark_stopped", lambda: "runtime STOPPED", shutdown=True)
+
+
+def _dispose_engine(state: Any) -> str:
+    """Best-effort engine dispose (pooled connections released)."""
+    try:
+        factory = state.session_factory
+        engine = factory.kw.get("bind") if hasattr(factory, "kw") else None
+        if engine is None:
+            return "no engine to dispose"
+        engine.dispose()
+        return "engine disposed"
+    except Exception as exc:
+        return f"dispose skipped ({type(exc).__name__})"
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
+    runtime = app.state.runtime
     logger = get_logger("industrial-vision")
     logger.info("startup service=%s env=%s", settings.app_name, settings.app_env.value)
     # Best-effort schema init (Alembic owns prod; never block startup).
@@ -131,6 +221,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _load_quality_configuration(app, logger)
     _load_autonomous_configuration(app, logger)
     yield
+    # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
+    # then run the ordered idempotent runtime shutdown.
+    ws_manager = getattr(app.state, "ws_manager", None)
+    if ws_manager is not None:
+        try:
+            report = await ws_manager.shutdown("server shutdown")
+            logger.info("websockets drained: %s", report)
+        except Exception:
+            logger.warning("websocket drain failed", exc_info=True)
+    try:
+        runtime.shutdown()
+    except Exception:
+        logger.warning("runtime shutdown failed", exc_info=True)
     for key in ("inference_supervisor", "supervisor"):
         try:
             supervisor = getattr(app.state, key, None)
@@ -225,18 +328,101 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # V11: central lifecycle owner. Construction stays here (the test suite
     # builds apps without a lifespan context); the lifespan and endpoints
-    # drive its phases. Starts in CREATED; lifespan moves it to READY.
+    # drive its phases. Starts in CREATED; initialized below.
     from backend.app.runtime.manager import ApplicationRuntime
 
     app.state.runtime = ApplicationRuntime()
 
+    # V11: WebSocket lifecycle boundary + worker supervision registry.
+    # Both are additive: the streams_ws loop and worker threads keep
+    # their current behavior; these objects observe and bound it.
+    from backend.app.websocket.manager import WebSocketManager
+    from backend.app.workers.base import WorkerSupervisor
+
+    app.state.ws_manager = WebSocketManager(
+        queue_max_size=settings.websocket_queue_max_size,
+        heartbeat_timeout_seconds=settings.websocket_heartbeat_timeout_seconds,
+        shutdown_timeout_seconds=settings.websocket_shutdown_timeout_seconds,
+    )
+    app.state.worker_supervisor = WorkerSupervisor(
+        heartbeat_timeout_seconds=settings.worker_heartbeat_timeout_seconds
+    )
+
+    # V11: centralized readiness (route handlers stay thin).
+    from backend.app.runtime.health import HealthStatus
+    from backend.app.runtime.readiness import ReadinessManager, database_check_factory
+
+    readiness = ReadinessManager(app.state.runtime)
+    readiness.register_check(
+        "database", lambda: database_check_factory(app.state.session_factory)()
+    )
+
+    def _workers_check() -> tuple[HealthStatus, str]:
+        # Only FAILED supervision fails readiness; DEGRADED/stale optional
+        # workers keep the platform servable (§10, §23).
+        try:
+            snapshots: dict[str, Any] = {}
+            snapshots.update(app.state.inference_supervisor.health_snapshots())
+            snapshots.update(app.state.supervisor.health_snapshots())
+        except Exception as exc:
+            return HealthStatus.UNKNOWN, f"supervisors unreachable: {type(exc).__name__}"
+        failed = [k for k, v in snapshots.items() if v.get("state") == "FAILED"]
+        if failed:
+            return HealthStatus.NOT_READY, f"failed workers: {','.join(sorted(failed)[:5])}"
+        return (
+            HealthStatus.READY,
+            f"{len(snapshots)} worker(s) supervised",
+        )
+
+    readiness.register_check("workers", _workers_check)
+    app.state.readiness = readiness
+
+    _register_runtime_phases(app, settings)
+    app.state.runtime.initialize()
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_credentials=bool(settings.cors_allow_credentials),
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+
+    @app.middleware("http")
+    async def _body_limit(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # Bounded JSON payloads (§38). Content-Length is checked before any
+        # domain service sees the body; chunked bodies without a length fall
+        # through to the per-field Field(max_length=...) validators.
+        # The 413 is returned directly: exceptions raised in middleware
+        # bypass the route exception handlers.
+        from fastapi.responses import JSONResponse
+
+        from backend.app.core.exceptions import error_envelope
+        from backend.app.core.request_context import (
+            REQUEST_ID_HEADER as _RID_HEADER,
+        )
+        from backend.app.core.request_context import sanitize_request_id as _sanitize
+
+        limit = int(settings.max_request_body_bytes)
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+            except ValueError:
+                size = 0
+            if size > limit:
+                request_id = _sanitize(request.headers.get(_RID_HEADER))
+                return JSONResponse(
+                    status_code=413,
+                    content=error_envelope(
+                        "PAYLOAD_TOO_LARGE",
+                        f"request body too large ({size} bytes > {limit} bytes)",
+                        request_id,
+                    ),
+                    headers={_RID_HEADER: request_id},
+                )
+        return await call_next(request)
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -250,6 +436,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         request_id = sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
         request.state.request_id = request_id
+        request.state.started_monotonic = time.monotonic()
         token = set_request_context(
             RequestContext(
                 request_id=request_id, method=request.method, path=request.url.path
@@ -292,20 +479,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(incidents_router)
 
-    @app.get("/health", tags=["health"])
+    @app.get("/health", tags=["health"], summary="Service health diagnostics")
     def health() -> dict:
-        return _base_payload(settings)
+        payload = _base_payload(settings)
+        try:
+            payload["runtime"] = app.state.runtime.health()
+        except Exception:
+            payload["runtime"] = {"state": "UNKNOWN", "ready": False}
+        return payload
 
-    @app.get("/ready", tags=["health"])
+    @app.get("/live", tags=["health"], summary="Liveness probe")
+    def live() -> dict:
+        # Liveness only: the process is running. Never expensive.
+        payload = _base_payload(settings)
+        try:
+            payload["runtime_state"] = app.state.runtime.state.value
+        except Exception:
+            payload["runtime_state"] = "UNKNOWN"
+        return payload
+
+    @app.get("/ready", tags=["health"], summary="Readiness probe")
     def ready() -> JSONResponse:
-        # V01: API itself is ready; downstream systems report explicit not-checked
-        # states rather than faked healthy states.
+        # Legacy shape preserved (status/checks/ready); the real verdict
+        # comes from the centralized ReadinessManager (additive).
         payload = _base_payload(settings)
         payload["checks"] = _checks(settings)
-        payload["ready"] = True
-        return JSONResponse(content=payload)
+        try:
+            verdict = app.state.readiness.evaluate()
+        except Exception:
+            verdict = {"ready": False, "status": "not_ready", "checks": {}, "failing": ["readiness"]}
+        payload["ready"] = bool(verdict["ready"])
+        payload["readiness"] = verdict
+        return JSONResponse(
+            status_code=200 if verdict["ready"] else 503, content=payload
+        )
 
-    @app.get("/", tags=["health"])
+    @app.get("/", tags=["health"], summary="Service root")
     def root() -> dict:
         return {"service": settings.app_name, "version": "0.1.0", "docs": "/docs"}
 

@@ -23,7 +23,7 @@ def get_safety_engine(request: Request) -> SafetyEngine:
     return engine
 
 
-@router.get("/api/v1/safety/status")
+@router.get("/api/v1/safety/status", summary="Safety engine status")
 def safety_status(engine: SafetyEngine = Depends(get_safety_engine)) -> dict[str, Any]:
     return engine.status()
 

@@ -78,6 +78,8 @@ class StreamManager:
         self._width: int | None = camera.width
         self._height: int | None = camera.height
         self._last_error: str | None = None
+        # V11 supervision: monotonic heartbeat for stale detection.
+        self._heartbeat_monotonic: float | None = None
 
     # -- state -----------------------------------------------------------
     @property
@@ -146,6 +148,7 @@ class StreamManager:
         source = self._source_factory(self._effective_camera())
         try:
             while not self._stop_event.is_set():
+                self._heartbeat_monotonic = time.monotonic()
                 if not source.is_open():
                     self._transition(StreamState.CONNECTING)
                     if not source.open():
@@ -254,6 +257,29 @@ class StreamManager:
                 reconnect_count=self._reconnect_count,
             )
 
+    def health_snapshot(self) -> dict:
+        """V11 supervision snapshot (additive; existing behavior unchanged)."""
+        from datetime import timedelta
+
+        from backend.app.domain.common import utcnow
+
+        with self._lock:
+            state = self._state
+            heartbeat = self._heartbeat_monotonic
+            last_error = self._last_error
+        running = state in (StreamState.CONNECTED, StreamState.RUNNING)
+        last_heartbeat = None
+        if heartbeat is not None:
+            age = max(0.0, time.monotonic() - heartbeat)
+            last_heartbeat = utcnow() - timedelta(seconds=age)
+        return {
+            "name": f"stream:{self.camera.camera_id}",
+            "state": "RUNNING" if running else state.value,
+            "running": running,
+            "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
+            "last_error": last_error,
+        }
+
     @property
     def last_error(self) -> str | None:
         with self._lock:
@@ -315,3 +341,15 @@ class StreamSupervisor:
         with self._lock:
             managers = dict(self._managers)
         return {camera_id: manager.status() for camera_id, manager in managers.items()}
+
+    def health_snapshots(self) -> dict[str, dict]:
+        """V11 supervision snapshots keyed by camera_id (additive)."""
+        with self._lock:
+            managers = dict(self._managers)
+        snapshots: dict[str, dict] = {}
+        for camera_id, manager in managers.items():
+            try:
+                snapshots[camera_id] = manager.health_snapshot()
+            except Exception:
+                snapshots[camera_id] = {"name": f"stream:{camera_id}", "state": "UNKNOWN"}
+        return snapshots

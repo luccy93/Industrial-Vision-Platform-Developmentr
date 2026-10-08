@@ -70,7 +70,7 @@ def _require_engine(engine: Any) -> Any:
     return engine
 
 
-@router.get("/api/v1/intelligence/status")
+@router.get("/api/v1/intelligence/status", summary="Intelligence engine status")
 def intelligence_status(engine: Any = Depends(get_intelligence_engine)) -> dict[str, Any]:
     return _require_engine(engine).status()
 

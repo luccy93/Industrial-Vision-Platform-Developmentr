@@ -114,11 +114,19 @@ class Connection:
         self.sent += 1
 
     def idle_seconds(self, now: datetime | None = None) -> float:
-        """Seconds since the last client activity (receive or ping)."""
+        """Seconds since the last activity on this connection.
+
+        Considers receives, pings, *and* successful sends: on the
+        send-only camera feed a flowing socket is alive even though the
+        client never transmits application frames.
+        """
         reference = now or utcnow()
-        latest = self.last_received or self.last_ping or self.connected_at
+        candidates = [self.connected_at]
+        for stamp in (self.last_received, self.last_ping, self.last_sent):
+            if stamp is not None:
+                candidates.append(stamp)
         try:
-            return max(0.0, (reference - latest).total_seconds())
+            return max(0.0, (reference - max(candidates)).total_seconds())
         except Exception:
             return 0.0
 

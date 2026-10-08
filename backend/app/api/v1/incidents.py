@@ -231,7 +231,7 @@ def _incident_error(exc: Exception) -> HTTPException:
     raise exc
 
 
-@router.get("/api/v1/incidents")
+@router.get("/api/v1/incidents", summary="List incidents")
 def list_incidents(
     status: list[str] = Query(default=[]),
     priority: list[str] = Query(default=[]),
@@ -271,7 +271,7 @@ def list_incidents(
     }
 
 
-@router.get("/api/v1/incidents/{incident_id}")
+@router.get("/api/v1/incidents/{incident_id}", summary="Get incident detail")
 def get_incident(incident_id: str, manager: Any = Depends(get_incident_manager)) -> dict[str, Any]:
     manager = _require_manager(manager)
     detail = manager.get_detail(incident_id)
@@ -280,7 +280,7 @@ def get_incident(incident_id: str, manager: Any = Depends(get_incident_manager))
     return detail
 
 
-@router.post("/api/v1/incidents", status_code=201)
+@router.post("/api/v1/incidents", status_code=201, summary="Create manual incident")
 def create_incident(
     payload: IncidentCreateRequest,
     request: Request,
@@ -306,7 +306,7 @@ def create_incident(
     return detail
 
 
-@router.patch("/api/v1/incidents/{incident_id}")
+@router.patch("/api/v1/incidents/{incident_id}", summary="Patch incident details")
 def patch_incident(
     incident_id: str,
     payload: IncidentPatchRequest,
@@ -338,7 +338,7 @@ def _action(incident_id: str, manager: Any, call: Any) -> dict[str, Any]:
     return detail
 
 
-@router.post("/api/v1/incidents/{incident_id}/acknowledge")
+@router.post("/api/v1/incidents/{incident_id}/acknowledge", summary="Acknowledge incident")
 def acknowledge_incident(
     incident_id: str, payload: AcknowledgeRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -347,7 +347,7 @@ def acknowledge_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/assign")
+@router.post("/api/v1/incidents/{incident_id}/assign", summary="Assign incident")
 def assign_incident(
     incident_id: str, payload: AssignRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -356,14 +356,14 @@ def assign_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/unassign")
+@router.post("/api/v1/incidents/{incident_id}/unassign", summary="Unassign incident")
 def unassign_incident(
     incident_id: str, payload: UnassignRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
     return _action(incident_id, manager, lambda: manager.unassign(incident_id, payload.actor_id))
 
 
-@router.post("/api/v1/incidents/{incident_id}/escalate")
+@router.post("/api/v1/incidents/{incident_id}/escalate", summary="Escalate incident priority")
 def escalate_incident(
     incident_id: str, payload: EscalateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -374,7 +374,7 @@ def escalate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/investigate")
+@router.post("/api/v1/incidents/{incident_id}/investigate", summary="Start incident investigation")
 def investigate_incident(
     incident_id: str, payload: InvestigateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -383,7 +383,7 @@ def investigate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/notes")
+@router.post("/api/v1/incidents/{incident_id}/notes", summary="Add incident note")
 def add_incident_note(
     incident_id: str, payload: NoteRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -394,7 +394,7 @@ def add_incident_note(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/mitigate")
+@router.post("/api/v1/incidents/{incident_id}/mitigate", summary="Mitigate incident")
 def mitigate_incident(
     incident_id: str, payload: MitigateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -403,7 +403,7 @@ def mitigate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/resolve")
+@router.post("/api/v1/incidents/{incident_id}/resolve", summary="Resolve incident")
 def resolve_incident(
     incident_id: str, payload: ResolveRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -414,7 +414,7 @@ def resolve_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/close")
+@router.post("/api/v1/incidents/{incident_id}/close", summary="Close incident")
 def close_incident(
     incident_id: str, payload: CloseRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -425,7 +425,7 @@ def close_incident(
     )
 
 
-@router.get("/api/v1/incidents/{incident_id}/evidence")
+@router.get("/api/v1/incidents/{incident_id}/evidence", summary="List incident evidence")
 def list_incident_evidence(incident_id: str, manager: Any = Depends(get_incident_manager)) -> dict[str, Any]:
     manager = _require_manager(manager)
     try:
@@ -456,7 +456,7 @@ def list_incident_evidence(incident_id: str, manager: Any = Depends(get_incident
     }
 
 
-@router.post("/api/v1/incidents/{incident_id}/evidence", status_code=201)
+@router.post("/api/v1/incidents/{incident_id}/evidence", status_code=201, summary="Add incident evidence")
 def add_incident_evidence(
     incident_id: str, payload: EvidenceCreateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -488,7 +488,7 @@ def add_incident_evidence(
     }
 
 
-@router.delete("/api/v1/incidents/{incident_id}/evidence/{evidence_id}")
+@router.delete("/api/v1/incidents/{incident_id}/evidence/{evidence_id}", summary="Delete incident evidence")
 def delete_incident_evidence(
     incident_id: str, evidence_id: str, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:

@@ -274,7 +274,7 @@ def _profile_detail_payload(profile: InspectionProfile) -> dict[str, Any]:
     return data
 
 
-@router.get("/api/v1/quality/status")
+@router.get("/api/v1/quality/status", summary="Quality engine status")
 def quality_status(engine: Any = Depends(get_quality_engine)) -> dict[str, Any]:
     if engine is None:
         return {

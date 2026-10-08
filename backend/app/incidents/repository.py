@@ -410,6 +410,59 @@ class IncidentRepository:
             session.refresh(row)
             return incident_to_domain(row)
 
+    def transition_with_timeline(
+        self,
+        incident_id: str,
+        new_status: IncidentStatus,
+        timeline_type: TimelineEventType,
+        message: str = "",
+        actor_id: str | None = None,
+        actor_type: ActorType = ActorType.SYSTEM,
+        previous_state: str | None = None,
+        new_state: str | None = None,
+        timestamp: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Incident | None:
+        """Move lifecycle state and append the timeline row atomically (§20).
+
+        A single session/transaction covers both writes: a crash between
+        them can no longer leave a moved incident without its audit row.
+        Returns None for unknown incidents (matches ``transition``).
+        """
+        with self._session_factory() as session:
+            row = session.query(IncidentORM).filter_by(id=incident_id).one_or_none()
+            if row is None:
+                return None
+            validate_transition(IncidentStatus(row.status), new_status)
+            now = timestamp or utcnow()
+            row.status = new_status.value
+            row.updated_at = now
+            if new_status is IncidentStatus.ACKNOWLEDGED and row.acknowledged_at is None:
+                row.acknowledged_at = now
+            if new_status is IncidentStatus.RESOLVED:
+                row.resolved_at = now
+            if new_status is IncidentStatus.CLOSED:
+                row.closed_at = now
+            session.add(
+                IncidentTimelineORM(
+                    id=str(uuid.uuid4()),
+                    incident_id=incident_id,
+                    event_type=timeline_type.value
+                    if isinstance(timeline_type, TimelineEventType)
+                    else str(timeline_type),
+                    actor_id=actor_id,
+                    actor_type=actor_type.value if isinstance(actor_type, ActorType) else str(actor_type),
+                    message=message,
+                    previous_state=previous_state,
+                    new_state=new_state,
+                    timestamp=now,
+                    meta=dict(metadata or {}),
+                )
+            )
+            session.commit()
+            session.refresh(row)
+            return incident_to_domain(row)
+
     def add_timeline_entry(
         self,
         incident_id: str,

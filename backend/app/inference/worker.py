@@ -16,6 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 from backend.app.domain.frame import IngestionFrame
@@ -89,6 +90,9 @@ class InferenceWorker:
         self._errors = 0
         self._last_error: str | None = None
         self._load_retry_at = 0.0
+        # V11 supervision: monotonic heartbeat (stale detection) + tz-aware
+        # exposure derived from it (never wall-clock comparisons).
+        self._heartbeat_monotonic: float | None = None
 
     @property
     def running(self) -> bool:
@@ -137,6 +141,7 @@ class InferenceWorker:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
+            self._heartbeat_monotonic = time.monotonic()
             try:
                 frame = self._frame_source()
             except Exception:
@@ -369,6 +374,27 @@ class InferenceWorker:
                 "incident_syncs": self._incident_syncs,
             }
 
+    def health_snapshot(self) -> dict:
+        """V11 supervision snapshot (additive; existing behavior unchanged)."""
+        from backend.app.domain.common import utcnow
+
+        with self._lock:
+            running = self._running
+            heartbeat = self._heartbeat_monotonic
+            last_error = self._last_error
+        state = "RUNNING" if running else "STOPPED"
+        last_heartbeat = None
+        if heartbeat is not None:
+            age = max(0.0, time.monotonic() - heartbeat)
+            last_heartbeat = utcnow() - timedelta(seconds=age)
+        return {
+            "name": f"inference:{self.camera_id}",
+            "state": state,
+            "running": running,
+            "last_heartbeat": last_heartbeat.isoformat() if last_heartbeat else None,
+            "last_error": last_error,
+        }
+
 
 class InferenceSupervisor:
     """Coordinates one inference worker per camera."""
@@ -415,6 +441,18 @@ class InferenceSupervisor:
     def worker_count(self) -> int:
         with self._lock:
             return len(self._workers)
+
+    def health_snapshots(self) -> dict[str, dict]:
+        """V11 supervision snapshots keyed by camera_id (additive)."""
+        with self._lock:
+            workers = dict(self._workers)
+        snapshots: dict[str, dict] = {}
+        for camera_id, worker in workers.items():
+            try:
+                snapshots[camera_id] = worker.health_snapshot()
+            except Exception:
+                snapshots[camera_id] = {"name": f"inference:{camera_id}", "state": "UNKNOWN"}
+        return snapshots
 
     def stop_all(self) -> None:
         with self._lock:
