@@ -29,17 +29,21 @@ def test_wildcard_plus_credentials_rejected_everywhere() -> None:
 
 
 def test_production_rejects_wildcard_regardless() -> None:
+    # Production rules fail startup validation, not construction: production
+    # Settings stay unit-constructible (V01 contract), but create_app fails.
+    settings = _settings(
+        app_env=AppEnv.production,
+        cors_allowed_origins=["*"],
+        cors_allow_credentials=False,
+    )
     with pytest.raises(ConfigurationError):
-        _settings(
-            app_env=AppEnv.production,
-            cors_allowed_origins=["*"],
-            cors_allow_credentials=False,
-        )
+        settings.validate_startup()
 
 
 def test_production_requires_explicit_origin() -> None:
+    settings = _settings(app_env=AppEnv.production, cors_allowed_origins=[])
     with pytest.raises(ConfigurationError):
-        _settings(app_env=AppEnv.production, cors_allowed_origins=[])
+        settings.validate_startup()
     settings = _settings(
         app_env=AppEnv.production,
         cors_allowed_origins=["https://vision.example.com"],

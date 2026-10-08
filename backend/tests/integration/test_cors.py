@@ -17,6 +17,28 @@ def test_request_id_exposed_to_browsers(client: TestClient) -> None:
     assert "X-Request-ID" in exposed
 
 
+def test_production_wildcard_fails_startup() -> None:
+    """Invalid CORS security configuration fails app startup (not /ready)."""
+    import tempfile
+
+    import pytest
+
+    from backend.app.core.config import AppEnv, Settings
+    from backend.app.core.exceptions import ConfigurationError
+    from backend.app.main import create_app
+
+    tmp = tempfile.mkdtemp().replace("\\", "/")
+    settings = Settings(
+        app_env=AppEnv.production,
+        database_url=f"sqlite:///{tmp}/cors-prod.db",
+        cors_allowed_origins=["*"],
+        cors_allow_credentials=False,
+        _env_file=None,  # type: ignore[call-arg]
+    )
+    with pytest.raises(ConfigurationError):
+        create_app(settings)
+
+
 def test_explicit_origins_echo(client: TestClient) -> None:
     import tempfile
 

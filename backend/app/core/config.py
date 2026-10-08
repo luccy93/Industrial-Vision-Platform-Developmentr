@@ -248,30 +248,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_cors_policy(self) -> Settings:
-        """Enforce the CORS strictness table (§37, §40–§41).
+        """Reject wildcard + credentials in EVERY environment (§37, §41).
 
-        - wildcard + credentials is rejected in EVERY environment;
-        - production rejects wildcard origins regardless of credentials;
-        - production requires at least one explicit origin.
-        Invalid security configuration fails startup, never degrades to a
-        permissive fallback.
+        This combination is never legitimate, so it fails at construction.
+        Production-specific rules (no wildcard, explicit origins required)
+        live in ``validate_startup()``: unit-constructing production
+        Settings stays possible, but starting an app with them fails.
         """
         from backend.app.core.exceptions import ConfigurationError
 
         origins = [str(o).strip() for o in (self.cors_allowed_origins or []) if str(o).strip()]
-        wildcard = "*" in origins
-        production = self.app_env == AppEnv.production
-        if wildcard and self.cors_allow_credentials:
+        if "*" in origins and self.cors_allow_credentials:
             raise ConfigurationError(
                 "CORS_ALLOWED_ORIGINS=['*'] with CORS_ALLOW_CREDENTIALS=true is forbidden "
                 "in every environment; configure explicit origins."
             )
-        if production and wildcard:
-            raise ConfigurationError(
-                "CORS_ALLOWED_ORIGINS=['*'] is forbidden in production; configure explicit origins."
-            )
-        if production and not origins:
-            raise ConfigurationError("production requires at least one CORS_ALLOWED_ORIGINS entry.")
         return self
 
     def validate_startup(self) -> list[str]:
@@ -291,6 +282,16 @@ class Settings(BaseSettings):
             raise ConfigurationError("WEBSOCKET_QUEUE_MAX_SIZE must be in [1, 10000].")
         if self.max_request_body_bytes < 1024:
             raise ConfigurationError("MAX_REQUEST_BODY_BYTES must be >= 1024.")
+        # Production CORS rules (§37): no wildcard origins, explicit origins
+        # required. Enforced here (not in the model validator) so production
+        # Settings remain unit-constructible while app startup fails fast.
+        origins = [str(o).strip() for o in (self.cors_allowed_origins or []) if str(o).strip()]
+        if self.app_env == AppEnv.production and "*" in origins:
+            raise ConfigurationError(
+                "CORS_ALLOWED_ORIGINS=['*'] is forbidden in production; configure explicit origins."
+            )
+        if self.app_env == AppEnv.production and not origins:
+            raise ConfigurationError("production requires at least one CORS_ALLOWED_ORIGINS entry.")
         # CORS policy itself raises ConfigurationError when violated.
         notes.append(f"env={self.app_env.value}")
         notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
