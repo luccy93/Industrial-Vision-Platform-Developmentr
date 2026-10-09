@@ -204,6 +204,15 @@ class IncidentManager:
                 return
             incident_id = str(entry.get("incident_id", ""))
             event_id = f"incident:{incident_id}:{entry.get('seq', 0)}"
+            # Origin is the bus (not this manager) so own-bus echoes —
+            # local fan-out of our own intent — are skipped by the
+            # remote-ingest guard instead of duplicating the feed.
+            origin = self._origin
+            if self._event_bus is not None:
+                try:
+                    origin = str(self._event_bus.origin)
+                except Exception:
+                    pass
             payload: dict[str, Any] = {
                 "incident_id": incident_id,
                 "incident_number": entry.get("incident_number"),
@@ -229,7 +238,7 @@ class IncidentManager:
                 event_type=f"incident_{kind}",
                 domain="INCIDENT",
                 camera_id=str(entry.get("camera_id") or ""),
-                origin=self._origin,
+                origin=origin,
                 payload=payload,
             )
             queued = self._outbox.enqueue(

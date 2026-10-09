@@ -26,7 +26,6 @@ from backend.app.core.exceptions import register_exception_handlers
 from backend.app.core.logging import configure_logging, get_logger
 
 _started_at = time.time()
-_logger = get_logger("industrial-vision")
 
 
 def _load_spatial_configuration(app: FastAPI, logger: Any) -> None:
@@ -490,20 +489,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         outbox_repository=outbox_repository,
     )
 
-    def _ingest_remote_incident(envelope: Any) -> None:
-        # Cross-process incident change → local WS feed. Own-origin echoes
-        # are skipped (local recording already fanned out); unknown kinds
-        # drop safely inside ingest_remote_change.
-        try:
-            if getattr(envelope, "origin", "") == event_bus.origin:
-                return
-            if not str(getattr(envelope, "event_type", "")).startswith("incident_"):
-                return
-            app.state.incident_manager.ingest_remote_change(envelope)
-        except Exception:
-            _logger.debug("remote incident ingest failed", exc_info=True)
+    # Cross-process incident changes ingest idempotently into the WS
+    # feed (own-bus echoes skipped; no hot-loop changes).
+    from backend.app.events.wiring import register_remote_incident_ingest
 
-    event_bus.subscribe(_ingest_remote_incident)
+    register_remote_incident_ingest(event_bus, app.state.incident_manager)
     app.state.readiness.register_check(
         "redis", lambda: _redis_readiness(app), required=settings.redis_required
     )
