@@ -42,7 +42,7 @@ def _spatial(client: Any) -> SpatialEngine:
 def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch
 ) -> None:
-    """The migration chain applies and reverses cleanly (002-005)."""
+    """The migration chain applies and reverses cleanly (002-006)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -61,9 +61,19 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
         "incident_evidence",
         "incident_assignments",
         "incident_counters",
+        "operational_events",
+        "event_outbox",
     } <= _tables(url)
 
-    # V10 (005) reverses first: incident tables go, autonomous stays.
+    # V12 (006) reverses first: history + outbox go, incidents stay.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "operational_events" not in remaining
+    assert "event_outbox" not in remaining
+    assert "incidents" in remaining
+    assert "incident_timeline" in remaining
+
+    # V10 (005) reverses next: incident tables go, autonomous stays.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "incidents" not in remaining

@@ -44,6 +44,29 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
+    # --- V12 PostgreSQL pool reliability (non-sqlite only) ---
+    db_pool_size: int = Field(default=5, ge=1, le=50)
+    db_max_overflow: int = Field(default=10, ge=0, le=100)
+    db_pool_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    db_pool_recycle_seconds: float = Field(default=1800.0, gt=0.0, le=86400.0)
+    db_connect_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
+
+    # --- V12 Redis + event bus ---
+    # Local single-process delivery is the default. Distributed mode
+    # requires Redis explicitly; required mode fails startup without it.
+    redis_enabled: bool = Field(default=False)
+    redis_required: bool = Field(default=False)
+    redis_connect_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    redis_socket_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    event_bus_mode: str = Field(default="local")
+    event_bus_channel: str = Field(default="ivp:events/v1", min_length=1, max_length=256)
+    event_max_payload_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    event_queue_max: int = Field(default=1000, ge=10, le=100000)
+    outbox_batch_size: int = Field(default=50, ge=1, le=1000)
+    outbox_max_attempts: int = Field(default=10, ge=1, le=1000)
+    outbox_retry_base_seconds: float = Field(default=5.0, gt=0.0, le=3600.0)
+    operational_event_retention_days: int = Field(default=90, ge=1, le=3650)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")
@@ -282,6 +305,14 @@ class Settings(BaseSettings):
             raise ConfigurationError("WEBSOCKET_QUEUE_MAX_SIZE must be in [1, 10000].")
         if self.max_request_body_bytes < 1024:
             raise ConfigurationError("MAX_REQUEST_BODY_BYTES must be >= 1024.")
+        # V12 deployment-mode consistency: distributed delivery requires
+        # Redis explicitly; never silently fall back to local-only.
+        if self.event_bus_mode == "distributed" and not self.redis_enabled:
+            raise ConfigurationError("EVENT_BUS_MODE=distributed requires REDIS_ENABLED=true.")
+        if self.redis_required and not self.redis_enabled:
+            raise ConfigurationError("REDIS_REQUIRED=true requires REDIS_ENABLED=true.")
+        if self.redis_enabled and not str(self.redis_url or "").strip():
+            raise ConfigurationError("REDIS_ENABLED=true requires a REDIS_URL.")
         # Production CORS rules (§37): no wildcard origins, explicit origins
         # required. Enforced here (not in the model validator) so production
         # Settings remain unit-constructible while app startup fails fast.
@@ -296,6 +327,14 @@ class Settings(BaseSettings):
         notes.append(f"env={self.app_env.value}")
         notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
         return notes
+
+    @field_validator("event_bus_mode")
+    @classmethod
+    def _normalize_event_bus_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in ("local", "distributed"):
+            raise ValueError("EVENT_BUS_MODE must be local|distributed")
+        return normalized
 
     @field_validator("spatial_proximity_strategy")
     @classmethod
@@ -352,6 +391,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == AppEnv.production
+
+    @property
+    def is_distributed(self) -> bool:
+        """Cross-process event delivery is explicitly configured."""
+        return self.event_bus_mode == "distributed" and self.redis_enabled
 
 
 @lru_cache(maxsize=1)

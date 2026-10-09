@@ -194,13 +194,12 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
 
 def _dispose_engine(state: Any) -> str:
     """Best-effort engine dispose (pooled connections released)."""
+    from backend.app.infrastructure.db import dispose_engine
+
     try:
-        factory = state.session_factory
-        engine = factory.kw.get("bind") if hasattr(factory, "kw") else None
-        if engine is None:
-            return "no engine to dispose"
-        engine.dispose()
-        return "engine disposed"
+        if dispose_engine(state.session_factory):
+            return "engine disposed"
+        return "no engine to dispose"
     except Exception as exc:
         return f"dispose skipped ({type(exc).__name__})"
 

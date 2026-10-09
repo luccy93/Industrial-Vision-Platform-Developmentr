@@ -8,6 +8,9 @@ services:
       - .env.example
     environment:
       APP_ENV: development
+      # V12: explicit local mode (single-process delivery, no Redis needed).
+      REDIS_ENABLED: "false"
+      EVENT_BUS_MODE: local
     ports:
       - "8000:8000"
     depends_on:

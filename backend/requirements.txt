@@ -16,3 +16,6 @@ torch>=2.0
 ultralytics>=8.0
 python-multipart>=0.0.9
 httpx>=0.27
+# V12 Redis coordination + event distribution (sync client; backend is sync).
+# Imported lazily — the API boots and tests pass without a server.
+redis>=5.0,<6
