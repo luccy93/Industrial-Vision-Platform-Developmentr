@@ -162,6 +162,22 @@ startup, never degrade silently. `WORKER_HEARTBEAT_TIMEOUT_SECONDS`,
 supervision and socket layers; out-of-range values fail startup validation
 (`Settings.validate_startup()`). Full guide: `docs/BACKEND_HARDENING.md`.
 
+## Data reliability (V12)
+
+`DB_POOL_*` / `DB_CONNECT_TIMEOUT_SECONDS` size server-database pools
+(SQLite dev/test unchanged). `REDIS_ENABLED=false` + `EVENT_BUS_MODE=
+local` default to single-process delivery with zero Redis dependence;
+set `REDIS_ENABLED=true` + `EVENT_BUS_MODE=distributed` (plus
+`REDIS_REQUIRED=true` to enforce) with a reachable `REDIS_URL` for
+cross-process distribution — misconfiguration fails startup, never
+falls back silently. `EVENT_MAX_PAYLOAD_BYTES`, `EVENT_QUEUE_MAX`,
+`OUTBOX_*` bound the bus and publisher; `OPERATIONAL_EVENT_
+RETENTION_DAYS` bounds history. Tune against the deterministic fake in
+`backend/tests/redis_helpers.py` (no live server needed). Compose runs
+`postgres:16` + `redis:7`; the api service pins local mode. The optional
+real-Redis smoke runs only with an explicit service, else SKIPPED.
+Full guide: `docs/DATA_RELIABILITY.md`.
+
 ## Docker
 
 ```powershell

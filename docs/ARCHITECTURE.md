@@ -206,7 +206,37 @@ Dashboard
   No Redis, no auth, no new domain features. See
   `docs/BACKEND_HARDENING.md`.
 
-## Future volumes (explicitly NOT in V01–V11)
+## V12 — Implemented (data reliability)
+
+- `backend/app/infrastructure/db.py`: explicit pool sizing/timeouts/
+  recycle/connect-timeout (server DBs; SQLite unchanged), `dispose_engine`,
+  `pool_status` telemetry. `get_session_factory` accepts settings; cache
+  key includes pool values.
+- `backend/app/models/operational_orm.py` + Alembic `006`: `operational_
+  events` (canonical history, idempotent) + `event_outbox` (durable
+  intents). `incident_events` links resolve to history rows going
+  forward; legacy orphans reported, never fabricated or deleted.
+- `backend/app/events/`: `envelope.py` (v1, validated, bounded),
+  `bus.py` (local fan-out + distributed Redis, dedup, isolation),
+  `store.py` (history + outbox repositories, atomic
+  `record_event_with_outbox`), `publisher.py` (`OutboxPublisher` +
+  `RedisEventSubscriber` as `ManagedWorker`s with sync `drain_once` /
+  `poll_once` for determinism).
+- `backend/app/infrastructure/redis_client.py`: single lifecycle-owned
+  client (bounded timeouts, ping-verified, idempotent close, secret-free).
+- Producers: worker stages publish new/changed V05–V09 events;
+  `IncidentManager` persists member history + queues lifecycle intents
+  (all failure-isolated, zero behavior change unwired). Remote incident
+  changes ingest idempotently into the existing WS feed — no hot-loop
+  rewrite. Retention cleanup rides the sweep.
+- Runtime: `redis` startup + `stop_event_bus`/`close_redis` shutdown
+  phases; publisher/subscriber threads start in lifespan only (no test
+  thread leaks); `redis` + `eventbus` health components; Redis-aware
+  readiness (required-only gating). Compose pins local mode by default.
+- No cache (documented), no Streams/locks, V10 pagination frozen. See
+  `docs/DATA_RELIABILITY.md`.
+
+## Future volumes (explicitly NOT in V01–V12)
 
 | Stage | Status | Notes |
 |---|---|---|

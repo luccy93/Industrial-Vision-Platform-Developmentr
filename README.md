@@ -77,6 +77,25 @@ queues, heartbeat, graceful shutdown), settings-driven CORS with
 production fail-fast, JSON body caps, and atomic incident transactions.
 No Redis, no auth/RBAC, no new domain features — resilience only.
 **V11 = Backend Hardening.**
+V12 adds the **PostgreSQL + Redis data layer**: pooled, timeout-bounded
+database access; durable operational event history + transactional outbox
+(Alembic `006`); a local-first event bus (V05–V10 genuine events) with
+opt-in Redis pub/sub distribution; lifecycle-owned Redis with
+required/optional policy; Redis-aware health/readiness; and retention
+cleanup. No cache, no new models, no auth/RBAC — reliability only.
+**V12 = Data Reliability.**
+
+## Features (V12)
+
+- Explicit PostgreSQL pool configuration (size/overflow/timeout/recycle/connect timeout) with health-checked connections; SQLite dev/test path unchanged; engine dispose on shutdown
+- Durable operational event history (`operational_events`, Alembic `006`): canonical V09 unified events for incident-linked members, idempotent on event id and source identity — never frames, detections, or tracks
+- Transactional outbox (`event_outbox`): event row + delivery intent commit together; managed publisher drains with bounded batches, exponential-backoff retries, and observably dead intents after exhausting attempts
+- Local-first event bus for genuine V05–V10 events (versioned envelopes reusing existing contracts, size-bounded, duplicate-suppressed) with opt-in Redis pub/sub distribution; subscribers never republish; redelivery-safe idempotent consumers
+- Worker stages publish new-or-changed domain events (failure-isolated, skipped with no listeners); incident lifecycle queues durable intents; remote changes ingest idempotently into the WS feed without hot-loop changes
+- Lifecycle-owned Redis (bounded timeouts, ping-verified start, idempotent close, secret-free logs); required mode fails startup and reports 503, optional mode degrades honestly, distributed mode never silently falls back to local
+- Redis/eventbus health components, Redis-aware readiness, pool telemetry in DB metadata, retention cleanup on the sweep path
+- V10 pagination and all V01–V11 contracts preserved byte-for-byte
+- Documented non-claims: no cache, no Redis Streams/locks, no auth/RBAC (V16), Pub/Sub is notification transport — never storage or guaranteed delivery
 
 ## Features (V11)
 
@@ -92,7 +111,6 @@ No Redis, no auth/RBAC, no new domain features — resilience only.
 - Documented non-claims: no Redis broker, no auth/RBAC (V16), no production rate limiting, no K8s/observability deployment, no new domain models
 
 ## Features (V10)
-
 - Operational incidents from V09 risk clusters: `INC-YYYY-XXXXXX` numbering (atomic counter), category precedence (AUTONOMOUS→COLLISION, QUALITY→QUALITY, SPATIAL→SPATIAL, SAFETY→SAFETY), priority inherited from cluster, dedupe on `(camera_id, source_cluster_id)` backed by a partial unique index
 - Explicit lifecycle OPEN → ACKNOWLEDGED/INVESTIGATING → MITIGATED → RESOLVED → CLOSED (terminal; no REOPENED, never auto-close); violations are HTTP 409 with structured `{code, current_status, attempted_status}`
 - Operator actions: assignment with history, escalation to any priority with mandatory reason (up or down), notes/findings/actions/observations, mitigation and resolution reasons, terminal closure with reason

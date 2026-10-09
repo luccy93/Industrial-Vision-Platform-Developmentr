@@ -394,6 +394,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
             autonomous_engine=autonomous_engine,
             intelligence_engine=_intelligence_engine(request),
             incident_manager=getattr(request.app.state, "incident_manager", None),
+            event_bus=getattr(request.app.state, "event_bus", None),
         )
         worker.start()
     except Exception:

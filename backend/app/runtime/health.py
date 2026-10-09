@@ -51,6 +51,8 @@ class ReadinessStatus(BaseModel):
 HEALTH_COMPONENTS: tuple[str, ...] = (
     "application",
     "database",
+    "redis",
+    "eventbus",
     "camera_manager",
     "inference",
     "tracking",

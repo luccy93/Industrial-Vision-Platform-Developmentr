@@ -157,9 +157,10 @@ class EventBus:
     def publish(self, envelope: EventEnvelope) -> DeliveryReport:
         """Deliver locally; also publish remotely when distributed.
 
-        Local subscriber failures are isolated (counted, logged) and never
-        crash the publisher. Remote failures raise in distributed mode
-        (observed, never silent) and are skipped in local mode.
+        Ephemeral path with duplicate suppression: repeated publishes of
+        the same ``event_id`` are dropped (protects against double-publish
+        bugs). Durable redelivery uses :meth:`deliver_durable` instead —
+        subscribers of durable events MUST be idempotent.
         """
         report = DeliveryReport(event_id=envelope.event_id)
         try:
@@ -176,6 +177,42 @@ class EventBus:
             report.duplicate_dropped = True
             self._dropped_duplicates += 1
             return report
+        fan_out = self._fan_out(envelope)
+        report.delivered_local = fan_out.delivered_local
+        report.subscriber_errors = fan_out.subscriber_errors
+        self._delivered += 1
+        if self.is_distributed:
+            self._publish_remote(raw, report)
+        return report
+
+    def deliver_durable(self, envelope: EventEnvelope) -> DeliveryReport:
+        """Deliver one outbox intent (no duplicate suppression).
+
+        Used ONLY by the outbox publisher: intents are unique by
+        construction, and crash-recovery redelivery is expected. Every
+        durable subscriber must be idempotent.
+        """
+        report = DeliveryReport(event_id=envelope.event_id)
+        try:
+            raw = envelope.to_bytes(self._max_payload)
+        except ValueError:
+            report.oversize_dropped = True
+            logger.warning(
+                "durable event oversize dropped type=%s event_id=%s",
+                envelope.event_type,
+                envelope.event_id,
+            )
+            return report
+        fan_out = self._fan_out(envelope)
+        report.delivered_local = fan_out.delivered_local
+        report.subscriber_errors = fan_out.subscriber_errors
+        self._delivered += 1
+        if self.is_distributed:
+            self._publish_remote(raw, report)
+        return report
+
+    def _fan_out(self, envelope: EventEnvelope) -> DeliveryReport:
+        report = DeliveryReport(event_id=envelope.event_id)
         with self._lock:
             running = self._running
             subscriptions = list(self._subscriptions.values())
@@ -193,20 +230,20 @@ class EventBus:
                         envelope.event_type,
                         type(exc).__name__,
                     )
-        self._delivered += 1
-        if self.is_distributed:
-            manager = self._redis_manager
-            if manager is None:
-                # Misconfiguration: distributed without transport is a loud
-                # error, never a silent local-only fallback.
-                raise ConnectionError("distributed event bus has no Redis transport configured")
-            try:
-                manager.publish(self._channel, raw)
-                report.published_remote = True
-            except Exception as exc:
-                report.remote_error = f"{type(exc).__name__}"
-                raise
         return report
+
+    def _publish_remote(self, raw: bytes, report: DeliveryReport) -> None:
+        manager = self._redis_manager
+        if manager is None:
+            # Misconfiguration: distributed without transport is a loud
+            # error, never a silent local-only fallback.
+            raise ConnectionError("distributed event bus has no Redis transport configured")
+        try:
+            manager.publish(self._channel, raw)
+            report.published_remote = True
+        except Exception as exc:
+            report.remote_error = f"{type(exc).__name__}"
+            raise
 
     def receive_remote(self, raw: bytes | bytearray) -> EventEnvelope | None:
         """Handle one remotely-received payload: validate + local fan-out.

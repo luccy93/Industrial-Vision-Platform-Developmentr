@@ -26,6 +26,7 @@ from backend.app.core.exceptions import register_exception_handlers
 from backend.app.core.logging import configure_logging, get_logger
 
 _started_at = time.time()
+_logger = get_logger("industrial-vision")
 
 
 def _load_spatial_configuration(app: FastAPI, logger: Any) -> None:
@@ -136,6 +137,13 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
             raise
         notes["logging"] = f"level={settings.log_level}"
         notes["database"] = "session factory ready (live probe in readiness)"
+        redis_manager = getattr(state, "redis_manager", None)
+        if redis_manager is None or not bool(getattr(redis_manager, "enabled", False)):
+            notes["redis"] = "disabled (local mode)"
+        elif bool(getattr(redis_manager, "connected", False)):
+            notes["redis"] = "connected"
+        else:
+            notes["redis"] = "enabled but unreachable (degraded unless required)"
         notes["repositories"] = "schema warm-up deferred to lifespan"
         notes["camera_manager"] = "stream supervisor constructed"
         notes["inference"] = "model manager + inference supervisor constructed"
@@ -178,6 +186,31 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         lambda: _stop_all(state.inference_supervisor, "inference supervisor"),
         shutdown=True,
     )
+    def _stop_event_bus() -> str:
+        # Consumers stop before the resources they need (§6): publisher +
+        # subscriber first, Redis client after (close_redis phase).
+        stopped: list[str] = []
+        for key in ("outbox_publisher", "redis_subscriber"):
+            worker = getattr(state, key, None)
+            if worker is None:
+                continue
+            try:
+                worker.stop(timeout=5.0)
+                stopped.append(key)
+            except Exception as exc:
+                return f"event bus stop failed ({type(exc).__name__})"
+        return f"event bus stopped ({','.join(stopped) or 'nothing running'})"
+
+    def _close_redis() -> str:
+        manager = getattr(state, "redis_manager", None)
+        if manager is None:
+            return "no redis manager"
+        try:
+            manager.close()
+            return "redis client closed"
+        except Exception as exc:
+            return f"redis close skipped ({type(exc).__name__})"
+
     for _phase, _message in (
         ("stop_perception_workers", "perception runs inline on inference workers"),
         ("stop_intelligence_worker", "intelligence runs inline on inference workers"),
@@ -186,10 +219,28 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         ("close_websockets", "websocket drain managed by lifespan (bounded)"),
     ):
         runtime.register_phase(_phase, lambda m=_message: m, shutdown=True)
+    runtime.register_phase("stop_event_bus", _stop_event_bus, shutdown=True)
+    runtime.register_phase("close_redis", _close_redis, shutdown=True)
     runtime.register_phase(
         "close_database", lambda: _dispose_engine(state), shutdown=True
     )
     runtime.register_phase("mark_stopped", lambda: "runtime STOPPED", shutdown=True)
+
+
+def _redis_readiness(app: FastAPI) -> tuple[Any, str]:
+    """Redis readiness: required → real ping; optional → honest state."""
+    from backend.app.runtime.health import HealthStatus
+
+    manager = getattr(app.state, "redis_manager", None)
+    if manager is None or not bool(getattr(manager, "enabled", False)):
+        return HealthStatus.DISABLED, "redis disabled (local mode)"
+    try:
+        reachable = bool(manager.ping())
+    except Exception:
+        return HealthStatus.NOT_READY, "redis probe failed"
+    if reachable:
+        return HealthStatus.READY, "redis reachable"
+    return HealthStatus.NOT_READY, "redis unreachable"
 
 
 def _dispose_engine(state: Any) -> str:
@@ -219,6 +270,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _load_spatial_configuration(app, logger)
     _load_quality_configuration(app, logger)
     _load_autonomous_configuration(app, logger)
+    # V12: start durable-distribution threads (lifespan only, so tests that
+    # build apps without a lifespan context never leak threads). The
+    # publisher drains in both modes; the subscriber only exists when
+    # distributed delivery is configured.
+    publisher = getattr(app.state, "outbox_publisher", None)
+    if publisher is not None:
+        try:
+            publisher.start()
+        except Exception:
+            logger.warning("outbox publisher start failed", exc_info=True)
+    subscriber = getattr(app.state, "redis_subscriber", None)
+    if subscriber is not None:
+        try:
+            subscriber.start()
+        except Exception:
+            logger.warning("redis subscriber start failed", exc_info=True)
     yield
     # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
     # then run the ordered idempotent runtime shutdown.
@@ -375,6 +442,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     readiness.register_check("workers", _workers_check)
     app.state.readiness = readiness
+
+    # V12: durable distribution layer (local mode by default).
+    from backend.app.events.bus import EventBus
+    from backend.app.events.publisher import OutboxPublisher, RedisEventSubscriber
+    from backend.app.events.store import OperationalEventRepository, OutboxRepository
+    from backend.app.infrastructure.redis_client import RedisLifecycleManager
+
+    operational_repository = OperationalEventRepository(app.state.session_factory)
+    outbox_repository = OutboxRepository(app.state.session_factory)
+    redis_manager = RedisLifecycleManager(
+        enabled=settings.redis_enabled,
+        required=settings.redis_required,
+        url=settings.redis_url,
+        connect_timeout_seconds=settings.redis_connect_timeout_seconds,
+        socket_timeout_seconds=settings.redis_socket_timeout_seconds,
+    )
+    # Required Redis unreachable fails startup here (fail fast); optional
+    # Redis degrades honestly inside start().
+    redis_manager.start()
+    app.state.redis_manager = redis_manager
+    event_bus = EventBus(
+        mode=settings.event_bus_mode,
+        channel=settings.event_bus_channel,
+        max_payload_bytes=settings.event_max_payload_bytes,
+        redis_manager=redis_manager if settings.is_distributed else None,
+    )
+    event_bus.start()
+    app.state.event_bus = event_bus
+    outbox_publisher = OutboxPublisher(
+        outbox=outbox_repository,
+        bus=event_bus,
+        batch_size=settings.outbox_batch_size,
+        max_attempts=settings.outbox_max_attempts,
+        retry_base_seconds=settings.outbox_retry_base_seconds,
+    )
+    app.state.outbox_publisher = outbox_publisher
+    redis_subscriber: RedisEventSubscriber | None = None
+    if settings.is_distributed:
+        redis_subscriber = RedisEventSubscriber(
+            redis_manager=redis_manager, bus=event_bus, channel=settings.event_bus_channel
+        )
+    app.state.redis_subscriber = redis_subscriber
+    app.state.incident_manager.configure_distribution(
+        event_bus=event_bus,
+        operational_repository=operational_repository,
+        outbox_repository=outbox_repository,
+    )
+
+    def _ingest_remote_incident(envelope: Any) -> None:
+        # Cross-process incident change → local WS feed. Own-origin echoes
+        # are skipped (local recording already fanned out); unknown kinds
+        # drop safely inside ingest_remote_change.
+        try:
+            if getattr(envelope, "origin", "") == event_bus.origin:
+                return
+            if not str(getattr(envelope, "event_type", "")).startswith("incident_"):
+                return
+            app.state.incident_manager.ingest_remote_change(envelope)
+        except Exception:
+            _logger.debug("remote incident ingest failed", exc_info=True)
+
+    event_bus.subscribe(_ingest_remote_incident)
+    app.state.readiness.register_check(
+        "redis", lambda: _redis_readiness(app), required=settings.redis_required
+    )
 
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()

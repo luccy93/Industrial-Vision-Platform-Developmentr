@@ -14,12 +14,14 @@ nothing new) and every sync path is idempotent.
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import threading
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -61,15 +63,41 @@ def _priority_rank(priority: EventPriority | str) -> int:
 class IncidentManager:
     """Owns incident lifecycle, numbering, timeline, evidence, and WS feed."""
 
+    # Change kinds that map 1:1 onto bus event types ("incident_" + kind).
+    LIFECYCLE_CHANGE_KINDS = frozenset(
+        {
+            "created",
+            "updated",
+            "status_changed",
+            "assigned",
+            "resolved",
+            "closed",
+            "evidence_added",
+        }
+    )
+
     def __init__(
         self,
         settings: Any,
         session_factory: Callable[[], Session],
         intelligence_engine: Any = None,
+        *,
+        event_bus: Any = None,
+        operational_repository: Any = None,
+        outbox_repository: Any = None,
     ) -> None:
         self._settings = settings
         self._repository = IncidentRepository(session_factory)
         self._intelligence = intelligence_engine
+        self._event_bus = event_bus
+        self._operational = operational_repository
+        self._outbox = outbox_repository
+        self._origin = f"incidents-{uuid.uuid4().hex[:12]}"
+        # Idempotency for redelivered remote changes (crash recovery may
+        # legitimately deliver twice; the feed must not duplicate). The
+        # deque is pruned manually so the set never leaks evicted ids.
+        self._remote_seen: deque[str] = deque()
+        self._remote_seen_set: set[str] = set()
         self._lock = threading.RLock()
         self._open_index: dict[tuple[str, str], str] = {}
         self._last_synced: dict[str, datetime] = {}
@@ -85,6 +113,12 @@ class IncidentManager:
             "operations_total": 0,
             "sync_runs": 0,
             "processing_latency_ms": 0.0,
+            "history_persisted": 0,
+            "history_failures": 0,
+            "outbox_queued": 0,
+            "outbox_failures": 0,
+            "remote_ingested": 0,
+            "remote_dropped": 0,
         }
 
     # ------------------------------------------------------------------
@@ -98,6 +132,26 @@ class IncidentManager:
     def repository(self) -> IncidentRepository:
         return self._repository
 
+    def configure_distribution(
+        self,
+        *,
+        event_bus: Any = None,
+        operational_repository: Any = None,
+        outbox_repository: Any = None,
+    ) -> None:
+        """Attach V12 distribution collaborators (additive; default off).
+
+        Safe to call at any time; takes effect on subsequent syncs and
+        operations. All hooks are failure-isolated.
+        """
+        with self._lock:
+            if event_bus is not None:
+                self._event_bus = event_bus
+            if operational_repository is not None:
+                self._operational = operational_repository
+            if outbox_repository is not None:
+                self._outbox = outbox_repository
+
     def metrics(self) -> dict[str, Any]:
         with self._lock:
             return dict(self._metrics)
@@ -107,7 +161,9 @@ class IncidentManager:
             items = [c for c in self._changes if c["seq"] > since_seq]
             return items[-max(1, limit) :]
 
-    def _record_change(self, kind: str, incident: Incident, message: str = "", **extra: Any) -> None:
+    def _record_change(
+        self, kind: str, incident: Incident, message: str = "", **extra: Any
+    ) -> dict[str, Any]:
         with self._lock:
             entry: dict[str, Any] = {
                 "seq": next(self._seq),
@@ -125,6 +181,204 @@ class IncidentManager:
             }
             entry.update(extra)
             self._changes.append(entry)
+        # Durable delivery intent + history live outside the lock (I/O must
+        # never hold the manager lock); failures are isolated, never raised.
+        self._publish_lifecycle_change(entry)
+        return entry
+
+    # ------------------------------------------------------------------
+    # V12 durable distribution (§4.4, §5.2)
+    # ------------------------------------------------------------------
+    def _publish_lifecycle_change(self, entry: dict[str, Any]) -> None:
+        """Queue one outbox intent for a lifecycle change (best-effort).
+
+        The incident row + timeline are already durable (V11 atomic move);
+        this intent covers downstream notification. No-op without an
+        outbox repository. Never raises.
+        """
+        if self._outbox is None:
+            return
+        try:
+            kind = str(entry.get("kind", ""))
+            if kind not in self.LIFECYCLE_CHANGE_KINDS:
+                return
+            incident_id = str(entry.get("incident_id", ""))
+            event_id = f"incident:{incident_id}:{entry.get('seq', 0)}"
+            payload: dict[str, Any] = {
+                "incident_id": incident_id,
+                "incident_number": entry.get("incident_number"),
+                "camera_id": entry.get("camera_id"),
+                "status": entry.get("status"),
+                "priority": entry.get("priority"),
+            }
+            for key in (
+                "previous_status",
+                "new_status",
+                "resolution_reason",
+                "closure_reason",
+                "previous_assignee",
+                "evidence_id",
+                "evidence_type",
+            ):
+                if entry.get(key) is not None:
+                    payload[key] = entry[key]
+            from backend.app.events.envelope import EventEnvelope
+
+            envelope = EventEnvelope(
+                event_id=event_id,
+                event_type=f"incident_{kind}",
+                domain="INCIDENT",
+                camera_id=str(entry.get("camera_id") or ""),
+                origin=self._origin,
+                payload=payload,
+            )
+            queued = self._outbox.enqueue(
+                event_id, f"incident_{kind}", json.loads(envelope.model_dump_json())
+            )
+            with self._lock:
+                if queued:
+                    self._metrics["outbox_queued"] += 1
+                else:
+                    self._metrics["outbox_failures"] += 1
+        except Exception as exc:
+            logger.warning("incident outbox enqueue failed: %s", type(exc).__name__)
+            with self._lock:
+                self._metrics["outbox_failures"] += 1
+
+    def _persist_member_events(self, members: list[Any], risk_level: str, risk_score: float) -> int:
+        """Upsert member unified events into durable history (best-effort).
+
+        Only incident-linked members persist — never every domain event.
+        Returns rows created-or-refreshed. Never raises.
+        """
+        if self._operational is None:
+            return 0
+        persisted = 0
+        for member in members:
+            try:
+                _, _created = self._operational.upsert_event(
+                    event_id=str(member.event_id),
+                    camera_id=str(member.camera_id),
+                    source_domain=member.source_domain.value,
+                    source_event_id=str(member.source_event_id),
+                    event_type=member.event_type.value,
+                    severity=member.severity.value,
+                    risk_level=str(risk_level),
+                    risk_score=float(risk_score),
+                    status=member.status.value,
+                    first_seen=member.first_seen,
+                    last_seen=member.last_seen,
+                    metadata={
+                        "message": str(getattr(member, "message", "") or "")[:160],
+                        "confidence": float(getattr(member, "confidence", 0.0) or 0.0),
+                        "priority": str(getattr(getattr(member, "priority", None), "value", "P4")),
+                    },
+                )
+                persisted += 1
+            except Exception as exc:
+                logger.warning("operational history upsert failed: %s", type(exc).__name__)
+                with self._lock:
+                    self._metrics["history_failures"] += 1
+        if persisted:
+            with self._lock:
+                self._metrics["history_persisted"] += persisted
+        return persisted
+
+    def ingest_remote_change(self, envelope: dict[str, Any] | Any) -> dict[str, Any] | None:
+        """Ingest a remotely-published incident change into the feed.
+
+        Used by the distributed WS path: the incident row itself resolves
+        from shared PostgreSQL; this entry only carries the feed position
+        and display extras. Unknown kinds are dropped (never crash).
+        Redeliveries of the same envelope event_id are dropped: crash
+        recovery is expected to deliver twice.
+        Own-origin echoes must be filtered by the caller.
+        """
+        try:
+            data = dict(envelope) if isinstance(envelope, dict) else envelope.model_dump()
+            event_id = str(data.get("event_id", ""))
+            event_type = str(data.get("event_type", ""))
+            if not event_type.startswith("incident_"):
+                return None
+            kind = event_type[len("incident_") :]
+            if kind not in self.LIFECYCLE_CHANGE_KINDS:
+                with self._lock:
+                    self._metrics["remote_dropped"] += 1
+                return None
+            with self._lock:
+                if event_id and event_id in self._remote_seen_set:
+                    self._metrics["remote_dropped"] += 1
+                    return None
+                if event_id:
+                    self._remote_seen.append(event_id)
+                    self._remote_seen_set.add(event_id)
+                    while len(self._remote_seen) > 5000:
+                        self._remote_seen_set.discard(self._remote_seen.popleft())
+            payload = data.get("payload") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            incident_id = str(payload.get("incident_id") or data.get("incident_id") or "")
+            if not incident_id:
+                with self._lock:
+                    self._metrics["remote_dropped"] += 1
+                return None
+            with self._lock:
+                entry: dict[str, Any] = {
+                    "seq": next(self._seq),
+                    "kind": kind,
+                    "incident_id": incident_id,
+                    "incident_number": payload.get("incident_number", ""),
+                    "camera_id": str(payload.get("camera_id") or data.get("camera_id") or ""),
+                    "title": str(payload.get("title") or ""),
+                    "status": str(payload.get("status") or ""),
+                    "priority": str(payload.get("priority") or ""),
+                    "risk_level": "",
+                    "risk_score": 0.0,
+                    "timestamp": str(
+                        data.get("timestamp")
+                        or (payload.get("timestamp") if isinstance(payload, dict) else "")
+                        or utcnow().isoformat()
+                    ),
+                    "message": str(payload.get("message") or ""),
+                    "remote": True,
+                }
+                for key in (
+                    "previous_status",
+                    "new_status",
+                    "resolution_reason",
+                    "closure_reason",
+                    "previous_assignee",
+                    "evidence_id",
+                    "evidence_type",
+                ):
+                    if payload.get(key) is not None:
+                        entry[key] = payload[key]
+                self._changes.append(entry)
+                self._metrics["remote_ingested"] += 1
+                return dict(entry)
+        except Exception as exc:
+            logger.warning("remote change ingest failed: %s", type(exc).__name__)
+            with self._lock:
+                self._metrics["remote_dropped"] += 1
+            return None
+
+    def run_retention_cleanup(self, now: datetime | None = None) -> dict[str, int]:
+        """Bounded retention deletes for history + sent outbox intents."""
+        reference = now or utcnow()
+        summary = {"history_deleted": 0, "outbox_deleted": 0}
+        if self._operational is None or self._outbox is None:
+            return summary
+        try:
+            retention_days = int(getattr(self._settings, "operational_event_retention_days", 90))
+        except (TypeError, ValueError):
+            retention_days = 90
+        cutoff = reference - timedelta(days=max(1, retention_days))
+        try:
+            summary["history_deleted"] = self._operational.delete_older_than(cutoff, limit=500)
+            summary["outbox_deleted"] = self._outbox.delete_sent_older_than(cutoff, limit=500)
+        except Exception as exc:
+            logger.warning("retention cleanup failed: %s", type(exc).__name__)
+        return summary
 
     # ------------------------------------------------------------------
     # Automatic sync from V09 intelligence
@@ -266,6 +520,12 @@ class IncidentManager:
                 is_primary=(primary is not None and member.event_id == primary.event_id),
             ):
                 linked += 1
+        # Durable history for incident-linked members (V12; best-effort).
+        self._persist_member_events(
+            members,
+            cluster.risk_assessment.risk_level.value,
+            cluster.risk_assessment.risk_score,
+        )
         # Refresh risk/severity from the triggering cluster.
         self._repository.update_incident(
             str(incident.id),
@@ -328,6 +588,8 @@ class IncidentManager:
                 linked += 1
         if linked:
             changed = True
+            # Durable history for newly linked members (V12; best-effort).
+            self._persist_member_events(members, assessment.risk_level.value, assessment.risk_score)
         if changed:
             updated = self._repository.update_incident(str(incident.id), **fields)
             assert updated is not None
@@ -395,6 +657,8 @@ class IncidentManager:
                 actor_id=None,
             )
             resolved += 1
+        # Bounded retention cleanup rides the periodic sweep (V12).
+        self.run_retention_cleanup(timestamp)
         return resolved
 
     @staticmethod

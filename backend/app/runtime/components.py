@@ -72,6 +72,46 @@ def evaluate_components(state: Any, settings: Any) -> list[ComponentHealth]:
 
     results.append(_timed("database", _database))
 
+    def _redis() -> tuple[HealthStatus, str, dict[str, Any]]:
+        manager = _presence(state, "redis_manager")
+        if manager is None:
+            return HealthStatus.DISABLED, "redis not configured (local mode)", {"required": False}
+        try:
+            status = manager.status()
+        except Exception:
+            return HealthStatus.UNKNOWN, "redis status unavailable", {}
+        metadata = {"required": bool(status.required), "connected": bool(status.connected)}
+        if not bool(status.enabled):
+            return HealthStatus.DISABLED, "redis disabled (local mode)", metadata
+        if bool(status.connected):
+            return HealthStatus.READY, "redis reachable", metadata
+        # Enabled but unreachable: required → NOT_READY (gates readiness),
+        # optional → DEGRADED (honest, platform stays servable).
+        if bool(status.required):
+            return HealthStatus.NOT_READY, "required redis unreachable", metadata
+        return HealthStatus.DEGRADED, "optional redis unreachable", metadata
+
+    results.append(_timed("redis", _redis))
+
+    def _eventbus() -> tuple[HealthStatus, str, dict[str, Any]]:
+        bus = _presence(state, "event_bus")
+        if bus is None:
+            return HealthStatus.DISABLED, "event bus not configured", {}
+        try:
+            stats = bus.stats()
+        except Exception:
+            return HealthStatus.UNKNOWN, "event bus status unavailable", {}
+        mode = str(stats.get("mode", "local"))
+        metadata = {
+            "mode": mode,
+            "subscriptions": int(stats.get("subscriptions", 0)),
+            "delivered": int(stats.get("delivered", 0)),
+            "dropped_duplicates": int(stats.get("dropped_duplicates", 0)),
+        }
+        return HealthStatus.READY, f"event bus running ({mode})", metadata
+
+    results.append(_timed("eventbus", _eventbus))
+
     def _camera_manager() -> tuple[HealthStatus, str, dict[str, Any]]:
         supervisor = _presence(state, "supervisor")
         if supervisor is None:

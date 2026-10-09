@@ -16,7 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from backend.app.domain.frame import IngestionFrame
@@ -54,6 +54,7 @@ class InferenceWorker:
         autonomous_engine: Any = None,
         intelligence_engine: Any = None,
         incident_manager: Any = None,
+        event_bus: Any = None,
     ) -> None:
         self.camera_id = camera_id
         self._model_manager = model_manager
@@ -64,6 +65,11 @@ class InferenceWorker:
         self._autonomous_engine = autonomous_engine
         self._intelligence_engine = intelligence_engine
         self._incident_manager = incident_manager
+        self._event_bus = event_bus
+        # V12 bus publish state: (event identity → last published status),
+        # mirroring the WS delta dictionaries. Bounded; pruned on growth.
+        self._bus_published: dict[str, str] = {}
+        self._bus_origin = f"worker:{camera_id}"
         self._queue: queue.Queue[IngestionFrame] = queue.Queue(maxsize=queue_size)
         self._poll_interval = poll_interval
         self._results: deque[InferenceResult] = deque(maxlen=results_size)
@@ -224,6 +230,7 @@ class InferenceWorker:
         with self._lock:
             self._safety_new = list(analysis.new_events)
             self._safety_active = list(analysis.active_events)
+        self._publish_safety_events(list(analysis.new_events) + list(analysis.active_events))
 
     def _analyze_quality(self, frame: IngestionFrame, result: InferenceResult) -> None:
         """V07 stage: frame → quality inspection (sampled, isolated failures).
@@ -252,6 +259,7 @@ class InferenceWorker:
             return
         with self._lock:
             self._quality_latest = list(results)
+        self._publish_quality_events(list(results))
 
     def _analyze_autonomous(self, tracks: list, frame: IngestionFrame, result: InferenceResult) -> None:
         """V08 stage: tracks + frame → autonomous perception (sampled, isolated).
@@ -281,6 +289,7 @@ class InferenceWorker:
             return
         with self._lock:
             self._autonomous_latest = perceived
+        self._publish_autonomous_events()
 
     def _analyze_intelligence(self, result: InferenceResult) -> None:
         """V09 stage: domain events → unified intelligence (isolated failures).
@@ -298,6 +307,237 @@ class InferenceWorker:
             return
         with self._lock:
             self._intelligence_latest = intel
+        self._publish_intelligence_events(intel)
+
+    # ------------------------------------------------------------------
+    # V12 event-bus publication (additive, isolated, never blocking).
+    #
+    # Only new or status-changed genuine events publish — never frames,
+    # detections, tracks, or telemetry. With no bus (or a local bus with
+    # no subscribers) every hook returns after two attribute reads.
+    # ------------------------------------------------------------------
+    def _bus_active(self) -> bool:
+        bus = self._event_bus
+        if bus is None:
+            return False
+        try:
+            if not bus.is_distributed and bus.subscription_count() == 0:
+                return False
+        except Exception:
+            return False
+        return True
+
+    def _publish_resolved(self, resolved: list[tuple[str, str, str, str, Any, dict[str, Any]]]) -> None:
+        """Publish pre-resolved (key, status, type, domain, ts, payload)."""
+        try:
+            from backend.app.domain.common import utcnow as _utcnow
+            from backend.app.events.envelope import EventEnvelope
+
+            bus = self._event_bus
+            if bus is None:
+                return
+            for key, status, message_type, domain, timestamp, payload in resolved:
+                marker = f"{key}:{status}"
+                if self._bus_published.get(marker) == message_type:
+                    continue
+                self._bus_published[marker] = message_type
+                envelope = EventEnvelope(
+                    event_id=marker,
+                    event_type=message_type,
+                    domain=domain,
+                    camera_id=self.camera_id,
+                    timestamp=timestamp or _utcnow(),
+                    origin=self._bus_origin,
+                    payload=dict(payload),
+                )
+                bus.publish(envelope)
+            if len(self._bus_published) > 2000:
+                oldest = list(self._bus_published)[:1000]
+                for stale in oldest:
+                    self._bus_published.pop(stale, None)
+        except Exception as exc:
+            logger.warning("event bus publish failed for %s: %s", self.camera_id, exc)
+
+    @staticmethod
+    def _event_status(event: Any) -> str:
+        status = getattr(event, "status", None)
+        return str(getattr(status, "value", status or "ACTIVE"))
+
+    @staticmethod
+    def _event_timestamp(event: Any) -> Any:
+        return getattr(event, "timestamp", None)
+
+    def _publish_safety_events(self, events: list) -> None:
+        """V05/V06 safety + spatial events (rule-routed wire types)."""
+        if not self._bus_active():
+            return
+        resolved: list[tuple[str, str, str, str, Any, dict[str, Any]]] = []
+        for event in events:
+            try:
+                rule = str((getattr(event, "metadata", None) or {}).get("rule", ""))
+                if rule == "restricted_zone":
+                    message_type, domain = "zone_event", "SPATIAL"
+                elif rule == "proximity_relationships":
+                    message_type, domain = "proximity_event", "SPATIAL"
+                else:
+                    message_type, domain = "safety_event", "SAFETY"
+                payload = event.to_websocket()
+                if not isinstance(payload, dict):
+                    continue
+                resolved.append(
+                    (
+                        f"SAFETY:{event.event_id}",
+                        self._event_status(event),
+                        message_type,
+                        domain,
+                        self._event_timestamp(event),
+                        payload,
+                    )
+                )
+            except Exception:
+                continue
+        self._publish_resolved(resolved)
+
+    def _publish_quality_events(self, results: list) -> None:
+        """V07 quality decisions (events + new inspection results)."""
+        if not self._bus_active():
+            return
+        try:
+            from backend.app.quality.ws import (
+                quality_event_message,
+                quality_result_message,
+            )
+        except Exception:
+            return
+        engine = self._quality_engine
+        resolved: list[tuple[str, str, str, str, Any, dict[str, Any]]] = []
+        for result in results:
+            try:
+                key = f"QUALITY:{result.inspection_id}"
+                payload = quality_result_message(self.camera_id, result)
+                resolved.append((key, "RESULT", "quality_result", "QUALITY", None, payload))
+            except Exception:
+                continue
+        if engine is not None:
+            try:
+                candidates = list(engine.active_events(self.camera_id, 50)) + list(
+                    engine.recent_events(self.camera_id, 10)
+                )
+            except Exception:
+                candidates = []
+            for event in candidates:
+                try:
+                    payload = quality_event_message(self.camera_id, event)
+                    resolved.append(
+                        (
+                            f"QUALITY:{event.event_id}",
+                            self._event_status(event),
+                            "quality_event",
+                            "QUALITY",
+                            self._event_timestamp(event),
+                            payload,
+                        )
+                    )
+                except Exception:
+                    continue
+        self._publish_resolved(resolved)
+
+    def _publish_autonomous_events(self) -> None:
+        """V08 collision-risk + lane events (scene summaries excluded)."""
+        if not self._bus_active():
+            return
+        try:
+            from backend.app.autonomous.ws import collision_risk_message, lane_event_message
+        except Exception:
+            return
+        engine = self._autonomous_engine
+        if engine is None:
+            return
+        try:
+            candidates = list(engine.active_events(self.camera_id, 50)) + list(
+                engine.recent_events(self.camera_id, 10)
+            )
+        except Exception:
+            return
+        resolved: list[tuple[str, str, str, str, Any, dict[str, Any]]] = []
+        for event in candidates:
+            try:
+                if str(getattr(getattr(event, "event_type", None), "value", "")) == "COLLISION_RISK":
+                    message_type = "collision_risk"
+                    payload = collision_risk_message(self.camera_id, event)
+                else:
+                    message_type = "lane_event"
+                    payload = lane_event_message(self.camera_id, event)
+                resolved.append(
+                    (
+                        f"AUTONOMOUS:{event.event_id}",
+                        self._event_status(event),
+                        message_type,
+                        "AUTONOMOUS",
+                        self._event_timestamp(event),
+                        payload,
+                    )
+                )
+            except Exception:
+                continue
+        self._publish_resolved(resolved)
+
+    def _publish_intelligence_events(self, intel: Any) -> None:
+        """V09 unified events + cluster updates + risk summary changes."""
+        if not self._bus_active():
+            return
+        try:
+            from backend.app.intelligence.ws import (
+                intelligence_event_message,
+                risk_cluster_message,
+                risk_update_message,
+            )
+        except Exception:
+            return
+        resolved: list[tuple[str, str, str, str, Any, dict[str, Any]]] = []
+        for event in list(getattr(intel, "events", []) or []):
+            try:
+                domain = str(getattr(getattr(event, "source_domain", None), "value", "INTELLIGENCE"))
+                resolved.append(
+                    (
+                        f"INTELLIGENCE:{event.event_id}",
+                        self._event_status(event),
+                        "intelligence_event",
+                        domain,
+                        self._event_timestamp(event),
+                        intelligence_event_message(self.camera_id, event),
+                    )
+                )
+            except Exception:
+                continue
+        for cluster in list(getattr(intel, "clusters", []) or []):
+            try:
+                assessment = cluster.risk_assessment
+                version = f"{cluster.status.value}:{assessment.risk_level.value}"
+                resolved.append(
+                    (
+                        f"CLUSTER:{cluster.cluster_id}:{version}",
+                        cluster.status.value,
+                        "risk_cluster",
+                        "INTELLIGENCE",
+                        getattr(cluster, "last_seen", None),
+                        risk_cluster_message(self.camera_id, cluster),
+                    )
+                )
+            except Exception:
+                continue
+        try:
+            highest = getattr(intel, "highest_risk", None)
+            priority = getattr(intel, "highest_priority", None)
+            if highest is not None and priority is not None:
+                signature = f"{highest.risk_level.value}:{priority.value}"
+                stamp = getattr(intel, "timestamp", None)
+                stamp_text = stamp.isoformat() if isinstance(stamp, datetime) else str(stamp or "")
+                payload = risk_update_message(self.camera_id, highest, priority, stamp_text)
+                resolved.append(("RISK:summary", signature, "risk_update", "INTELLIGENCE", None, payload))
+        except Exception:
+            pass
+        self._publish_resolved(resolved)
 
     def _sync_incidents(self, result: InferenceResult) -> None:
         """V10 stage: V09 intelligence → incident sync (isolated failures).

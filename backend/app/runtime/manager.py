@@ -63,6 +63,7 @@ STARTUP_PHASES: tuple[str, ...] = (
     "configuration",
     "logging",
     "database",
+    "redis",
     "repositories",
     "camera_manager",
     "inference",
@@ -88,7 +89,9 @@ SHUTDOWN_PHASES: tuple[str, ...] = (
     "stop_intelligence_worker",
     "stop_incident_sync",
     "flush_pending_work",
+    "stop_event_bus",
     "close_websockets",
+    "close_redis",
     "close_database",
     "mark_stopped",
 )
