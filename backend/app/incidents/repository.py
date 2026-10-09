@@ -293,6 +293,25 @@ class IncidentRepository:
             )
             return incident_to_domain(row) if row else None
 
+    def count_by_status_priority(self) -> dict[str, dict[str, int]]:
+        """Grouped incident counts for dashboards (single indexed query).
+
+        Returns ``{status: {priority: count}}`` covering only states and
+        priorities actually present. Read-only; no pagination.
+        """
+        from sqlalchemy import func as _func
+
+        with self._session_factory() as session:
+            rows = (
+                session.query(IncidentORM.status, IncidentORM.priority, _func.count(IncidentORM.id))
+                .group_by(IncidentORM.status, IncidentORM.priority)
+                .all()
+            )
+            grouped: dict[str, dict[str, int]] = {}
+            for status, priority, count in rows:
+                grouped.setdefault(str(status), {})[str(priority)] = int(count)
+            return grouped
+
     def list_incidents(
         self,
         *,

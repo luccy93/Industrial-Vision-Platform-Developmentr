@@ -651,3 +651,94 @@ export type IncidentListResponse = {
   page: number;
   page_size: number;
 };
+
+// --- V13 operations dashboard ---
+
+export type SectionState = "ok" | "degraded" | "unavailable";
+
+export type SectionMeta = {
+  status: SectionState;
+  message: string;
+  updated_at: string;
+};
+
+export type CamerasSection = SectionMeta & {
+  configured: number;
+  enabled: number;
+  by_state: Record<string, number>;
+};
+
+export type SafetySection = SectionMeta & {
+  total_active: number;
+  by_severity: Record<string, number>;
+  cameras_with_events: number;
+  truncated: boolean;
+};
+
+export type IncidentsSection = SectionMeta & {
+  total: number;
+  open_total: number;
+  by_status: Record<string, number>;
+  by_priority: Record<string, number>;
+};
+
+export type QualitySection = SectionMeta & {
+  model_status: string;
+  outcomes: Record<string, number>;
+  active_profiles: number;
+};
+
+export type RiskSection = SectionMeta & {
+  risk_level: string;
+  risk_score: number;
+  priority: string;
+  active_events: number;
+  active_clusters: number;
+};
+
+export type HealthSection = SectionMeta & {
+  ready: boolean;
+  readiness: string;
+  checks: Record<string, string>;
+};
+
+export type OperationsSummary = {
+  timestamp: string;
+  cameras: CamerasSection;
+  safety: SafetySection;
+  incidents: IncidentsSection;
+  quality: QualitySection;
+  risk: RiskSection;
+  health: HealthSection;
+};
+
+export type OperationsWsMessage = {
+  type?: string;
+  event_type?: string;
+  camera_id?: string;
+  timestamp?: string;
+  [key: string]: unknown;
+};
+
+export type TimelineKind =
+  | "safety"
+  | "spatial"
+  | "quality"
+  | "autonomous"
+  | "intelligence"
+  | "incident";
+
+export type TimelineItem = {
+  /** Stable identity for dedup (event_id / cluster_id / incident timeline id). */
+  id: string;
+  kind: TimelineKind;
+  /** Wire or envelope event type, e.g. safety_event, incident_created. */
+  eventType: string;
+  severity: string;
+  cameraId: string;
+  timestamp: string;
+  title: string;
+  /** Existing detail destination, when one exists. */
+  href: string | null;
+  source: "rest" | "socket";
+};

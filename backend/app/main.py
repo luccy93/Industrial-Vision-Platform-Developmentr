@@ -599,6 +599,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.incidents import router as incidents_router
 
     app.include_router(incidents_router)
+    from backend.app.api.v1.operations import router as operations_router
+
+    app.include_router(operations_router)
+    from backend.app.api.v1.operations_ws import router as operations_ws_router
+
+    app.include_router(operations_ws_router)
 
     @app.get("/health", tags=["health"], summary="Service health diagnostics")
     def health() -> dict:
