@@ -912,7 +912,17 @@ class IncidentManager:
 
             raise InvalidTransitionError(incident.status, incident.status)
         previous = incident.priority
-        updated = self._repository.update_incident(str(incident.id), priority=target.value)
+        updated = self._repository.update_incident(
+            str(incident.id),
+            priority=target.value,
+            transition={
+                "type": "ESCALATED",
+                "previous_state": previous.value,
+                "new_state": target.value,
+                "actor_id": actor_id,
+                "metadata": {"reason": str(reason).strip()},
+            },
+        )
         assert updated is not None
         self._repository.add_timeline_entry(
             str(incident.id),

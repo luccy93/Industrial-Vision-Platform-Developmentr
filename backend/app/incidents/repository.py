@@ -35,6 +35,7 @@ from backend.app.incidents.schemas import (
 )
 from backend.app.incidents.statemachine import validate_transition
 from backend.app.intelligence.schemas import EventPriority, RiskLevel, UnifiedSeverity
+from backend.app.models.alerting_orm import IncidentTransitionORM
 from backend.app.models.incident_orm import (
     IncidentAssignmentORM,
     IncidentCounterORM,
@@ -260,6 +261,27 @@ class IncidentRepository:
                 meta=dict(metadata or {}),
             )
             session.add(row)
+            # V15: creation transition commits atomically with the incident
+            # row, so a crash can neither lose the mutation nor orphan alert
+            # evaluation. The transition id is a fresh UUID, so any
+            # IntegrityError here means the duplicate-incident race.
+            session.add(
+                IncidentTransitionORM(
+                    id=str(uuid.uuid4()),
+                    incident_id=str(incident.id),
+                    transition_type="CREATED",
+                    previous_state=None,
+                    new_state=IncidentStatus.OPEN.value,
+                    actor_id=None,
+                    timestamp=now,
+                    meta={
+                        "camera_id": row.camera_id,
+                        "severity": row.severity,
+                        "priority": row.priority,
+                        "source": source,
+                    },
+                )
+            )
             try:
                 session.commit()
             except IntegrityError as exc:
@@ -550,8 +572,19 @@ class IncidentRepository:
             )
             return [incident_to_domain(row) for row in rows], total
 
-    def update_incident(self, incident_id: str, **fields: Any) -> Incident | None:
-        """Update whitelisted row fields (no lifecycle moves — use transitions)."""
+    def update_incident(
+        self,
+        incident_id: str,
+        transition: dict[str, Any] | None = None,
+        **fields: Any,
+    ) -> Incident | None:
+        """Update whitelisted row fields (no lifecycle moves — use transitions).
+
+        ``transition`` optionally carries ``{"type": ..., "previous_state": ...,
+        "new_state": ..., "actor_id": ..., "metadata": ...}``; when given, a
+        V15 transition row commits atomically with the update (used by
+        escalate; risk/sync updates pass nothing and stay silent).
+        """
         allowed = {
             "title",
             "description",
@@ -576,6 +609,25 @@ class IncidentRepository:
                 elif hasattr(row, key):
                     setattr(row, key, value.value if isinstance(value, Enum) else value)
             row.updated_at = utcnow()
+            if transition is not None:
+                info = dict(transition)
+                session.add(
+                    IncidentTransitionORM(
+                        id=str(uuid.uuid4()),
+                        incident_id=incident_id,
+                        transition_type=str(info.get("type", "UPDATED")),
+                        previous_state=info.get("previous_state"),
+                        new_state=info.get("new_state"),
+                        actor_id=info.get("actor_id"),
+                        timestamp=utcnow(),
+                        meta={
+                            "camera_id": row.camera_id,
+                            "severity": row.severity,
+                            "priority": row.priority,
+                            **(info.get("metadata") or {}),
+                        },
+                    )
+                )
             session.commit()
             session.refresh(row)
             return incident_to_domain(row)
@@ -650,6 +702,29 @@ class IncidentRepository:
                     new_state=new_state,
                     timestamp=now,
                     meta=dict(metadata or {}),
+                )
+            )
+            # V15: durable transition record in the SAME transaction, so a
+            # crash can neither lose the mutation nor orphan the alert
+            # evaluation. Unknown types are recorded verbatim; the evaluator
+            # only matches explicitly supported transition types.
+            transition_type = (
+                timeline_type.value if isinstance(timeline_type, TimelineEventType) else str(timeline_type)
+            )
+            session.add(
+                IncidentTransitionORM(
+                    id=str(uuid.uuid4()),
+                    incident_id=incident_id,
+                    transition_type=transition_type,
+                    previous_state=previous_state,
+                    new_state=new_state,
+                    actor_id=actor_id,
+                    timestamp=now,
+                    meta={
+                        "camera_id": row.camera_id,
+                        "severity": row.severity,
+                        "priority": row.priority,
+                    },
                 )
             )
             session.commit()
@@ -844,6 +919,24 @@ class IncidentRepository:
             if incident is not None:
                 incident.assigned_to = assignee
                 incident.updated_at = utcnow()
+            # V15: assignment transition in the same transaction.
+            transition_type = "UNASSIGNED" if assignee is None else "ASSIGNED"
+            session.add(
+                IncidentTransitionORM(
+                    id=str(uuid.uuid4()),
+                    incident_id=incident_id,
+                    transition_type=transition_type,
+                    previous_state=previous_assignee,
+                    new_state=assignee,
+                    actor_id=actor_id,
+                    timestamp=utcnow(),
+                    meta={
+                        "camera_id": incident.camera_id if incident is not None else None,
+                        "severity": incident.severity if incident is not None else "UNKNOWN",
+                        "priority": incident.priority if incident is not None else "P4",
+                    },
+                )
+            )
             session.commit()
             session.refresh(row)
             return assignment_to_domain(row)

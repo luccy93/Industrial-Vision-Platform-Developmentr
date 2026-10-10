@@ -19,8 +19,9 @@ from backend.app.domain.common import utcnow
 EVENT_ENVELOPE_VERSION = 1
 
 # Event types carried on the bus (locked scope): genuine V05–V08 domain
-# events, V09 unified/cluster updates, V10 incident lifecycle. Never raw
-# frames, detections, tracks, telemetry, or heartbeats.
+# events, V09 unified/cluster updates, V10 incident lifecycle, V15
+# notification creation. Never raw frames, detections, tracks, telemetry,
+# or heartbeats.
 BUS_EVENT_TYPES = frozenset(
     {
         # V05/V06 safety + spatial (wire names from streams_ws).
@@ -46,6 +47,8 @@ BUS_EVENT_TYPES = frozenset(
         "incident_resolved",
         "incident_closed",
         "incident_evidence_added",
+        # V15 notification creation (persist-first, best-effort push).
+        "notification_created",
     }
 )
 

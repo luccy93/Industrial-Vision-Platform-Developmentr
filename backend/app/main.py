@@ -189,7 +189,7 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         # Consumers stop before the resources they need (§6): publisher +
         # subscriber first, Redis client after (close_redis phase).
         stopped: list[str] = []
-        for key in ("outbox_publisher", "redis_subscriber"):
+        for key in ("outbox_publisher", "redis_subscriber", "alerting_evaluator", "alerting_delivery"):
             worker = getattr(state, key, None)
             if worker is None:
                 continue
@@ -285,6 +285,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             subscriber.start()
         except Exception:
             logger.warning("redis subscriber start failed", exc_info=True)
+    for key in ("alerting_evaluator", "alerting_delivery"):
+        worker = getattr(app.state, key, None)
+        if worker is None:
+            continue
+        try:
+            worker.start()
+        except Exception:
+            logger.warning("%s start failed", key, exc_info=True)
     yield
     # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
     # then run the ordered idempotent runtime shutdown.
@@ -494,6 +502,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.events.wiring import register_remote_incident_ingest
 
     register_remote_incident_ingest(event_bus, app.state.incident_manager)
+
+    # V15: durable alerting. Workers construct here (no threads yet);
+    # threads start in lifespan so tests never leak them. Adapters read
+    # secrets from settings at construction; nothing secret is stored.
+    from backend.app.alerting.delivery import (
+        DeliveryWorker,
+        InAppChannelAdapter,
+        SmtpChannelAdapter,
+        WebhookChannelAdapter,
+    )
+    from backend.app.alerting.evaluator import AlertingEvaluator
+    from backend.app.alerting.repository import AlertRepository
+
+    alerting_repository = AlertRepository(app.state.session_factory)
+    app.state.alerting_repository = alerting_repository
+    alerting_evaluator = AlertingEvaluator(
+        alert_repository=alerting_repository,
+        operational_repository=operational_repository,
+        settings=settings,
+        event_bus=event_bus,
+        poll_interval_seconds=settings.alerting_eval_interval_seconds,
+        batch_size=settings.alerting_eval_batch_size,
+        max_notifications_per_cycle=settings.alerting_max_notifications_per_cycle,
+    )
+    app.state.alerting_evaluator = alerting_evaluator
+    alerting_adapters = {
+        "in_app": InAppChannelAdapter(),
+        "email": SmtpChannelAdapter(
+            host=settings.alerting_smtp_host,
+            port=settings.alerting_smtp_port,
+            tls_mode=settings.alerting_smtp_tls_mode,
+            username=settings.alerting_smtp_username,
+            password=settings.alerting_smtp_password,
+            sender=settings.alerting_smtp_from,
+            recipients=settings.alerting_email_recipients,
+            timeout_seconds=settings.alerting_delivery_timeout_seconds,
+        ),
+        "webhook": WebhookChannelAdapter(
+            allowlist=settings.alerting_webhook_allowlist,
+            secret=settings.alerting_webhook_secret,
+            timeout_seconds=settings.alerting_webhook_timeout_seconds,
+            max_payload_bytes=settings.alerting_max_payload_bytes,
+        ),
+    }
+    alerting_delivery = DeliveryWorker(
+        alert_repository=alerting_repository,
+        adapters=alerting_adapters,
+        batch_size=settings.alerting_delivery_batch_size,
+        max_attempts=settings.alerting_max_attempts,
+        retry_base_seconds=settings.alerting_retry_base_seconds,
+        poll_interval_seconds=settings.alerting_eval_interval_seconds,
+        app_base_url=getattr(settings, "alerting_app_base_url", "http://localhost:3000"),
+    )
+    app.state.alerting_delivery = alerting_delivery
     app.state.readiness.register_check(
         "redis", lambda: _redis_readiness(app), required=settings.redis_required
     )
@@ -605,6 +667,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.operations_ws import router as operations_ws_router
 
     app.include_router(operations_ws_router)
+    from backend.app.api.v1.alerting import router as alerting_router
+
+    app.include_router(alerting_router)
 
     @app.get("/health", tags=["health"], summary="Service health diagnostics")
     def health() -> dict:

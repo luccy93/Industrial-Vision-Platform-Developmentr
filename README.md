@@ -84,6 +84,23 @@ opt-in Redis pub/sub distribution; lifecycle-owned Redis with
 required/optional policy; Redis-aware health/readiness; and retention
 cleanup. No cache, no new models, no auth/RBAC — reliability only.
 **V12 = Data Reliability.**
+V15 adds **durable alerting and notifications**: configurable alert rules
+over genuine events and incident transitions, persistent in-app
+notifications, optional SMTP and webhook delivery with per-channel
+attempts and retries, idempotent evaluation with cooldown audit, and an
+operator UI. No synthetic events, no new models, no auth/RBAC (V16) —
+operators only, on trusted networks.
+**V15 = Alerting & Notifications.**
+
+## Features (V15)
+
+- Alert rules (Alembic `008`): domains, event types, severity/priority minimums, cameras, incident statuses, channels, cooldowns — validated, unknown values rejected, disabled until an operator opts in
+- Durable incident transition records committed atomically with V10 mutations; evaluator watermarks survive restarts; duplicates collapse on idempotency keys
+- Notifications (UNIQUE rule+source) with independent per-channel delivery rows; cooldown suppressions recorded as auditable outcomes, never silent
+- SMTP (stdlib, TLS modes, timeouts) and webhook (httpx, allowlist, no redirects, HMAC) adapters with categorized, secret-free errors; unconfigured channels visibly unavailable
+- Supervised delivery worker: bounded batches, timeouts, backoff+jitter, terminal failures, idempotent manual retry, clean shutdown
+- `GET /api/v1/alerting/...` rules/notifications/deliveries/status APIs with envelopes and pagination; `notification_created` on the shared operations socket; `/notifications` UI with rules management
+- Documented non-claims: no SMS/push/chat, no per-user inboxes, no exactly-once external delivery, no auth/RBAC (V16)
 
 ## Features (V12)
 

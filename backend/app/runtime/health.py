@@ -62,6 +62,7 @@ HEALTH_COMPONENTS: tuple[str, ...] = (
     "autonomous",
     "intelligence",
     "incidents",
+    "alerting",
     "websocket",
     "workers",
 )

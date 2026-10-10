@@ -180,6 +180,39 @@ def evaluate_components(state: Any, settings: Any) -> list[ComponentHealth]:
 
     results.append(_timed("incidents", _incidents))
 
+    def _alerting() -> tuple[HealthStatus, str, dict[str, Any]]:
+        settings = _presence(state, "settings")
+        enabled = bool(getattr(settings, "alerting_enabled", False)) if settings is not None else False
+        if not enabled:
+            return HealthStatus.DISABLED, "alerting disabled by configuration", {}
+        evaluator = _presence(state, "alerting_evaluator")
+        delivery_worker = getattr(state, "alerting_delivery", None)
+        states: list[str] = []
+        for worker in (evaluator, delivery_worker):
+            if worker is None:
+                continue
+            try:
+                snapshot = worker.health()
+                states.append(
+                    snapshot.state.value if hasattr(snapshot.state, "value") else str(snapshot.state)
+                )
+            except Exception:
+                states.append("UNKNOWN")
+        metadata: dict[str, Any] = {}
+        try:
+            repository = _presence(state, "alerting_repository")
+            if repository is not None:
+                metadata["deliveries"] = repository.delivery_counts()
+        except Exception:
+            pass
+        if any(s == "FAILED" for s in states):
+            return HealthStatus.FAILED, "alerting worker failed", metadata
+        if not states:
+            return HealthStatus.NOT_READY, "alerting workers not registered", metadata
+        return HealthStatus.READY, "alerting workers available", metadata
+
+    results.append(_timed("alerting", _alerting))
+
     def _websocket() -> tuple[HealthStatus, str, dict[str, Any]]:
         if not bool(getattr(settings, "websocket_enabled", True)):
             return HealthStatus.DISABLED, "websocket disabled by configuration", {}

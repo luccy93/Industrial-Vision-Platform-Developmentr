@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     alerting_webhook_urls: str = Field(default="")
     alerting_webhook_secret: str = Field(default="")
     alerting_webhook_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
+    alerting_app_base_url: str = Field(default="http://localhost:3000")
 
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)

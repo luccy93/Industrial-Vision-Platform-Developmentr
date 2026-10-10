@@ -338,6 +338,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/incidents", label: "Incidents", note: "V10 management" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/analytics", label: "Analytics", note: "V14 historical reporting" },
+  { href: "/notifications", label: "Notifications", note: "V15 alerting" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
 
@@ -840,3 +841,92 @@ export type ExportReportType =
   | "safety"
   | "camera_activity"
   | "quality_events";
+
+// --- V15 alerting & notifications ---
+
+export type AlertChannel = "in_app" | "email" | "webhook";
+
+export type AlertRule = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  domains: string[];
+  event_types: string[];
+  min_severity: string | null;
+  min_priority: string | null;
+  camera_ids: string[];
+  incident_statuses: string[];
+  channels: AlertChannel[];
+  cooldown_seconds: number;
+  suppression_scope: string;
+  trigger_count: number;
+  suppressed_count: number;
+  last_triggered_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type AlertRuleListResponse = {
+  rules: AlertRule[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type NotificationItem = {
+  id: string;
+  rule_id: string;
+  source_event_id: string;
+  source_domain: string;
+  event_type: string;
+  camera_id: string | null;
+  incident_id: string | null;
+  title: string;
+  message: string;
+  severity: string;
+  priority: string;
+  context: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type NotificationListResponse = {
+  notifications: NotificationItem[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type DeliveryItem = {
+  id: string;
+  notification_id: string;
+  channel: string;
+  destination: string;
+  status: string;
+  attempts: number;
+  next_retry_at: string | null;
+  last_attempt_at: string | null;
+  delivered_at: string | null;
+  last_error: string | null;
+  created_at: string | null;
+};
+
+export type DeliveryListResponse = {
+  deliveries: DeliveryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type NotificationDetail = NotificationItem & {
+  deliveries: DeliveryItem[];
+};
+
+export type AlertingStatus = {
+  enabled: boolean;
+  evaluator: { state: string } | null;
+  delivery_worker: { state: string } | null;
+  channels: Record<string, { available: boolean; destinations?: number }>;
+  deliveries: Record<string, number>;
+  security_note: string;
+};
