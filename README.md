@@ -97,6 +97,15 @@ cleanup. No cache, no new models, no auth/RBAC — reliability only.
 - V10 pagination and all V01–V11 contracts preserved byte-for-byte
 - Documented non-claims: no cache, no Redis Streams/locks, no auth/RBAC (V16), Pub/Sub is notification transport — never storage or guaranteed delivery
 
+## Features (V14)
+
+- Historical analytics over durable records only: incidents (full lifecycle timestamps) + canonical event history; quality inspection outcomes honestly unavailable (results are not persisted)
+- `GET /api/v1/analytics/summary` (replaces the V01 stub; bare path stays 200), `trends` (UTC hour/day/week buckets), `breakdowns` (bounded groupings), `export` (CSV with BOM, quoting, formula-injection mitigation, 5000-row cap)
+- Definitions documented per metric (created vs currently-open, terminal timestamps, resolution denominators); missing data unavailable, never zero; truncated sources flagged
+- `/analytics` page: presets 24h/7d/30d/custom, Recharts line/bars with table alternatives, per-panel isolation, stale-on-filter-change, CSV download with progress/error states
+- Additive `007` time indexes (EXPLAIN-proven); no cache, no summary tables, no new persistence pipelines
+- Documented non-claims: no FPS/uptime/latency history, no inspection pass rates, no PDF/scheduled reports, no Redis cache
+
 ## Features (V11)
 
 - Central `ApplicationRuntime` lifecycle with ordered startup/shutdown phases, invalid-transition rejection, and idempotent shutdown

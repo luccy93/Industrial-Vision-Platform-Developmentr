@@ -398,6 +398,48 @@ class IncidentRepository:
                 for row in rows[:cap]
             ], truncated
 
+    def terminal_timestamps_in_range(
+        self,
+        field: str,
+        start: datetime,
+        end: datetime,
+        *,
+        camera_id: str | None = None,
+        limit: int = 5000,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Bounded (terminal_ts, status, priority) rows for trend bucketing.
+
+        ``field`` is resolved_at|closed_at; rows ordered by terminal time.
+        """
+        from backend.app.analytics.contracts import as_utc as _as_utc
+
+        column = {
+            "resolved_at": IncidentORM.resolved_at,
+            "closed_at": IncidentORM.closed_at,
+        }.get(field)
+        if column is None:
+            raise ValueError("field must be resolved_at|closed_at")
+        cap = max(1, min(int(limit), 5000))
+        with self._session_factory() as session:
+            query = (
+                session.query(IncidentORM)
+                .filter(column.is_not(None), column >= start, column < end)
+                .order_by(column.asc())
+            )
+            if camera_id:
+                query = query.filter(IncidentORM.camera_id == camera_id)
+            rows = query.limit(cap + 1).all()
+            truncated = len(rows) > cap
+            return [
+                {
+                    "terminal_at": _as_utc(getattr(row, field)),
+                    "status": str(row.status),
+                    "priority": str(row.priority),
+                    "camera_id": str(row.camera_id),
+                }
+                for row in rows[:cap]
+            ], truncated
+
     def export_incidents(
         self,
         start: datetime,

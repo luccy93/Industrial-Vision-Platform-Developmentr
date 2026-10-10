@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -184,7 +184,7 @@ class OperationalEventRepository:
         end: datetime,
         *,
         camera_id: str | None = None,
-        domain: str | None = None,
+        domain: str | Sequence[str] | None = None,
         severity: str | None = None,
         limit: int = 5000,
     ) -> tuple[list[dict[str, Any]], bool]:
@@ -205,7 +205,8 @@ class OperationalEventRepository:
             if camera_id:
                 query = query.filter(OperationalEventORM.camera_id == camera_id)
             if domain:
-                query = query.filter(OperationalEventORM.source_domain == domain.upper())
+                domains = [domain] if isinstance(domain, str) else list(domain)
+                query = query.filter(OperationalEventORM.source_domain.in_([d.upper() for d in domains]))
             if severity:
                 query = query.filter(OperationalEventORM.severity == severity.upper())
             query = query.order_by(OperationalEventORM.first_seen.asc())

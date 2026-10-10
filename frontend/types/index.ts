@@ -811,6 +811,7 @@ export type AnalyticsOverview = {
     total: number;
     by_domain: Record<string, number>;
     by_severity: Record<string, number>;
+    truncated: boolean;
   };
   incidents: AnalyticsSectionMeta & {
     created_total: number;
