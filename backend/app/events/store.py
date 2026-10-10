@@ -178,6 +178,48 @@ class OperationalEventRepository:
             row = session.query(OperationalEventORM).filter_by(event_id=str(event_id)).one_or_none()
             return _event_to_dict(row) if row is not None else None
 
+    def list_in_window(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        camera_id: str | None = None,
+        domain: str | None = None,
+        severity: str | None = None,
+        limit: int = 5000,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Bounded canonical events by occurrence window. Returns (rows, truncated).
+
+        Filters hit indexed columns (first_seen/camera/domain/severity);
+        occurrence semantics use first_seen. Python-side grouping/bucketing
+        keeps SQLite and PostgreSQL behavior identical at dashboard volumes.
+        """
+        from backend.app.analytics.contracts import as_utc as _as_utc
+
+        cap = max(1, min(int(limit), 5000))
+        with self._session_factory() as session:
+            query = session.query(OperationalEventORM).filter(
+                OperationalEventORM.first_seen >= start,
+                OperationalEventORM.first_seen < end,
+            )
+            if camera_id:
+                query = query.filter(OperationalEventORM.camera_id == camera_id)
+            if domain:
+                query = query.filter(OperationalEventORM.source_domain == domain.upper())
+            if severity:
+                query = query.filter(OperationalEventORM.severity == severity.upper())
+            query = query.order_by(OperationalEventORM.first_seen.asc())
+            rows = query.limit(cap + 1).all()
+            truncated = len(rows) > cap
+            result = []
+            for row in rows[:cap]:
+                item = _event_to_dict(row)
+                item["first_seen"] = _as_utc(row.first_seen)
+                item["last_seen"] = _as_utc(row.last_seen)
+                item["created_at"] = _as_utc(row.created_at)
+                result.append(item)
+            return result, truncated
+
     def count_orphan_links(self) -> int:
         """Incident links whose event_id has no durable history row.
 

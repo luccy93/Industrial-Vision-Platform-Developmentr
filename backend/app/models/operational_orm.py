@@ -36,7 +36,7 @@ class OperationalEventORM(Base):
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False, default="UNKNOWN")
     risk_score: Mapped[float] = mapped_column(Float(), nullable=False, default=0.0)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     meta: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)

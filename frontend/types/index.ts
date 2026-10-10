@@ -337,6 +337,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/intelligence", label: "Intelligence", note: "V09 event & risk" },
   { href: "/incidents", label: "Incidents", note: "V10 management" },
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
+  { href: "/analytics", label: "Analytics", note: "V14 historical reporting" },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
 
@@ -742,3 +743,99 @@ export type TimelineItem = {
   href: string | null;
   source: "rest" | "socket";
 };
+
+// --- V14 historical analytics & reporting ---
+
+export type AnalyticsSectionState = "ok" | "degraded" | "unavailable";
+
+export type AnalyticsSectionMeta = {
+  status: AnalyticsSectionState;
+  message: string;
+};
+
+export type AnalyticsPreset = "24h" | "7d" | "30d" | "custom";
+
+export type AnalyticsFilters = {
+  preset: AnalyticsPreset;
+  /** ISO-8601 UTC bounds; required when preset is custom. */
+  startAt: string | null;
+  endAt: string | null;
+  bucket: "hour" | "day" | "week";
+  domains: string[];
+  severities: string[];
+  cameras: string[];
+  statuses: string[];
+  priorities: string[];
+};
+
+/** Query params actually sent (validated: start < end, bounded window). */
+export type AnalyticsQuery = {
+  start_at: string;
+  end_at: string;
+  bucket: "hour" | "day" | "week";
+  domain?: string[];
+  severity?: string[];
+  camera_id?: string;
+  status?: string[];
+  priority?: string[];
+};
+
+export type AnalyticsBucket = {
+  bucket_start: string;
+  count: number;
+};
+
+export type AnalyticsTrend = {
+  metric: string;
+  bucket: "hour" | "day" | "week";
+  buckets: AnalyticsBucket[];
+  truncated: boolean;
+};
+
+export type AnalyticsBreakdown = {
+  dataset: string;
+  group_by: string;
+  groups: Array<{ key: string; label: string; count: number }>;
+  truncated: boolean;
+};
+
+export type QualityAvailability = AnalyticsSectionMeta & {
+  reason: string;
+};
+
+export type AnalyticsOverview = {
+  start_at: string;
+  end_at: string;
+  generated_at: string;
+  events: AnalyticsSectionMeta & {
+    total: number;
+    by_domain: Record<string, number>;
+    by_severity: Record<string, number>;
+  };
+  incidents: AnalyticsSectionMeta & {
+    created_total: number;
+    open_total: number;
+    resolved_total: number;
+    closed_total: number;
+    by_status: Record<string, number>;
+    by_priority: Record<string, number>;
+    resolution: {
+      count: number;
+      average_seconds: number | null;
+      median_seconds: number | null;
+      min_seconds: number | null;
+      max_seconds: number | null;
+    };
+  };
+  quality: QualityAvailability;
+  cameras: AnalyticsSectionMeta & {
+    by_camera: Record<string, number>;
+  };
+};
+
+export type ExportReportType =
+  | "events"
+  | "incidents"
+  | "safety"
+  | "camera_activity"
+  | "quality_events";

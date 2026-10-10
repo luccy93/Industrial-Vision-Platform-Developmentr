@@ -312,6 +312,138 @@ class IncidentRepository:
                 grouped.setdefault(str(status), {})[str(priority)] = int(count)
             return grouped
 
+    def count_created_in_range(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        status: Sequence[str] | None = None,
+        priority: Sequence[str] | None = None,
+        camera_id: str | None = None,
+    ) -> dict[str, dict[str, int]]:
+        """Incidents created in [start, end), grouped by status/priority."""
+        from sqlalchemy import func as _func
+
+        with self._session_factory() as session:
+            query = session.query(
+                IncidentORM.status, IncidentORM.priority, _func.count(IncidentORM.id)
+            ).filter(IncidentORM.created_at >= start, IncidentORM.created_at < end)
+            if status:
+                query = query.filter(IncidentORM.status.in_(list(status)))
+            if priority:
+                query = query.filter(IncidentORM.priority.in_(list(priority)))
+            if camera_id:
+                query = query.filter(IncidentORM.camera_id == camera_id)
+            grouped: dict[str, dict[str, int]] = {}
+            for row_status, row_priority, count in query.group_by(
+                IncidentORM.status, IncidentORM.priority
+            ).all():
+                grouped.setdefault(str(row_status), {})[str(row_priority)] = int(count)
+            return grouped
+
+    def count_terminal_in_range(self, field: str, start: datetime, end: datetime) -> int:
+        """Incidents whose resolved_at/closed_at falls in [start, end)."""
+        column = {
+            "resolved_at": IncidentORM.resolved_at,
+            "closed_at": IncidentORM.closed_at,
+        }.get(field)
+        if column is None:
+            raise ValueError("field must be resolved_at|closed_at")
+        from sqlalchemy import func as _func
+
+        with self._session_factory() as session:
+            return int(
+                session.query(_func.count(IncidentORM.id))
+                .filter(column.is_not(None), column >= start, column < end)
+                .scalar()
+                or 0
+            )
+
+    def incident_timestamps_in_range(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        camera_id: str | None = None,
+        limit: int = 5000,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Bounded timestamp rows ordered by created_at. Returns (rows, truncated).
+
+        Serves trends, durations, and breakdowns from one indexed query.
+        """
+        from backend.app.analytics.contracts import as_utc as _as_utc
+
+        cap = max(1, min(int(limit), 5000))
+        with self._session_factory() as session:
+            query = (
+                session.query(IncidentORM)
+                .filter(IncidentORM.created_at >= start, IncidentORM.created_at < end)
+                .order_by(IncidentORM.created_at.asc())
+            )
+            if camera_id:
+                query = query.filter(IncidentORM.camera_id == camera_id)
+            rows = query.limit(cap + 1).all()
+            truncated = len(rows) > cap
+            return [
+                {
+                    "id": str(row.id),
+                    "created_at": _as_utc(row.created_at),
+                    "resolved_at": _as_utc(row.resolved_at),
+                    "closed_at": _as_utc(row.closed_at),
+                    "status": str(row.status),
+                    "priority": str(row.priority),
+                    "camera_id": str(row.camera_id),
+                    "category": str(row.category),
+                }
+                for row in rows[:cap]
+            ], truncated
+
+    def export_incidents(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        status: Sequence[str] | None = None,
+        priority: Sequence[str] | None = None,
+        camera_id: str | None = None,
+        limit: int = 5000,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Bounded incident export rows (capped columns, created_at order)."""
+        from backend.app.analytics.contracts import as_utc as _as_utc
+
+        cap = max(1, min(int(limit), 5000))
+        with self._session_factory() as session:
+            query = (
+                session.query(IncidentORM)
+                .filter(IncidentORM.created_at >= start, IncidentORM.created_at < end)
+                .order_by(IncidentORM.created_at.asc())
+            )
+            if status:
+                query = query.filter(IncidentORM.status.in_(list(status)))
+            if priority:
+                query = query.filter(IncidentORM.priority.in_(list(priority)))
+            if camera_id:
+                query = query.filter(IncidentORM.camera_id == camera_id)
+            rows = query.limit(cap + 1).all()
+            truncated = len(rows) > cap
+            return [
+                {
+                    "incident_number": str(row.incident_number),
+                    "title": str(row.title),
+                    "status": str(row.status),
+                    "priority": str(row.priority),
+                    "severity": str(row.severity),
+                    "category": str(row.category),
+                    "camera_id": str(row.camera_id),
+                    "created_at": _as_utc(row.created_at),
+                    "acknowledged_at": _as_utc(row.acknowledged_at),
+                    "resolved_at": _as_utc(row.resolved_at),
+                    "closed_at": _as_utc(row.closed_at),
+                    "assigned_to": row.assigned_to,
+                }
+                for row in rows[:cap]
+            ], truncated
+
     def list_incidents(
         self,
         *,

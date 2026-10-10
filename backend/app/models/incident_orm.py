@@ -63,13 +63,19 @@ class IncidentORM(Base):
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
+    )
 
     assigned_to: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True, default=None)
     meta: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)

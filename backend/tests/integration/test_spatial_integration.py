@@ -30,6 +30,10 @@ def _tables(url: str) -> set[str]:
     return set(inspect(create_engine(url)).get_table_names())
 
 
+def _indexes(url: str, table: str) -> set[str]:
+    return {str(index["name"]) for index in inspect(create_engine(url)).get_indexes(table) if index["name"]}
+
+
 def _state(client: Any) -> Any:
     """Access app state; `TestClient.app` is typed as a generic ASGI callable."""
     return client.app.state
@@ -42,7 +46,7 @@ def _spatial(client: Any) -> SpatialEngine:
 def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch
 ) -> None:
-    """The migration chain applies and reverses cleanly (002-006)."""
+    """The migration chain applies and reverses cleanly (002-007)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -64,8 +68,22 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
         "operational_events",
         "event_outbox",
     } <= _tables(url)
+    # V14 (007) time indexes exist for the analytics range queries
+    # (created_at has been indexed since 005).
+    assert {
+        "ix_incidents_created_at",
+        "ix_incidents_resolved_at",
+        "ix_incidents_closed_at",
+    } <= _indexes(url, "incidents")
+    assert "ix_operational_events_first_seen" in _indexes(url, "operational_events")
 
-    # V12 (006) reverses first: history + outbox go, incidents stay.
+    # V14 (007) reverses first: time indexes go, tables stay.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "operational_events" in remaining
+    assert "incidents" in remaining
+
+    # V12 (006) reverses next: history + outbox go, incidents stay.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "operational_events" not in remaining
