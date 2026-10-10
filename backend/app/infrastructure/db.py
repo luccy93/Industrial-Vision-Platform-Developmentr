@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.core.config import get_settings
 from backend.app.models import (
+    alerting_orm,  # noqa: F401 (registers the alerting tables)
     autonomous_orm,  # noqa: F401 (registers the autonomous profiles table)
     incident_orm,  # noqa: F401 (registers the incident tables)
     operational_orm,  # noqa: F401 (registers operational history + outbox)

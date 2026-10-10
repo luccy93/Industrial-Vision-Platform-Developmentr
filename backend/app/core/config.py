@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,6 +67,29 @@ class Settings(BaseSettings):
     outbox_max_attempts: int = Field(default=10, ge=1, le=1000)
     outbox_retry_base_seconds: float = Field(default=5.0, gt=0.0, le=3600.0)
     operational_event_retention_days: int = Field(default=90, ge=1, le=3650)
+
+    # --- V15 durable alerting (disabled by default; no traffic until an
+    # operator enables a rule with configured channels) ---
+    alerting_enabled: bool = Field(default=False)
+    alerting_eval_interval_seconds: float = Field(default=10.0, gt=0.0, le=3600.0)
+    alerting_eval_batch_size: int = Field(default=200, ge=1, le=5000)
+    alerting_delivery_batch_size: int = Field(default=50, ge=1, le=1000)
+    alerting_delivery_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
+    alerting_max_attempts: int = Field(default=8, ge=1, le=100)
+    alerting_retry_base_seconds: float = Field(default=30.0, gt=0.0, le=3600.0)
+    alerting_max_payload_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    alerting_retention_days: int = Field(default=90, ge=1, le=3650)
+    alerting_max_notifications_per_cycle: int = Field(default=500, ge=1, le=10000)
+    alerting_smtp_host: str = Field(default="")
+    alerting_smtp_port: int = Field(default=587, ge=1, le=65535)
+    alerting_smtp_tls_mode: str = Field(default="starttls")
+    alerting_smtp_username: str = Field(default="")
+    alerting_smtp_password: str = Field(default="")
+    alerting_smtp_from: str = Field(default="")
+    alerting_smtp_to: str = Field(default="")
+    alerting_webhook_urls: str = Field(default="")
+    alerting_webhook_secret: str = Field(default="")
+    alerting_webhook_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
 
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
@@ -323,10 +347,53 @@ class Settings(BaseSettings):
             )
         if self.app_env == AppEnv.production and not origins:
             raise ConfigurationError("production requires at least one CORS_ALLOWED_ORIGINS entry.")
+        # V15 alerting: TLS mode allowlist; webhook destinations validated
+        # (scheme + count cap). Secrets themselves are never validated for
+        # content here — only presence is reported, never values.
+        if self.alerting_smtp_tls_mode not in ("starttls", "ssl", "none"):
+            raise ConfigurationError("ALERTING_SMTP_TLS_MODE must be one of starttls|ssl|none.")
+        webhook_urls = self.alerting_webhook_allowlist
+        if len(webhook_urls) > 5:
+            raise ConfigurationError("ALERTING_WEBHOOK_URLS supports at most 5 destinations.")
         # CORS policy itself raises ConfigurationError when violated.
         notes.append(f"env={self.app_env.value}")
         notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
         return notes
+
+    @property
+    def alerting_webhook_allowlist(self) -> list[str]:
+        """Parsed, validated webhook destination allowlist (exact URLs)."""
+        urls: list[str] = []
+        for part in str(self.alerting_webhook_urls or "").split(","):
+            candidate = part.strip()
+            if not candidate:
+                continue
+            parsed = urlparse(candidate)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValueError(f"invalid webhook URL (http|https with host required): {candidate}")
+            urls.append(candidate)
+        return urls
+
+    @property
+    def alerting_email_recipients(self) -> list[str]:
+        """Parsed recipient list (basic shape check; no discovery)."""
+        recipients = [part.strip() for part in str(self.alerting_smtp_to or "").split(",")]
+        return [address for address in recipients if "@" in address and address]
+
+    @property
+    def alerting_smtp_configured(self) -> bool:
+        return bool(
+            str(self.alerting_smtp_host or "").strip()
+            and str(self.alerting_smtp_from or "").strip()
+            and self.alerting_email_recipients
+        )
+
+    @property
+    def alerting_webhook_configured(self) -> bool:
+        try:
+            return len(self.alerting_webhook_allowlist) > 0
+        except ValueError:
+            return False
 
     @field_validator("event_bus_mode")
     @classmethod

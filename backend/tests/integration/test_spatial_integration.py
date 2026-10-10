@@ -46,7 +46,7 @@ def _spatial(client: Any) -> SpatialEngine:
 def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch
 ) -> None:
-    """The migration chain applies and reverses cleanly (002-007)."""
+    """The migration chain applies and reverses cleanly (002-008)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -67,6 +67,12 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
         "incident_counters",
         "operational_events",
         "event_outbox",
+        "alert_rules",
+        "notifications",
+        "delivery_attempts",
+        "incident_transitions",
+        "alert_evaluations",
+        "alerting_cursor",
     } <= _tables(url)
     # V14 (007) time indexes exist for the analytics range queries
     # (created_at has been indexed since 005).
@@ -77,7 +83,19 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     } <= _indexes(url, "incidents")
     assert "ix_operational_events_first_seen" in _indexes(url, "operational_events")
 
-    # V14 (007) reverses first: time indexes go, tables stay.
+    # V15 (008) reverses first: alerting tables go, analytics stay.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "alert_rules" not in remaining
+    assert "notifications" not in remaining
+    assert "delivery_attempts" not in remaining
+    assert "incident_transitions" not in remaining
+    assert "alert_evaluations" not in remaining
+    assert "alerting_cursor" not in remaining
+    assert "operational_events" in remaining
+    assert "incidents" in remaining
+
+    # V14 (007) reverses next: time indexes go, tables stay.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "operational_events" in remaining
