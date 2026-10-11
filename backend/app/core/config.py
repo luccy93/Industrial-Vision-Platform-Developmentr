@@ -356,6 +356,24 @@ class Settings(BaseSettings):
         webhook_urls = self.alerting_webhook_allowlist
         if len(webhook_urls) > 5:
             raise ConfigurationError("ALERTING_WEBHOOK_URLS supports at most 5 destinations.")
+        # V16 auth: sane policy ranges, production cookie/CORS posture.
+        if self.auth_password_min_length > self.auth_password_max_length:
+            raise ConfigurationError(
+                "AUTH_PASSWORD_MIN_LENGTH must not exceed AUTH_PASSWORD_MAX_LENGTH."
+            )
+        if self.auth_cookie_samesite not in ("Lax", "Strict"):
+            raise ConfigurationError("AUTH_COOKIE_SAMESITE must be Lax or Strict.")
+        if self.app_env == AppEnv.production:
+            if self.auth_cookie_secure is False:
+                raise ConfigurationError(
+                    "AUTH_COOKIE_SECURE=false is forbidden in production; "
+                    "sessions require Secure cookies."
+                )
+            if not self.cors_allow_credentials:
+                raise ConfigurationError(
+                    "production requires CORS_ALLOW_CREDENTIALS=true with explicit "
+                    "origins so browser sessions function."
+                )
         # CORS policy itself raises ConfigurationError when violated.
         notes.append(f"env={self.app_env.value}")
         notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
@@ -437,6 +455,33 @@ class Settings(BaseSettings):
     websocket_heartbeat_timeout_seconds: float = Field(default=60.0, gt=0.0)
     websocket_shutdown_timeout_seconds: float = Field(default=5.0, gt=0.0)
     max_request_body_bytes: int = Field(default=1048576, ge=1024)
+
+    # --- V16 authentication & RBAC (database-backed opaque sessions) ---
+    auth_password_min_length: int = Field(default=15, ge=8, le=64)
+    auth_password_max_length: int = Field(default=128, ge=32, le=1024)
+    auth_session_idle_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_session_absolute_hours: int = Field(default=12, ge=1, le=720)
+    auth_session_cookie_name: str = Field(default="ivp_session")
+    # None = automatic (Secure in production, plain on dev HTTP). Set
+    # explicitly only to override; production forbids insecure cookies.
+    auth_cookie_secure: bool | None = Field(default=None)
+    auth_cookie_samesite: str = Field(default="Lax")
+    auth_csrf_header: str = Field(default="X-CSRF-Token")
+    # Per-account throttle: failures inside the window trigger escalating
+    # delays capped at auth_login_max_delay_minutes (no permanent lockout).
+    auth_login_account_max_attempts: int = Field(default=5, ge=1, le=100)
+    auth_login_account_window_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_login_max_delay_minutes: int = Field(default=15, ge=1, le=1440)
+    auth_login_ip_max_attempts: int = Field(default=30, ge=1, le=10000)
+    auth_login_ip_window_minutes: int = Field(default=15, ge=1, le=1440)
+    # Sensitive admin operations require authentication within this window.
+    auth_recent_auth_minutes: int = Field(default=10, ge=1, le=1440)
+    auth_ws_ticket_ttl_seconds: int = Field(default=30, ge=5, le=600)
+    auth_ws_revalidate_seconds: int = Field(default=30, ge=10, le=600)
+    # Explicitly trusted proxies allowed to supply X-Forwarded-For for
+    # client-IP accounting. Empty = direct peer only; arbitrary forwarded
+    # values are never trusted.
+    auth_trusted_proxies: list[str] = Field(default_factory=list)
 
     # --- V02 video ingestion ---
     target_processing_fps: float = Field(default=10.0, ge=0.0)
