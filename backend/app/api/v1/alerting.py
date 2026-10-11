@@ -10,10 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from starlette.exceptions import HTTPException
 
 from backend.app.alerting.repository import (
     DeliveryNotFoundError,
@@ -47,7 +46,10 @@ def _alert_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (NotificationNotFoundError, DeliveryNotFoundError)):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, ValueError):
-        return HTTPException(status_code=422, detail=str(exc))
+        return HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        )
     raise exc
 
 

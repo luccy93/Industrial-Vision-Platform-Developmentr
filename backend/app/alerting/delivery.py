@@ -152,11 +152,13 @@ class WebhookChannelAdapter(ChannelAdapter):
         secret: str = "",
         timeout_seconds: float = 10.0,
         max_payload_bytes: int = 65536,
+        transport: Any = None,
     ) -> None:
         self._allowlist = [str(u).strip() for u in (allowlist or []) if str(u).strip()]
         self._secret = str(secret or "")
         self._timeout = max(1.0, float(timeout_seconds))
         self._max_payload = max(1024, int(max_payload_bytes))
+        self._transport = transport
         self._client: Any = None
         self._lock = threading.RLock()
 
@@ -186,6 +188,7 @@ class WebhookChannelAdapter(ChannelAdapter):
                 self._client = httpx.Client(
                     timeout=httpx.Timeout(self._timeout),
                     follow_redirects=False,
+                    transport=self._transport,
                 )
             client = self._client
         headers = {"Content-Type": "application/json"}
@@ -331,7 +334,8 @@ class DeliveryWorker(ManagedWorker):
         return stats
 
     def _deliver_row(self, row: Any, now: datetime, stats: dict[str, int]) -> None:
-        adapter = self._adapters.get(str(row.channel))
+        channel = row.channel.value if hasattr(row.channel, "value") else str(row.channel)
+        adapter = self._adapters.get(channel)
         if adapter is None or not adapter.is_configured():
             # Unconfigured channel: terminal, visible, never silent success.
             self._alerts.mark_delivery(str(row.id), status="failed", error=ERROR_NOT_CONFIGURED)

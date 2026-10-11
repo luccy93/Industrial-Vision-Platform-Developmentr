@@ -194,8 +194,10 @@ class AlertingEvaluator(ManagedWorker):
         if not rules:
             return stats
         try:
-            self._drain_events(rules, reference, stats)
-            self._drain_transitions(rules, reference, stats)
+            # One trigger map per cycle: cooldown sees same-cycle notifies.
+            recent_triggers: dict[str, datetime] = {}
+            self._drain_events(rules, reference, stats, recent_triggers=recent_triggers)
+            self._drain_transitions(rules, reference, stats, recent_triggers=recent_triggers)
         except Exception as exc:
             logger.warning("alert evaluation failed: %s", type(exc).__name__)
             stats["errors"] = 1
@@ -217,7 +219,13 @@ class AlertingEvaluator(ManagedWorker):
         rules, _ = self._alerts.list_rules(page=1, page_size=1000)
         return [rule for rule in rules if rule.enabled]
 
-    def _drain_events(self, rules: list[AlertRule], now: datetime, stats: dict[str, int]) -> None:
+    def _drain_events(
+        self,
+        rules: list[AlertRule],
+        now: datetime,
+        stats: dict[str, int],
+        recent_triggers: dict[str, datetime] | None = None,
+    ) -> None:
         timestamp, last_id = self._alerts.get_cursor(EVENTS_CONSUMER)
         # Watermark poll: operational history has no since-API, so read the
         # recent window and filter strictly past the watermark in Python.
@@ -245,10 +253,18 @@ class AlertingEvaluator(ManagedWorker):
                 "camera_id": row.get("camera_id"),
                 "new_state": None,
             }
-            self._evaluate_candidate(rules, str(row["event_id"]), candidate, now, stats)
+            self._evaluate_candidate(
+                rules, str(row["event_id"]), candidate, now, stats, recent_triggers=recent_triggers
+            )
             self._alerts.advance_cursor(EVENTS_CONSUMER, row.get("first_seen"), str(row.get("event_id", "")))
 
-    def _drain_transitions(self, rules: list[AlertRule], now: datetime, stats: dict[str, int]) -> None:
+    def _drain_transitions(
+        self,
+        rules: list[AlertRule],
+        now: datetime,
+        stats: dict[str, int],
+        recent_triggers: dict[str, datetime] | None = None,
+    ) -> None:
         timestamp, last_id = self._alerts.get_cursor(TRANSITIONS_CONSUMER)
         rows = self._alerts.list_transitions_since(timestamp, last_id, limit=self._batch_size)
         for row in rows:
@@ -267,7 +283,14 @@ class AlertingEvaluator(ManagedWorker):
             }
             source_id = f"transition:{row.id}"
             self._evaluate_candidate(
-                rules, source_id, candidate, now, stats, incident_id=row.incident_id, transition=row
+                rules,
+                source_id,
+                candidate,
+                now,
+                stats,
+                incident_id=row.incident_id,
+                transition=row,
+                recent_triggers=recent_triggers,
             )
             self._alerts.advance_cursor(TRANSITIONS_CONSUMER, row.timestamp, str(row.id))
 
@@ -280,7 +303,9 @@ class AlertingEvaluator(ManagedWorker):
         stats: dict[str, int],
         incident_id: str | None = None,
         transition: Any = None,
+        recent_triggers: dict[str, datetime] | None = None,
     ) -> None:
+        recent = recent_triggers if recent_triggers is not None else {}
         for rule in rules:
             if not rule_matches(rule, candidate):
                 continue
@@ -289,14 +314,14 @@ class AlertingEvaluator(ManagedWorker):
                 stats["duplicates"] += 1
                 continue
             scope_key = self._cooldown_scope_key(rule, candidate)
-            if self._in_cooldown(rule, scope_key, now):
+            if self._in_cooldown(rule, scope_key, now, recent):
                 recorded = self._alerts.record_evaluation(
                     rule_id=str(rule.id),
                     source_event_id=source_id,
                     outcome=EvaluationOutcome.SUPPRESSED_COOLDOWN.value,
                     suppression_reason="cooldown",
                     suppression_scope=rule.suppression_scope.value,
-                    next_eligible_at=self._cooldown_ends_at(rule, scope_key, now),
+                    next_eligible_at=self._cooldown_ends_at(rule, scope_key, now, recent),
                     metadata={"scope_key": scope_key},
                 )
                 if recorded is None:
@@ -306,6 +331,7 @@ class AlertingEvaluator(ManagedWorker):
                     self._alerts.bump_rule_counters(str(rule.id), triggered=False, suppressed=True)
                 continue
             self._notify(rule, source_id, candidate, now, stats, incident_id=incident_id, scope_key=scope_key)
+            recent[scope_key] = now
 
     def _cooldown_scope_key(self, rule: AlertRule, candidate: dict[str, Any]) -> str:
         if rule.suppression_scope.value == "RULE_CAMERA":
@@ -313,12 +339,18 @@ class AlertingEvaluator(ManagedWorker):
             return f"{rule.id}:{camera}"
         return str(rule.id)
 
-    def _cooldown_ends_at(self, rule: AlertRule, scope_key: str, now: datetime) -> datetime | None:
+    def _cooldown_ends_at(
+        self,
+        rule: AlertRule,
+        scope_key: str,
+        now: datetime,
+        recent: dict[str, datetime] | None = None,
+    ) -> datetime | None:
         if rule.cooldown_seconds <= 0:
             return None
         from datetime import timedelta
 
-        last = self._last_trigger_at(rule, scope_key)
+        last = (recent or {}).get(scope_key) or self._last_trigger_at(rule, scope_key)
         if last is None:
             return None
         return last + timedelta(seconds=rule.cooldown_seconds)
@@ -336,15 +368,24 @@ class AlertingEvaluator(ManagedWorker):
             return None
         return items[0].created_at
 
-    def _in_cooldown(self, rule: AlertRule, scope_key: str, now: datetime) -> bool:
+    def _in_cooldown(
+        self,
+        rule: AlertRule,
+        scope_key: str,
+        now: datetime,
+        recent: dict[str, datetime] | None = None,
+    ) -> bool:
         if rule.cooldown_seconds <= 0:
             return False
-        last = self._last_trigger_at(rule, scope_key)
+        last = (recent or {}).get(scope_key) or self._last_trigger_at(rule, scope_key)
         if last is None:
             return False
         try:
+            if last.tzinfo is None:
+                # SQLite reads back naive datetimes; storage is UTC.
+                last = last.replace(tzinfo=now.tzinfo)
             elapsed = (now - last).total_seconds()
-        except TypeError:
+        except (TypeError, OverflowError, ValueError):
             return False
         return elapsed < rule.cooldown_seconds
 
