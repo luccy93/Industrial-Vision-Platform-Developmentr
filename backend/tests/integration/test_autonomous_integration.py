@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.app.domain.frame import IngestionFrame
 from backend.app.infrastructure.db import get_session_factory, init_db
 from backend.app.main import create_app
+from backend.tests.auth_helpers import authenticate_client
 from backend.tests.autonomous_helpers import synthetic_frame, utc
 from backend.tests.safety_helpers import make_track
 
@@ -36,6 +37,7 @@ def test_startup_warms_perception_profiles(test_settings) -> None:  # type: igno
     _seed_camera_and_profile(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         from typing import cast
 
         from fastapi import FastAPI
@@ -56,6 +58,7 @@ def test_stream_stop_clears_runtime_but_keeps_profiles(test_settings, tmp_path) 
     _seed_camera_and_profile(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         video = write_sample_video(str(tmp_path / "lifecycle.mp4"), frames=40)
         assert client.put("/api/v1/cameras/cam-life", json={"source": video}).status_code == 200
         assert client.post("/api/v1/cameras/cam-life/start").status_code == 200

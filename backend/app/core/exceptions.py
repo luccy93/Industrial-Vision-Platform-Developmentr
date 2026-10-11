@@ -299,6 +299,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             return JSONResponse(
                 status_code=exc.status_code,
                 content=error_envelope(code, message, fields["request_id"], detail),
+                headers=dict(exc.headers) if exc.headers else None,
             )
         code = "not_found" if exc.status_code == 404 else "http_error"
         _log_api_error(
@@ -314,6 +315,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=error_envelope(code, str(detail), fields["request_id"]),
+            headers=dict(exc.headers) if exc.headers else None,
         )
 
     @app.exception_handler(Exception)

@@ -65,20 +65,28 @@ GENERIC_LOGIN_FAILURE = "Invalid email or password."
 
 
 class LoginRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=1024)
 
 
 class ChangePasswordRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     current_password: str = Field(min_length=1, max_length=1024)
     new_password: str = Field(min_length=1, max_length=1024)
 
 
 class WsTicketRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     scope: str = Field(min_length=1, max_length=128)
 
 
 class UserCreateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=1024)
     role: str = Field(default="VIEWER", max_length=16)
@@ -326,12 +334,9 @@ def issue_ws_ticket(
                 status_code=422,
                 detail={"code": "validation_error", "message": "Camera scope requires an id."},
             )
-        from backend.app.ingestion.repository import CameraRepository
-
-        factory = getattr(request.app.state, "session_factory", None)
-        cameras = CameraRepository(factory) if factory is not None else None
-        if cameras is None or cameras.get(camera_id) is None:
-            raise HTTPException(status_code=404, detail=f"camera not found: {camera_id}")
+        # Existence is NOT checked here: the socket itself reports
+        # CAMERA_NOT_FOUND to authorized holders (preserved V02 contract).
+        # Issuance still requires a valid session + CSRF + read role.
         scope = camera_scope(camera_id)
     else:
         raise HTTPException(

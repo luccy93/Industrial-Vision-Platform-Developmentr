@@ -40,3 +40,18 @@ def create_test_user(
         now=datetime.now(UTC),
     )
     return user, password
+
+
+def authenticate_client(test_client, database_url: str, email: str = "admin@example.com"):  # type: ignore[no-untyped-def]
+    """Log a bespoke TestClient in as ADMIN against its app's database.
+
+    For tests that build their own app/client instead of using the
+    shared ``client`` fixture (e.g. restart/warmup tests that seed the
+    database before ``create_app``). Mutates and returns the client.
+    """
+    repo = AuthRepository(get_session_factory(database_url))
+    create_test_user(repo, email, role=Role.ADMIN)
+    res = test_client.post("/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD})
+    assert res.status_code == 200, res.text
+    test_client.headers["X-CSRF-Token"] = res.json()["csrf_token"]
+    return test_client

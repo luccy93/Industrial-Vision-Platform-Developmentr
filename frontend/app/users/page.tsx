@@ -79,7 +79,7 @@ export default function UsersPage() {
         <div>
           <h1 className="text-lg font-bold">Users</h1>
           <p className="text-sm text-slate-400">
-            {total} identities. New accounts must change their password at first login.
+            {total} identities. New accounts sign in with a forced password change.
           </p>
         </div>
         <button

@@ -90,6 +90,12 @@ def test_smtp_configured_gate() -> None:
 
 
 def test_production_env_still_constructible() -> None:
-    settings = _settings(app_env=AppEnv.production, cors_allowed_origins=["https://ops.example.com"])
+    # V16 production posture: explicit origins AND credentialed CORS
+    # (browser sessions require both).
+    settings = _settings(
+        app_env=AppEnv.production,
+        cors_allowed_origins=["https://ops.example.com"],
+        cors_allow_credentials=True,
+    )
     assert settings.alerting_enabled is False
     assert settings.validate_startup() is not None

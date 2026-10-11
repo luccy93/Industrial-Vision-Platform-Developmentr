@@ -15,6 +15,7 @@ from backend.app.main import create_app
 from backend.app.spatial.engine import SpatialEngine
 from backend.app.spatial.repository import ZoneRepository
 from backend.app.spatial.schemas import ZonePoint
+from backend.tests.auth_helpers import authenticate_client
 from backend.tests.safety_helpers import make_track, utc
 
 _POLYGON = [
@@ -46,7 +47,7 @@ def _spatial(client: Any) -> SpatialEngine:
 def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch
 ) -> None:
-    """The migration chain applies and reverses cleanly (002-008)."""
+    """The migration chain applies and reverses cleanly (002-010)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -73,7 +74,15 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
         "incident_transitions",
         "alert_evaluations",
         "alerting_cursor",
+        "users",
+        "user_sessions",
+        "ws_tickets",
+        "login_attempts",
+        "auth_audit",
     } <= _tables(url)
+    assert "muted_until" in {
+        str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")
+    }
     # V14 (007) time indexes exist for the analytics range queries
     # (created_at has been indexed since 005).
     assert {
@@ -83,7 +92,21 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     } <= _indexes(url, "incidents")
     assert "ix_operational_events_first_seen" in _indexes(url, "operational_events")
 
-    # V15 (008) reverses first: alerting tables go, analytics stay.
+    # V16 (010) reverses first: mute column goes, auth tables stay.
+    command.downgrade(config, "-1")
+    assert "muted_until" not in {
+        str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")
+    }
+    assert "users" in _tables(url)
+
+    # V16 (009) reverses next: auth tables go, alerting stays.
+    command.downgrade(config, "-1")
+    remaining = _tables(url)
+    assert "users" not in remaining
+    assert "user_sessions" not in remaining
+    assert "alert_rules" in remaining
+
+    # V15 (008) reverses next: alerting tables go, analytics stay.
     command.downgrade(config, "-1")
     remaining = _tables(url)
     assert "alert_rules" not in remaining
@@ -158,6 +181,7 @@ def test_startup_warms_spatial_configuration(test_settings) -> None:  # type: ig
     _seed_camera_and_zone(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         spatial = _spatial(client)
         zones = spatial.zones_for("cam-lifecycle")
         assert [z.zone_id for z in zones] == ["restricted-01"]
@@ -171,6 +195,7 @@ def test_stream_stop_clears_runtime_state(test_settings, tmp_path) -> None:  # t
     _seed_camera_and_zone(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         video = write_sample_video(str(tmp_path / "lifecycle.mp4"), frames=40)
         res = client.put(
             "/api/v1/cameras/cam-lifecycle",

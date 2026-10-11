@@ -90,6 +90,8 @@ def resolve_principal(
     )
     if not live:
         raise unauthenticated()
+    # Throttled activity refresh (writes at most every 5 min per session).
+    repository.touch_session(session_id=session.id, now=moment)
     authenticated_at = session.authenticated_at
     if authenticated_at.tzinfo is None:
         authenticated_at = authenticated_at.replace(tzinfo=UTC)

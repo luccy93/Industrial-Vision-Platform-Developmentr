@@ -16,6 +16,7 @@ from backend.app.quality.schemas import (
     InspectionType,
     RegionType,
 )
+from backend.tests.auth_helpers import authenticate_client
 from backend.tests.quality_helpers import synthetic_frame, utc
 
 _RECT = {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8}
@@ -75,6 +76,7 @@ def test_startup_warms_quality_configuration(test_settings) -> None:  # type: ig
     _seed_profile(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         engine = _app(client).quality_engine
         state = engine._cameras["cam-lifecycle"]
         assert set(state.profiles) == {"profile-01"}
@@ -91,6 +93,7 @@ def test_stream_stop_clears_runtime_but_keeps_config(test_settings, tmp_path) ->
     _seed_profile(test_settings)
     app = create_app(test_settings)
     with TestClient(app) as client:
+        authenticate_client(client, str(test_settings.database_url))
         video = write_sample_video(str(tmp_path / "lifecycle.mp4"), frames=40)
         assert client.put("/api/v1/cameras/cam-lifecycle", json={"source": video}).status_code == 200
         assert client.post("/api/v1/cameras/cam-lifecycle/start").status_code == 200
