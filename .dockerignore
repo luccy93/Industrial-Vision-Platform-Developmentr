@@ -13,6 +13,27 @@ node_modules/
 frontend/.next/
 frontend/out/
 *.log
+# Environment and secrets (never baked into images)
 .env
+.env.*
+!.env.example
+# Tests and local tooling (not shipped in production images)
+backend/tests/
+backend/requirements-dev.txt
+vitest.setup.ts
+coverage/
+htmlcov/
+.coverage
+# Local data, weights, and machine artifacts (mounted or delivered at deploy)
+data/
+models/*.pt
+models/*.onnx
+models/*.engine
+emails.csv
 postgres-data/
 redis-data/
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

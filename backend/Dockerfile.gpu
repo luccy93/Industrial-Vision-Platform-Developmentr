@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+
+# Industrial Vision Platform — backend GPU image (opt-in, CUDA 12.6).
+#
+# Same application and Python as the CPU image; only the PyTorch build
+# differs (CUDA-enabled wheels from the official cu126 index). Requires
+# host NVIDIA drivers + NVIDIA Container Toolkit; selected via
+# compose.gpu.yaml device reservations. Never used by the default stack.
+#
+# Pinned pair verified against the PyTorch cu126 index (V17):
+#   torch==2.13.0+cu126, torchvision==0.28.0+cu126
+# requirements.txt is installed afterwards; its `torch>=2.0` constraint
+# is already satisfied so pip keeps the CUDA build (order matters).
+
+ARG PYTHON_BASE=python:3.11-slim-bookworm
+ARG TORCH_VERSION=2.13.0
+ARG TORCHVISION_VERSION=0.28.0
+
+FROM ${PYTHON_BASE} AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /code
+COPY backend/requirements.txt ./backend-requirements.txt
+RUN pip install --no-cache-dir --prefix=/install \
+        torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
+        --index-url https://download.pytorch.org/whl/cu126 \
+    && pip install --no-cache-dir --prefix=/install -r backend-requirements.txt \
+    && PYTHONPATH=/install/lib/python3.11/site-packages python -c "import torch; assert '+cu126' in torch.__version__, torch.__version__"
+
+FROM ${PYTHON_BASE} AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    MODEL_DEVICE=cuda
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /usr/sbin/nologin appuser
+
+WORKDIR /code
+COPY --from=builder /install /usr/local
+COPY backend ./backend
+RUN mkdir -p /code/models /code/data && chown -R appuser:appuser /code
+
+USER appuser
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/live')"]
+
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,20 @@
+# Local development overlay (V17) — loopback-only conveniences.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# Adds 127.0.0.1-bound host ports for API debugging and direct
+# database/cache inspection. Never used for production; never binds
+# datastores to all interfaces.
+
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

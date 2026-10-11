@@ -1,0 +1,28 @@
+# NVIDIA GPU override (V17, opt-in) — CUDA 12.6 target.
+#
+#   docker compose -f compose.yaml -f compose.gpu.yaml up --build
+#
+# Swaps only the api image for the CUDA build and selects the GPU
+# inference device. The migrate job stays on the CPU image (schema
+# migration is device-independent). Contains no database/cache/port
+# changes, so the CPU deployment never requires NVIDIA drivers,
+# runtime, or hardware.
+#
+# Host prerequisites: NVIDIA drivers (>=550 recommended for CUDA 12.6),
+# NVIDIA Container Toolkit, and operator-selected device count
+# (GPU_COUNT, default 1 — never all GPUs implicitly).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.gpu
+    environment:
+      MODEL_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu]
