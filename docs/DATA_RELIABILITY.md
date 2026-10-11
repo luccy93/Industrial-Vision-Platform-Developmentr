@@ -180,7 +180,7 @@ PostgreSQL is the source of truth. Revisit only with profiling evidence.
 ## Local development and Docker
 
 Compose already runs `postgres:16` + `redis:7`. The api service pins
-`REDIS_ENABLED=false` / `EVENT_BUS_MODE=local`, so `docker compose up`
+`REDIS_ENABLED=false` / `EVENT_BUS_MODE=local`, so `docker compose -f compose.yaml up`
 works with zero Redis dependence. For distributed mode, set
 `REDIS_ENABLED=true`, `EVENT_BUS_MODE=distributed` (and
 `REDIS_REQUIRED=true` to enforce it) with a reachable `REDIS_URL`.

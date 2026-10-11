@@ -181,13 +181,15 @@ Full guide: `docs/DATA_RELIABILITY.md`.
 ## Docker
 
 ```powershell
-docker compose config        # validate
-docker compose up --build    # api + web + postgres + redis
-docker compose down
+docker compose -f compose.yaml config        # validate
+docker compose -f compose.yaml up --build    # migrate + api + web + postgres + redis
+docker compose -f compose.yaml down
 ```
 
-GPU note: V01 runs CPU-only. For later CV volumes, uncomment the `deploy.reservations`
-example in `docker-compose.yml` on a CUDA host with the NVIDIA container toolkit.
+GPU: `docker compose -f compose.yaml -f compose.gpu.yaml up --build`
+on a CUDA host with the NVIDIA Container Toolkit (CUDA 12.6 target).
+Local debug ports: add `-f compose.dev.yaml` (loopback-only DB/cache/API).
+Full guide: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 
 ## Environments
 

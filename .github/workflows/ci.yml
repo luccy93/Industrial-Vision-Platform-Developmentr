@@ -25,3 +25,11 @@ jobs:
         with:
           node-version: "20"
       - run: cd frontend && npm ci && npm run typecheck && npm run build
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f compose.yaml config
+      - run: docker compose -f compose.yaml -f compose.dev.yaml config
+      - run: docker compose -f compose.yaml -f compose.gpu.yaml config

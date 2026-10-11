@@ -36,8 +36,8 @@ Dashboard
   TrackedObject, SafetyEvent, QualityEvent, PerceptionEvent, RiskAssessment, Incident, Alert.
 - Next.js + TS + Tailwind shell: layout, sidebar, dashboard/system pages, API/WS clients,
   shared types, env config.
-- Docker foundation: `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`
-  (api, web, postgres, redis), GPU-ready but CPU-default.
+- Docker foundation: `backend/Dockerfile`, `frontend/Dockerfile`, `compose.yaml`
+  (migrate, api, web, postgres, redis), CPU-default with GPU overlay.
 - CI skeleton: `.github/workflows/ci.yml` (backend tests + frontend typecheck/build).
 - Docs: constitution, architecture, development, README.
 
@@ -279,7 +279,7 @@ frontend/
   lib/{api,websocket,config}
   types/ styles/
 docs/ infra/ .github/
-docker-compose.yml
+compose.yaml (+ compose.dev.yaml, compose.gpu.yaml)
 .env.example
 ```
 
@@ -289,5 +289,6 @@ docker-compose.yml
 - Pydantic v2 everywhere: single validation story from env → API → domain.
 - Postgres/Redis-ready but optional: health reports `configured/reachable` honestly;
   `testing` never requires them.
-- CPU-default, GPU-possible: `GPU_ENABLED/MODEL_DEVICE` config; compose includes
-  commented GPU reservation example.
+- CPU-default, GPU-possible: `GPU_ENABLED/MODEL_DEVICE` config; `compose.gpu.yaml`
+  opts into NVIDIA reservations (CUDA 12.6 target). Full guide:
+  `docs/DOCKER_GPU_DEPLOYMENT.md`.

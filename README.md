@@ -316,9 +316,11 @@ cd frontend; npm run typecheck; npm run build
 ## Docker Usage
 
 ```powershell
-docker compose config
-docker compose up --build
+docker compose -f compose.yaml config
+docker compose -f compose.yaml up --build
 ```
+
+Full guide: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 
 ## Project Roadmap
 
