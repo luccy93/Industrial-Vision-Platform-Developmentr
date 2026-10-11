@@ -10,6 +10,7 @@ import {
   useIntelligenceSocket,
   type IntelligenceWsMessage,
 } from "../../lib/websocket/useIntelligenceSocket";
+import { useAuth } from "../../components/auth/AuthProvider";
 import { appConfig } from "../../lib/config";
 import type {
   CameraItem,
@@ -46,6 +47,7 @@ function upsertCluster(clusters: RiskClusterView[], incoming: RiskClusterView): 
 }
 
 export default function IntelligencePage() {
+  const { getTicket } = useAuth();
   const [status, setStatus] = useState<IntelligenceStatus | null>(null);
   const [cameras, setCameras] = useState<CameraItem[]>([]);
   const [cameraId, setCameraId] = useState<string>("");
@@ -128,7 +130,7 @@ export default function IntelligencePage() {
     [cameraId, refresh]
   );
 
-  const feedStatus = useIntelligenceSocket(cameraId || null, handleMessage);
+  const feedStatus = useIntelligenceSocket(cameraId || null, handleMessage, getTicket);
 
   useEffect(() => {
     void refresh();

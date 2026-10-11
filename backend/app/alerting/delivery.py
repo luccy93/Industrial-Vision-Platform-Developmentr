@@ -348,6 +348,10 @@ class DeliveryWorker(ManagedWorker):
             stats["terminal"] += 1
             self._failed += 1
             return
+        if self._is_muted(notification, now):
+            # V16 operator mute: leave pending, no attempt consumed.
+            stats["skipped"] += 1
+            return
         try:
             result = adapter.send(
                 notification,
@@ -381,10 +385,28 @@ class DeliveryWorker(ManagedWorker):
             )
             stats["retried"] += 1
 
+    def _is_muted(self, notification: dict[str, Any], now: datetime) -> bool:
+        """True while a V16 operator mute window is in effect."""
+        muted_until = notification.get("muted_until")
+        if muted_until is None:
+            return False
+        if isinstance(muted_until, str):
+            try:
+                muted_until = datetime.fromisoformat(muted_until)
+            except ValueError:
+                return False
+        if muted_until.tzinfo is None:
+            muted_until = muted_until.replace(tzinfo=now.tzinfo)
+        try:
+            return bool(muted_until > now)
+        except TypeError:
+            return False
+
     def _notification_payload(self, notification_id: str) -> dict[str, Any] | None:
         notification = self._alerts.get_notification(str(notification_id))
         if notification is None:
             return None
+        muted = notification.muted_until
         return {
             "id": str(notification.id),
             "rule_id": str(notification.rule_id),
@@ -397,6 +419,7 @@ class DeliveryWorker(ManagedWorker):
             "title": notification.title,
             "message": notification.message,
             "created_at": notification.created_at.isoformat() if notification.created_at else None,
+            "muted_until": muted.isoformat() if muted else None,
         }
 
     def delivery_stats(self) -> dict[str, int]:

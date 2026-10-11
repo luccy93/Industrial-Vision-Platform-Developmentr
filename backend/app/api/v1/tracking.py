@@ -11,11 +11,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.app.api.v1.cameras import get_repository
+from backend.app.auth.dependencies import require_read
 from backend.app.inference.worker import InferenceSupervisor
 from backend.app.ingestion.repository import CameraRepository
 from backend.app.tracking.manager import TrackingManager
 
-router = APIRouter(tags=["tracking"])
+router = APIRouter(tags=["tracking"], dependencies=[require_read])
 
 
 def get_tracking_manager(request: Request) -> TrackingManager:

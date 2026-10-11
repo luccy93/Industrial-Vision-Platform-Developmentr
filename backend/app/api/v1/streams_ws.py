@@ -20,6 +20,16 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.app.api.v1.cameras import _fallback_supervisor
+from backend.app.auth.repository import AuthRepository
+from backend.app.auth.ws import (
+    WS_CLOSE_FORBIDDEN,
+    WS_CLOSE_UNAUTHORIZED,
+    authorize_ticket,
+    camera_scope,
+    extract_ticket,
+    revalidate_connection,
+    ws_origin_allowed,
+)
 from backend.app.domain.common import utcnow
 from backend.app.domain.stream import StreamState
 from backend.app.ingestion.repository import CameraRepository
@@ -96,6 +106,35 @@ async def camera_stream_socket(
     camera_id: str,
 ) -> None:
     await websocket.accept()
+    # V16: ticket authorization BEFORE any application data. The per-frame
+    # hot loop below is untouched; only entry + periodic revalidation added.
+    app_state = websocket.app.state
+    settings = getattr(app_state, "settings", None)
+    factory = getattr(app_state, "session_factory", None)
+    auth_repo = AuthRepository(factory) if factory is not None else None
+    ticket = extract_ticket(websocket)
+    authorized = None
+    if settings is not None and auth_repo is not None and ticket is not None:
+        if ws_origin_allowed(websocket, list(settings.cors_allowed_origins or [])):
+            authorized = authorize_ticket(
+                auth_repo,
+                raw_ticket=ticket,
+                scope=camera_scope(camera_id),
+                now=utcnow(),
+                idle_minutes=int(settings.auth_session_idle_minutes),
+                absolute_hours=int(settings.auth_session_absolute_hours),
+            )
+    if authorized is None:
+        try:
+            await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        except Exception:
+            pass
+        return
+    assert settings is not None  # authorized is only set when settings exist
+    auth_user_id = str(authorized["user"].id)
+    auth_session_id = str(authorized["session_id"])
+    revalidate_every = max(1, int(int(settings.auth_ws_revalidate_seconds) // 0.5))
+    auth_ticks = 0
     # Resolve dependencies manually (WebSocket routes bypass Depends(get_db)).
     from backend.app.infrastructure.db import get_session_factory
 
@@ -359,6 +398,22 @@ async def camera_stream_socket(
                         }
                     )
                     await _send(payload)
+            auth_ticks += 1
+            if auth_ticks >= revalidate_every and auth_repo is not None:
+                auth_ticks = 0
+                if not revalidate_connection(
+                    auth_repo,
+                    user_id=auth_user_id,
+                    session_id=auth_session_id,
+                    now=utcnow(),
+                    idle_minutes=int(settings.auth_session_idle_minutes),
+                    absolute_hours=int(settings.auth_session_absolute_hours),
+                ):
+                    try:
+                        await websocket.close(code=WS_CLOSE_FORBIDDEN)
+                    except Exception:
+                        pass
+                    return
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         logger.info("ws closed for camera %s", camera_id)

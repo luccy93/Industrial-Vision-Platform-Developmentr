@@ -442,6 +442,21 @@ class AuthRepository:
             )
             return _session_to_info(row) if row else None
 
+    def get_session(self, session_id: str) -> AuthSessionInfo | None:
+        with self._sessions() as session:
+            row = session.get(UserSessionORM, session_id)
+            return _session_to_info(row) if row else None
+
+    def refresh_session_auth(self, *, session_id: str, now: datetime) -> None:
+        """Mark explicit re-authentication (login / password change)."""
+        with self._sessions() as session:
+            row = session.get(UserSessionORM, session_id)
+            if row is None:
+                raise SessionNotFoundError(f"session not found: {session_id}")
+            row.authenticated_at = now
+            row.last_seen_at = now
+            session.commit()
+
     def get_session_csrf_digest(self, session_id: str) -> str | None:
         with self._sessions() as session:
             row = session.get(UserSessionORM, session_id)
@@ -620,6 +635,26 @@ class AuthRepository:
                 or 0
             )
             return int(account), int(ip_wide)
+
+    def latest_failure_at(
+        self,
+        *,
+        email_normalized: str | None,
+        ip_hash: str | None,
+        since: datetime,
+    ) -> datetime | None:
+        """Most recent failed attempt in scope (for escalating delays)."""
+        with self._sessions() as session:
+            stmt = select(func.max(LoginAttemptORM.attempted_at)).where(
+                LoginAttemptORM.succeeded.is_(False),
+                LoginAttemptORM.attempted_at >= since,
+            )
+            if email_normalized:
+                stmt = stmt.where(LoginAttemptORM.email_normalized == email_normalized)
+            if ip_hash:
+                stmt = stmt.where(LoginAttemptORM.ip_hash == ip_hash)
+            value = session.scalar(stmt)
+            return _aware(value) if value is not None else None
 
     def prune_attempts(self, *, before: datetime, limit: int = 1000) -> int:
         with self._sessions() as session:

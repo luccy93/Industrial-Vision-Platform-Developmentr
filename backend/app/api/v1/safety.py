@@ -7,10 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from backend.app.api.v1.cameras import get_repository
+from backend.app.auth.dependencies import require_admin_config, require_read
 from backend.app.ingestion.repository import CameraRepository
 from backend.app.safety.engine import SafetyEngine
 
-router = APIRouter(tags=["safety"])
+router = APIRouter(tags=["safety"], dependencies=[require_read])
 
 
 def get_safety_engine(request: Request) -> SafetyEngine:
@@ -55,7 +56,7 @@ def camera_safety_events(
     }
 
 
-@router.post("/api/v1/cameras/{camera_id}/safety/suppress/{event_id}")
+@router.post("/api/v1/cameras/{camera_id}/safety/suppress/{event_id}", dependencies=[require_admin_config])
 def suppress_event(
     camera_id: str,
     event_id: str,

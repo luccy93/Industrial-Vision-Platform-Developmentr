@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card } from "../../components/ui/Card";
 import { DataState, SectionBadge } from "../../components/operations/primitives";
 import { useOperationsSocket } from "../../lib/websocket/useOperationsSocket";
+import { useAuth } from "../../components/auth/AuthProvider";
 import {
   createRule,
   emptyRuleForm,
@@ -55,6 +56,7 @@ const NOTIFICATION_TYPES = new Set(["notification_created"]);
  * REST is authoritative; the shared operations socket applies increments.
  */
 export default function NotificationsPage() {
+  const { getTicket } = useAuth();
   const [tab, setTab] = useState<"notifications" | "rules" | "status">("notifications");
   const [status, setStatus] = useState<AlertingStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -159,7 +161,7 @@ export default function NotificationsPage() {
     (message: { type?: string; event_type?: string }) => handlerRef.current(message),
     []
   );
-  const feedStatus = useOperationsSocket(true, NOTIFICATION_TYPES, stableHandler);
+  const feedStatus = useOperationsSocket(true, NOTIFICATION_TYPES, stableHandler, getTicket);
 
   const submitRule = async () => {
     const problem = validateRuleForm(form);

@@ -2,8 +2,9 @@
 
 All runtime incident state lives in PostgreSQL via ``IncidentRepository``.
 Every lifecycle move is validated against the state machine (invalid moves
-return 409); every manual change is recorded in the timeline. There is no
-authentication yet (V16): actors are opaque identifier strings.
+return 409); every manual change is recorded in the timeline. V16
+enforces authentication: reads need any authenticated role, lifecycle
+mutations need OPERATOR+. Actor identity comes from the session.
 
 Commit 01 ships the request/response contracts and dependencies; the routes
 land with the runtime workflow in Commit 02.
@@ -19,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from backend.app.auth.dependencies import require_incident_write, require_read
 from backend.app.incidents.schemas import (
     ActorType,
     EvidenceType,
@@ -31,7 +33,7 @@ from backend.app.infrastructure.db import get_db, get_session_factory
 
 logger = logging.getLogger("industrial-vision.api")
 
-router = APIRouter(tags=["incidents"])
+router = APIRouter(tags=["incidents"], dependencies=[require_read])
 
 
 def get_incident_repository(request: Request, session: Session = Depends(get_db)) -> Any:
@@ -280,7 +282,12 @@ def get_incident(incident_id: str, manager: Any = Depends(get_incident_manager))
     return detail
 
 
-@router.post("/api/v1/incidents", status_code=201, summary="Create manual incident")
+@router.post(
+    "/api/v1/incidents",
+    status_code=201,
+    summary="Create manual incident",
+    dependencies=[require_incident_write],
+)
 def create_incident(
     payload: IncidentCreateRequest,
     request: Request,
@@ -306,7 +313,9 @@ def create_incident(
     return detail
 
 
-@router.patch("/api/v1/incidents/{incident_id}", summary="Patch incident details")
+@router.patch(
+    "/api/v1/incidents/{incident_id}", summary="Patch incident details", dependencies=[require_incident_write]
+)
 def patch_incident(
     incident_id: str,
     payload: IncidentPatchRequest,
@@ -338,7 +347,11 @@ def _action(incident_id: str, manager: Any, call: Any) -> dict[str, Any]:
     return detail
 
 
-@router.post("/api/v1/incidents/{incident_id}/acknowledge", summary="Acknowledge incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/acknowledge",
+    summary="Acknowledge incident",
+    dependencies=[require_incident_write],
+)
 def acknowledge_incident(
     incident_id: str, payload: AcknowledgeRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -347,7 +360,9 @@ def acknowledge_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/assign", summary="Assign incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/assign", summary="Assign incident", dependencies=[require_incident_write]
+)
 def assign_incident(
     incident_id: str, payload: AssignRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -356,14 +371,22 @@ def assign_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/unassign", summary="Unassign incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/unassign",
+    summary="Unassign incident",
+    dependencies=[require_incident_write],
+)
 def unassign_incident(
     incident_id: str, payload: UnassignRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
     return _action(incident_id, manager, lambda: manager.unassign(incident_id, payload.actor_id))
 
 
-@router.post("/api/v1/incidents/{incident_id}/escalate", summary="Escalate incident priority")
+@router.post(
+    "/api/v1/incidents/{incident_id}/escalate",
+    summary="Escalate incident priority",
+    dependencies=[require_incident_write],
+)
 def escalate_incident(
     incident_id: str, payload: EscalateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -374,7 +397,11 @@ def escalate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/investigate", summary="Start incident investigation")
+@router.post(
+    "/api/v1/incidents/{incident_id}/investigate",
+    summary="Start incident investigation",
+    dependencies=[require_incident_write],
+)
 def investigate_incident(
     incident_id: str, payload: InvestigateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -383,7 +410,11 @@ def investigate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/notes", summary="Add incident note")
+@router.post(
+    "/api/v1/incidents/{incident_id}/notes",
+    summary="Add incident note",
+    dependencies=[require_incident_write],
+)
 def add_incident_note(
     incident_id: str, payload: NoteRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -394,7 +425,11 @@ def add_incident_note(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/mitigate", summary="Mitigate incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/mitigate",
+    summary="Mitigate incident",
+    dependencies=[require_incident_write],
+)
 def mitigate_incident(
     incident_id: str, payload: MitigateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -403,7 +438,11 @@ def mitigate_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/resolve", summary="Resolve incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/resolve",
+    summary="Resolve incident",
+    dependencies=[require_incident_write],
+)
 def resolve_incident(
     incident_id: str, payload: ResolveRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -414,7 +453,9 @@ def resolve_incident(
     )
 
 
-@router.post("/api/v1/incidents/{incident_id}/close", summary="Close incident")
+@router.post(
+    "/api/v1/incidents/{incident_id}/close", summary="Close incident", dependencies=[require_incident_write]
+)
 def close_incident(
     incident_id: str, payload: CloseRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -456,7 +497,12 @@ def list_incident_evidence(incident_id: str, manager: Any = Depends(get_incident
     }
 
 
-@router.post("/api/v1/incidents/{incident_id}/evidence", status_code=201, summary="Add incident evidence")
+@router.post(
+    "/api/v1/incidents/{incident_id}/evidence",
+    status_code=201,
+    summary="Add incident evidence",
+    dependencies=[require_incident_write],
+)
 def add_incident_evidence(
     incident_id: str, payload: EvidenceCreateRequest, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:
@@ -488,7 +534,11 @@ def add_incident_evidence(
     }
 
 
-@router.delete("/api/v1/incidents/{incident_id}/evidence/{evidence_id}", summary="Delete incident evidence")
+@router.delete(
+    "/api/v1/incidents/{incident_id}/evidence/{evidence_id}",
+    summary="Delete incident evidence",
+    dependencies=[require_incident_write],
+)
 def delete_incident_evidence(
     incident_id: str, evidence_id: str, manager: Any = Depends(get_incident_manager)
 ) -> dict[str, Any]:

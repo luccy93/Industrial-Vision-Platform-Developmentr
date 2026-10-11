@@ -27,6 +27,16 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.app.api.v1.streams_ws import _parse_subscription
+from backend.app.auth.repository import AuthRepository
+from backend.app.auth.ws import (
+    OPERATIONS_SCOPE,
+    WS_CLOSE_FORBIDDEN,
+    WS_CLOSE_UNAUTHORIZED,
+    authorize_ticket,
+    extract_ticket,
+    revalidate_connection,
+    ws_origin_allowed,
+)
 from backend.app.domain.common import utcnow
 from backend.app.domain.stream import StreamState
 
@@ -42,6 +52,34 @@ OPERATIONS_DRAIN_LIMIT = 50
 async def operations_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     app_state = websocket.app.state
+    settings = getattr(app_state, "settings", None)
+    factory = getattr(app_state, "session_factory", None)
+    auth_repo = AuthRepository(factory) if factory is not None else None
+    ticket = extract_ticket(websocket)
+    authorized = None
+    if settings is not None and auth_repo is not None and ticket is not None:
+        if ws_origin_allowed(websocket, list(settings.cors_allowed_origins or [])):
+            authorized = authorize_ticket(
+                auth_repo,
+                raw_ticket=ticket,
+                scope=OPERATIONS_SCOPE,
+                now=utcnow(),
+                idle_minutes=int(settings.auth_session_idle_minutes),
+                absolute_hours=int(settings.auth_session_absolute_hours),
+            )
+    if authorized is None:
+        try:
+            await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        except Exception:
+            pass
+        return
+    assert settings is not None  # authorized is only set when settings exist
+    auth_user_id = str(authorized["user"].id)
+    auth_session_id = str(authorized["session_id"])
+    revalidate_every = max(
+        1, int(int(settings.auth_ws_revalidate_seconds) // OPERATIONS_TICK_SECONDS)
+    )
+    ticks = 0
     ws_manager = getattr(app_state, "ws_manager", None)
     bus = getattr(app_state, "event_bus", None)
     subscription = _parse_subscription(websocket)
@@ -139,6 +177,22 @@ async def operations_socket(websocket: WebSocket) -> None:
                 except Exception:
                     ws_manager.record_failed(connection_id)
                     raise
+            ticks += 1
+            if ticks >= revalidate_every and auth_repo is not None:
+                ticks = 0
+                if not revalidate_connection(
+                    auth_repo,
+                    user_id=auth_user_id,
+                    session_id=auth_session_id,
+                    now=utcnow(),
+                    idle_minutes=int(settings.auth_session_idle_minutes),
+                    absolute_hours=int(settings.auth_session_absolute_hours),
+                ):
+                    try:
+                        await websocket.close(code=WS_CLOSE_FORBIDDEN)
+                    except Exception:
+                        pass
+                    return
             await asyncio.sleep(OPERATIONS_TICK_SECONDS)
     except WebSocketDisconnect:
         logger.info("operations socket closed")

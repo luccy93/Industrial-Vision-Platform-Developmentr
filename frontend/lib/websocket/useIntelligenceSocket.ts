@@ -14,10 +14,14 @@ const WANTED = new Set(["intelligence_event", "risk_cluster", "risk_update"]);
  * Live intelligence feed with exponential-backoff reconnect. When WebSocket
  * streaming is disabled the hook stays in polling mode and the page relies
  * on REST refresh instead — callers always keep polling as a fallback.
+ *
+ * V16: optional stable `getTicket(scope)` provides the single-use ticket
+ * for `/ws/cameras/{cameraId}` (`camera:{id}` scope).
  */
 export function useIntelligenceSocket(
   cameraId: string | null,
-  onMessage: (message: IntelligenceWsMessage) => void
+  onMessage: (message: IntelligenceWsMessage) => void,
+  getTicket?: (scope: string) => Promise<string | null>
 ): WsFeedStatus {
   const [feedStatus, setFeedStatus] = useState<WsFeedStatus>("polling");
 
@@ -34,8 +38,29 @@ export function useIntelligenceSocket(
 
     const connect = () => {
       if (closed || typeof window === "undefined") return;
+      void connectAsync();
+    };
+
+    const connectAsync = async () => {
+      if (closed || typeof window === "undefined") return;
+      let query = "";
+      if (getTicket && cameraId) {
+        let ticket: string | null = null;
+        try {
+          ticket = await getTicket(`camera:${cameraId}`);
+        } catch {
+          ticket = null;
+        }
+        if (closed) return;
+        if (!ticket) {
+          setFeedStatus("reconnecting");
+          schedule();
+          return;
+        }
+        query = `?ticket=${encodeURIComponent(ticket)}`;
+      }
       try {
-        socket = new WebSocket(`${appConfig.wsUrl}/ws/cameras/${cameraId}`);
+        socket = new WebSocket(`${appConfig.wsUrl}/ws/cameras/${cameraId}${query}`);
       } catch {
         schedule();
         return;

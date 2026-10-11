@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from backend.app.api.v1.cameras import get_repository
+from backend.app.auth.dependencies import require_admin_config, require_read
 from backend.app.core.config import get_settings
 from backend.app.infrastructure.db import get_db, get_session_factory
 from backend.app.ingestion.repository import CameraRepository
@@ -37,7 +38,7 @@ from backend.app.quality.schemas import (
 
 logger = logging.getLogger("industrial-vision.api")
 
-router = APIRouter(tags=["quality"])
+router = APIRouter(tags=["quality"], dependencies=[require_read])
 
 
 def get_profile_repository(request: Request, session: Session = Depends(get_db)) -> Any:
@@ -306,7 +307,7 @@ def list_defect_categories(categories: Any = Depends(get_category_repository)) -
     return {"count": len(items), "categories": [_category_payload(c) for c in items]}
 
 
-@router.post("/api/v1/quality/defect-categories", status_code=201)
+@router.post("/api/v1/quality/defect-categories", status_code=201, dependencies=[require_admin_config])
 def create_defect_category(
     payload: DefectCategoryCreate,
     categories: Any = Depends(get_category_repository),
@@ -329,7 +330,7 @@ def create_defect_category(
     return _category_payload(created)
 
 
-@router.put("/api/v1/quality/defect-categories/{code}")
+@router.put("/api/v1/quality/defect-categories/{code}", dependencies=[require_admin_config])
 def update_defect_category(
     code: str,
     payload: DefectCategoryUpdate,
@@ -344,7 +345,7 @@ def update_defect_category(
     return _category_payload(updated)
 
 
-@router.delete("/api/v1/quality/defect-categories/{code}")
+@router.delete("/api/v1/quality/defect-categories/{code}", dependencies=[require_admin_config])
 def delete_defect_category(
     code: str,
     categories: Any = Depends(get_category_repository),
@@ -368,7 +369,11 @@ def list_inspection_profiles(
     return {"camera_id": camera_id, "count": len(items), "profiles": [_profile_payload(p) for p in items]}
 
 
-@router.post("/api/v1/cameras/{camera_id}/inspection-profiles", status_code=201)
+@router.post(
+    "/api/v1/cameras/{camera_id}/inspection-profiles",
+    status_code=201,
+    dependencies=[require_admin_config],
+)
 def create_inspection_profile(
     camera_id: str,
     payload: ProfileCreateRequest,
@@ -436,7 +441,10 @@ def get_inspection_profile(
     return _profile_payload(profile)
 
 
-@router.put("/api/v1/cameras/{camera_id}/inspection-profiles/{profile_id}")
+@router.put(
+    "/api/v1/cameras/{camera_id}/inspection-profiles/{profile_id}",
+    dependencies=[require_admin_config],
+)
 def update_inspection_profile(
     camera_id: str,
     profile_id: str,
@@ -465,7 +473,10 @@ def update_inspection_profile(
     return _profile_payload(profiles.get(camera_id, profile_id))
 
 
-@router.delete("/api/v1/cameras/{camera_id}/inspection-profiles/{profile_id}")
+@router.delete(
+    "/api/v1/cameras/{camera_id}/inspection-profiles/{profile_id}",
+    dependencies=[require_admin_config],
+)
 def delete_inspection_profile(
     camera_id: str,
     profile_id: str,
@@ -535,7 +546,7 @@ def quality_events(
     }
 
 
-@router.post("/api/v1/cameras/{camera_id}/quality/suppress/{event_id}")
+@router.post("/api/v1/cameras/{camera_id}/quality/suppress/{event_id}", dependencies=[require_admin_config])
 def suppress_quality_event(
     camera_id: str,
     event_id: str,

@@ -11,11 +11,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.app.api.v1.cameras import get_repository
+from backend.app.auth.dependencies import require_read
 from backend.app.inference.manager import ModelManager
 from backend.app.inference.worker import InferenceSupervisor
 from backend.app.ingestion.repository import CameraRepository
 
-router = APIRouter(tags=["inference"])
+router = APIRouter(tags=["inference"], dependencies=[require_read])
 
 
 def get_model_manager(request: Request) -> ModelManager:

@@ -56,6 +56,9 @@ class NotificationORM(Base):
     severity: Mapped[str] = mapped_column(String(16), nullable=False, default="UNKNOWN")
     priority: Mapped[str] = mapped_column(String(8), nullable=False, default="P4")
     context: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    muted_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow, index=True
     )

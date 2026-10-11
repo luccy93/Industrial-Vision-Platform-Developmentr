@@ -106,7 +106,8 @@ export function exportUrl(query: AnalyticsQuery, report: ExportReportType): stri
 
 /** Trigger a browser file download for an export URL (throws on failure). */
 export async function downloadExport(url: string, fallbackName: string): Promise<void> {
-  const res = await fetch(url);
+  // Cookie-authenticated like every other API call (V16).
+  const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     let detail = `Export failed (${res.status})`;
     try {

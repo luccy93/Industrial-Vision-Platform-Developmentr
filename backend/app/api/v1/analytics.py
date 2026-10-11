@@ -37,10 +37,11 @@ from backend.app.analytics.contracts import (
     bucket_start,
     validate_bucket,
 )
+from backend.app.auth.dependencies import require_read
 from backend.app.domain.common import utcnow
 from backend.app.infrastructure.db import get_db, get_session_factory
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"], dependencies=[require_read])
 
 TREND_METRICS = ("events", "incidents_created", "incidents_resolved", "incidents_closed")
 BREAKDOWN_DATASETS = ("events", "incidents")

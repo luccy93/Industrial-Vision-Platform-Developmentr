@@ -18,9 +18,10 @@ from typing import Any, Protocol, TypeVar
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from backend.app.auth.dependencies import require_read
 from backend.app.domain.common import utcnow
 
-router = APIRouter(tags=["operations"])
+router = APIRouter(tags=["operations"], dependencies=[require_read])
 
 MAX_EVENT_SCAN = 200
 MAX_CAMERAS_SCAN = 50

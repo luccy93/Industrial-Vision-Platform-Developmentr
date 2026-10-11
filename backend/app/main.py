@@ -608,6 +608,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await call_next(request)
 
     @app.middleware("http")
+    async def _origin_policy(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # V16: reject cross-origin browser state changes outside the
+        # credentialed CORS allowlist. Requests without Origin are
+        # non-browser clients (CSRF token still required). A wildcard
+        # allowlist (dev default) cannot validate origins and passes;
+        # production forbids wildcards at startup validation.
+        from fastapi.responses import JSONResponse
+
+        from backend.app.core.exceptions import error_envelope
+        from backend.app.core.request_context import REQUEST_ID_HEADER as _ORIGIN_RID
+        from backend.app.core.request_context import sanitize_request_id as _sanitize_origin
+
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            origin = str(request.headers.get("origin", "") or "").strip()
+            if origin:
+                origins = [
+                    str(o).strip()
+                    for o in (settings.cors_allowed_origins or [])
+                    if str(o).strip()
+                ]
+                if "*" not in origins and origin not in origins:
+                    request_id = _sanitize_origin(request.headers.get(_ORIGIN_RID))
+                    return JSONResponse(
+                        status_code=403,
+                        content=error_envelope("forbidden", "Cross-origin request denied.", request_id),
+                        headers={_ORIGIN_RID: request_id},
+                    )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
         from backend.app.core.request_context import (
             REQUEST_ID_HEADER,
@@ -670,6 +700,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.alerting import router as alerting_router
 
     app.include_router(alerting_router)
+    from backend.app.api.v1.auth import router as auth_router
+
+    app.include_router(auth_router)
 
     @app.get("/health", tags=["health"], summary="Service health diagnostics")
     def health() -> dict:

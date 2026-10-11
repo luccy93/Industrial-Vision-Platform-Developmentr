@@ -35,6 +35,7 @@ import {
 } from "../../lib/operations/timeline";
 import type { TimelineItem } from "../../types";
 import { useOperationsSocket } from "../../lib/websocket/useOperationsSocket";
+import { useAuth } from "../../components/auth/AuthProvider";
 import type {
   DetectionSummary,
   IncidentSummary,
@@ -73,6 +74,7 @@ function readMetrics(status: unknown): Record<string, unknown> {
  * incremental timeline updates. Reconnects re-baseline from REST.
  */
 export default function DashboardPage() {
+  const { getTicket } = useAuth();
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [cameras, setCameras] = useState<CameraRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
@@ -275,7 +277,7 @@ export default function DashboardPage() {
     setTimeline((prev) => mergeTimeline(prev, [item]));
   }, []);
 
-  const feedStatus = useOperationsSocket(true, null, handleSocketMessage);
+  const feedStatus = useOperationsSocket(true, null, handleSocketMessage, getTicket);
   const wasLive = useRef(feedStatus);
   useEffect(() => {
     // Reconnect recovery: re-baseline authoritative state, then resume deltas.

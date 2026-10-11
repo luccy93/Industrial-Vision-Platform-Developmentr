@@ -19,11 +19,16 @@ function backoffDelay(attempts: number): number {
  * deltas + bus events; never frames/detections/tracking). Unknown or
  * malformed messages are ignored at the boundary; callers keep REST
  * polling as the authoritative fallback and re-baseline on reconnect.
+ *
+ * V16: when `getTicket` is provided, a fresh single-use ticket is
+ * acquired before every (re)connect and sent as `?ticket=`. Pass a
+ * stable (useCallback-memoized) getter to avoid reconnect churn.
  */
 export function useOperationsSocket(
   enabled: boolean,
   wantedTypes: ReadonlySet<string> | null,
-  onMessage: (message: OperationsWsMessage) => void
+  onMessage: (message: OperationsWsMessage) => void,
+  getTicket?: (scope: string) => Promise<string | null>
 ): OpsFeedStatus {
   const [feedStatus, setFeedStatus] = useState<OpsFeedStatus>("polling");
 
@@ -54,9 +59,31 @@ export function useOperationsSocket(
 
     const connect = () => {
       if (closed || typeof window === "undefined" || !visible) return;
+      void connectAsync();
+    };
+
+    const connectAsync = async () => {
+      if (closed || typeof window === "undefined" || !visible) return;
       const params = new URLSearchParams();
       if (wantedTypes && wantedTypes.size > 0) {
         params.set("event_types", Array.from(wantedTypes).join(","));
+      }
+      if (getTicket) {
+        let ticket: string | null = null;
+        try {
+          ticket = await getTicket("operations");
+        } catch {
+          ticket = null;
+        }
+        if (closed || !visible) return;
+        if (!ticket) {
+          // No ticket (expired session, CSRF failure): back off and retry
+          // rather than opening a socket the server must reject.
+          setFeedStatus("reconnecting");
+          schedule();
+          return;
+        }
+        params.set("ticket", ticket);
       }
       const query = params.toString();
       try {

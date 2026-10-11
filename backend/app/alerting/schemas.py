@@ -190,6 +190,9 @@ class Notification(BaseModel):
     severity: str = "UNKNOWN"
     priority: str = "P4"
     context: dict[str, Any] = Field(default_factory=dict)
+    # V16 operator mute: delivery pauses until this instant; detection,
+    # history, and analytics are unaffected.
+    muted_until: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
 

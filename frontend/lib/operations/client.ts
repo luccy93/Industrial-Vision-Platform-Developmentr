@@ -1,4 +1,5 @@
 import { appConfig } from "../config";
+import { ApiError, dispatchUnauthorized, getCsrfToken } from "../auth/session";
 import type {
   CameraItem,
   IncidentListResponse,
@@ -6,14 +7,29 @@ import type {
   StreamStatus,
 } from "../../types";
 
-/** Shared fetch honoring the backend error envelope (never throws raw). */
+/** Shared fetch honoring the backend error envelope (never throws raw).
+ *
+ * Sends the session cookie (`credentials: "include"`) and the CSRF header
+ * on state-changing requests. A 401 dispatches the global unauthorized
+ * event (the AuthProvider redirects to /login) and throws ApiError.
+ */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const started = Date.now();
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers ?? {}) as Record<string, string>),
+  };
+  if (method !== "GET" && method !== "HEAD") {
+    const csrf = getCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
+  }
   let res: Response;
   try {
     res = await fetch(`${appConfig.apiUrl}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      credentials: "include",
+      headers,
     });
   } catch (e) {
     throw new Error(`API unreachable (${path}): ${e instanceof Error ? e.message : e}`);
@@ -21,20 +37,31 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   void started;
   if (!res.ok) {
     let detail = `${path} → ${res.status}`;
+    let code: string | null = null;
     try {
       const body = (await res.json()) as {
         error?: { message?: string; code?: string };
         detail?: unknown;
       };
       if (body?.error?.message) {
+        code = body.error.code ?? null;
         detail = `${body.error.code ?? res.status}: ${body.error.message}`;
       } else if (typeof body?.detail === "string") {
         detail = body.detail;
+      } else if (
+        body?.detail !== null &&
+        typeof body.detail === "object" &&
+        (body.detail as { message?: string; code?: string })?.message
+      ) {
+        const d = body.detail as { message?: string; code?: string };
+        code = d.code ?? null;
+        detail = d.message ?? detail;
       }
     } catch {
       /* keep the status fallback */
     }
-    throw new Error(detail);
+    if (res.status === 401) dispatchUnauthorized();
+    throw new ApiError(detail, res.status, code);
   }
   return (await res.json()) as T;
 }

@@ -100,6 +100,7 @@ def _notification_to_domain(row: NotificationORM) -> Notification:
         severity=row.severity or "UNKNOWN",
         priority=row.priority or "P4",
         context=dict(row.context or {}),
+        muted_until=row.muted_until,
         created_at=row.created_at,
     )
 
@@ -379,6 +380,21 @@ class AlertRepository:
         with self._session_factory() as session:
             row = session.query(NotificationORM).filter_by(id=str(notification_id)).one_or_none()
             return _notification_to_domain(row) if row is not None else None
+
+    def mute_notification(self, notification_id: str, muted_until: datetime) -> Notification | None:
+        """Pause channel delivery until ``muted_until`` (V16 operator mute).
+
+        Detection, history, and analytics are unaffected; the delivery
+        worker skips muted notifications and retries after expiry.
+        """
+        with self._session_factory() as session:
+            row = session.query(NotificationORM).filter_by(id=str(notification_id)).one_or_none()
+            if row is None:
+                return None
+            row.muted_until = muted_until
+            session.commit()
+            session.refresh(row)
+            return _notification_to_domain(row)
 
     def list_notifications(
         self,

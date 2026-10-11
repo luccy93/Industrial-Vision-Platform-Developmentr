@@ -17,13 +17,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from backend.app.auth.dependencies import require_read
 from backend.app.infrastructure.db import get_db, get_session_factory
 from backend.app.ingestion.repository import CameraRepository
 from backend.app.intelligence.schemas import RiskCluster, UnifiedEvent
 
 logger = logging.getLogger("industrial-vision.api")
 
-router = APIRouter(tags=["intelligence"])
+router = APIRouter(tags=["intelligence"], dependencies=[require_read])
 
 
 def get_intelligence_engine(request: Request) -> Any:

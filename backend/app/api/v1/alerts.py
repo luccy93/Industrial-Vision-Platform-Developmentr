@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/alerts", tags=["alerts"])
+from backend.app.auth.dependencies import require_read
+
+router = APIRouter(prefix="/alerts", tags=["alerts"], dependencies=[require_read])
 
 
 @router.get("")

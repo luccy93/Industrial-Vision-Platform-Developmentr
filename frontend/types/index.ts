@@ -9,6 +9,19 @@ export type NavItem = {
   href: string;
   label: string;
   note: string;
+  /** Roles allowed to see this entry. Omitted = any authenticated role. */
+  roles?: AuthRole[];
+};
+
+export type AuthRole = "ADMIN" | "OPERATOR" | "VIEWER";
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  role: AuthRole;
+  is_active: boolean;
+  must_change_password: boolean;
+  last_login_at: string | null;
 };
 
 export type CameraItem = {
@@ -339,6 +352,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/analytics", label: "Analytics", note: "V14 historical reporting" },
   { href: "/notifications", label: "Notifications", note: "V15 alerting" },
+  { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
 

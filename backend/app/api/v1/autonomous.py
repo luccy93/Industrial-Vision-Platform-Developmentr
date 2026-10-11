@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.app.api.v1.cameras import get_repository
+from backend.app.auth.dependencies import require_admin_config, require_read
 from backend.app.autonomous.repository import AutonomousProfileConflictError
 from backend.app.autonomous.schemas import AutonomousProfile, SceneType
 from backend.app.core.config import get_settings
@@ -27,7 +28,7 @@ from backend.app.ingestion.repository import CameraRepository
 
 logger = logging.getLogger("industrial-vision.api")
 
-router = APIRouter(tags=["autonomous"])
+router = APIRouter(tags=["autonomous"], dependencies=[require_read])
 
 
 def get_autonomous_repository(request: Request, session: Session = Depends(get_db)) -> Any:
@@ -148,7 +149,11 @@ def list_autonomous_profiles(
     return {"camera_id": camera_id, "count": len(items), "profiles": [_profile_payload(p) for p in items]}
 
 
-@router.post("/api/v1/cameras/{camera_id}/autonomous-profiles", status_code=201)
+@router.post(
+    "/api/v1/cameras/{camera_id}/autonomous-profiles",
+    status_code=201,
+    dependencies=[require_admin_config],
+)
 def create_autonomous_profile(
     camera_id: str,
     payload: AutonomousProfileCreate,
@@ -211,7 +216,10 @@ def get_autonomous_profile(
     return _profile_payload(profile)
 
 
-@router.put("/api/v1/cameras/{camera_id}/autonomous-profiles/{profile_id}")
+@router.put(
+    "/api/v1/cameras/{camera_id}/autonomous-profiles/{profile_id}",
+    dependencies=[require_admin_config],
+)
 def update_autonomous_profile(
     camera_id: str,
     profile_id: str,
@@ -233,7 +241,10 @@ def update_autonomous_profile(
     return _profile_payload(profiles.get(camera_id, profile_id))
 
 
-@router.delete("/api/v1/cameras/{camera_id}/autonomous-profiles/{profile_id}")
+@router.delete(
+    "/api/v1/cameras/{camera_id}/autonomous-profiles/{profile_id}",
+    dependencies=[require_admin_config],
+)
 def delete_autonomous_profile(
     camera_id: str,
     profile_id: str,

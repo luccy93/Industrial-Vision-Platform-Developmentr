@@ -21,13 +21,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from backend.app.auth.dependencies import require_admin_config, require_camera_control, require_read
 from backend.app.domain.camera import Camera
 from backend.app.domain.stream import SourceType, StreamMetrics
 from backend.app.infrastructure.db import get_db, get_session_factory
 from backend.app.ingestion.manager import StreamSupervisor, create_source
 from backend.app.ingestion.repository import CameraRepository
 
-router = APIRouter(prefix="/cameras", tags=["cameras"])
+router = APIRouter(prefix="/cameras", tags=["cameras"], dependencies=[require_read])
 
 logger = logging.getLogger("industrial-vision.api")
 
@@ -97,7 +98,7 @@ def list_cameras(repository: CameraRepository = Depends(get_repository)) -> dict
     return {"items": [_public_dict(camera) for camera in repository.list()]}
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[require_admin_config])
 def create_camera(
     payload: CameraCreateRequest,
     repository: CameraRepository = Depends(get_repository),
@@ -128,7 +129,7 @@ def get_camera(camera_id: str, repository: CameraRepository = Depends(get_reposi
     return _public_dict(camera)
 
 
-@router.put("/{camera_id}")
+@router.put("/{camera_id}", dependencies=[require_admin_config])
 def update_camera(
     camera_id: str,
     payload: CameraUpdateRequest,
@@ -146,7 +147,7 @@ def update_camera(
     return _public_dict(camera)
 
 
-@router.delete("/{camera_id}", status_code=200)
+@router.delete("/{camera_id}", status_code=200, dependencies=[require_admin_config])
 def delete_camera(
     camera_id: str,
     request: Request,
@@ -401,7 +402,7 @@ def _attach_inference(request: Request, camera_id: str, frame_source: object) ->
         logger.warning("inference attach failed for %s", camera_id, exc_info=True)
 
 
-@router.post("/{camera_id}/start")
+@router.post("/{camera_id}/start", dependencies=[require_camera_control])
 def start_stream(
     camera_id: str,
     request: Request,
@@ -429,7 +430,7 @@ def start_stream(
     return {"camera_id": camera_id, "state": manager.state.value}
 
 
-@router.post("/{camera_id}/stop")
+@router.post("/{camera_id}/stop", dependencies=[require_camera_control])
 def stop_stream(
     camera_id: str,
     request: Request,

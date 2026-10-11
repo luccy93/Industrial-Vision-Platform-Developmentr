@@ -1,8 +1,9 @@
 """Alerting operations API — rules, notifications, deliveries (V15).
 
-Operator-facing management over durable alerting state. No authentication
-exists on this platform (V16 owns it): these endpoints must not be exposed
-to untrusted networks. No credentials ever appear in responses.
+Operator-facing management over durable alerting state. V16 enforces
+authentication on every route: reads require any authenticated role,
+rule/delivery management requires ADMIN, notification mute requires
+OPERATOR+. No credentials ever appear in responses.
 """
 
 from __future__ import annotations
@@ -19,13 +20,15 @@ from backend.app.alerting.repository import (
     NotificationNotFoundError,
 )
 from backend.app.alerting.schemas import AlertChannel, SuppressionScope
+from backend.app.auth.dependencies import require_admin_config, require_notification_mute, require_read
 from backend.app.infrastructure.db import get_db, get_session_factory
 
-router = APIRouter(tags=["alerting"])
+router = APIRouter(tags=["alerting"], dependencies=[require_read])
 
-V16_WARNING = (
-    "Alerting APIs have no authentication; do not expose them to untrusted "
-    "networks until the V16 security volume lands."
+V16_NOTE = (
+    "Alerting APIs require authentication (V16): reads need any "
+    "authenticated role; rule/delivery management needs ADMIN; "
+    "notification mute needs OPERATOR+."
 )
 
 
@@ -90,6 +93,14 @@ class RulePatchRequest(BaseModel):
     suppression_scope: str | None = None
 
 
+#: Maximum operator mute window (8h — covers a shift, then auto-restores).
+MUTE_MAX_MINUTES = 480
+
+
+class MuteRequest(BaseModel):
+    minutes: int = Field(ge=1, le=MUTE_MAX_MINUTES)
+
+
 def _rule_to_response(rule: Any) -> dict[str, Any]:
     return {
         "id": str(rule.id),
@@ -131,6 +142,7 @@ def _notification_to_response(item: Any) -> dict[str, Any]:
         "severity": item.severity,
         "priority": item.priority,
         "context": dict(item.context or {}),
+        "muted_until": item.muted_until.isoformat() if getattr(item, "muted_until", None) else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
@@ -198,7 +210,7 @@ def alerting_status(request: Request, repository: Any = Depends(get_alert_reposi
         "delivery_worker": _snapshot(delivery_worker),
         "channels": channels,
         "deliveries": counts,
-        "security_note": V16_WARNING,
+        "security_note": V16_NOTE,
     }
 
 
@@ -218,7 +230,12 @@ def list_rules(
     }
 
 
-@router.post("/api/v1/alerting/rules", summary="Create alert rule", status_code=201)
+@router.post(
+    "/api/v1/alerting/rules",
+    summary="Create alert rule",
+    status_code=201,
+    dependencies=[require_admin_config],
+)
 def create_rule(
     payload: RuleCreateRequest, repository: Any = Depends(get_alert_repository)
 ) -> dict[str, Any]:
@@ -262,7 +279,11 @@ def get_rule(rule_id: str, repository: Any = Depends(get_alert_repository)) -> d
     return _rule_to_response(rule)
 
 
-@router.patch("/api/v1/alerting/rules/{rule_id}", summary="Update alert rule")
+@router.patch(
+    "/api/v1/alerting/rules/{rule_id}",
+    summary="Update alert rule",
+    dependencies=[require_admin_config],
+)
 def patch_rule(
     rule_id: str, payload: RulePatchRequest, repository: Any = Depends(get_alert_repository)
 ) -> dict[str, Any]:
@@ -354,6 +375,30 @@ def get_notification(
     }
 
 
+@router.post(
+    "/api/v1/alerting/notifications/{notification_id}/mute",
+    summary="Mute notification deliveries",
+    dependencies=[require_notification_mute],
+)
+def mute_notification(
+    notification_id: str, payload: MuteRequest, repository: Any = Depends(get_alert_repository)
+) -> dict[str, Any]:
+    """Pause channel delivery for a bounded window (V16 operator mute).
+
+    Detection, history, and analytics continue; delivery resumes
+    automatically when the window expires.
+    """
+    from datetime import timedelta
+
+    from backend.app.domain.common import utcnow
+
+    muted_until = utcnow() + timedelta(minutes=int(payload.minutes))
+    item = repository.mute_notification(notification_id, muted_until)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"notification not found: {notification_id}")
+    return _notification_to_response(item)
+
+
 @router.get("/api/v1/alerting/deliveries", summary="List deliveries")
 def list_deliveries(
     notification_id: str | None = Query(default=None),
@@ -382,7 +427,11 @@ def list_deliveries(
     }
 
 
-@router.post("/api/v1/alerting/deliveries/{delivery_id}/retry", summary="Retry delivery")
+@router.post(
+    "/api/v1/alerting/deliveries/{delivery_id}/retry",
+    summary="Retry delivery",
+    dependencies=[require_admin_config],
+)
 def retry_delivery(delivery_id: str, repository: Any = Depends(get_alert_repository)) -> dict[str, Any]:
     """Requeue one failed delivery (idempotent; pending/sent are no-ops)."""
     delivery = repository.get_delivery(delivery_id)
