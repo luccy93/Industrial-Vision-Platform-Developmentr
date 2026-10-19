@@ -207,9 +207,7 @@ def test_account_throttle_escalates_without_lockout(client: Any) -> None:
     repo = _repo(client)
     create_test_user(repo, "op@example.com", role=Role.OPERATOR)
     plain = TestClient(client.app)
-    codes = [
-        _login(plain, "op@example.com", "wrong-password-value").status_code for _ in range(6)
-    ]
+    codes = [_login(plain, "op@example.com", "wrong-password-value").status_code for _ in range(6)]
     assert codes[:5] == [401] * 5
     assert codes[5] == 429
     throttled = _login(plain, "op@example.com", "wrong-password-value")
@@ -302,9 +300,7 @@ def test_bootstrap_cli_first_and_refuse_second(
     _init(url)
     settings = client.app.state.settings.model_copy(update={"database_url": url})
     monkeypatch.setattr(bootstrap_mod, "get_settings", lambda: settings)
-    monkeypatch.setattr(
-        "getpass.getpass", lambda prompt="": "Bootstrap-Admin-9-Zulu-Key!"
-    )
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": "Bootstrap-Admin-9-Zulu-Key!")
     assert bootstrap_mod.main(["--email", "root@example.com"]) == 0
     out = capsys.readouterr().out
     assert "root@example.com" in out

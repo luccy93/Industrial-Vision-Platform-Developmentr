@@ -263,9 +263,7 @@ class AuthRepository:
             session.refresh(row)
             return _user_to_domain(row)
 
-    def set_user_active(
-        self, *, user_id: str, is_active: bool, now: datetime | None = None
-    ) -> AuthUser:
+    def set_user_active(self, *, user_id: str, is_active: bool, now: datetime | None = None) -> AuthUser:
         moment = now or datetime.now(UTC)
         with self._sessions() as session:
             if not is_active:
@@ -437,9 +435,7 @@ class AuthRepository:
 
     def get_session_by_digest(self, token_digest: str) -> AuthSessionInfo | None:
         with self._sessions() as session:
-            row = session.scalar(
-                select(UserSessionORM).where(UserSessionORM.token_digest == token_digest)
-            )
+            row = session.scalar(select(UserSessionORM).where(UserSessionORM.token_digest == token_digest))
             return _session_to_info(row) if row else None
 
     def get_session(self, session_id: str) -> AuthSessionInfo | None:
@@ -561,9 +557,7 @@ class AuthRepository:
             )
             if not _affected(claimed):
                 return None
-            row = session.scalar(
-                select(WebSocketTicketORM).where(WebSocketTicketORM.digest == digest)
-            )
+            row = session.scalar(select(WebSocketTicketORM).where(WebSocketTicketORM.digest == digest))
             session.commit()
             if row is None:
                 return None
@@ -590,9 +584,7 @@ class AuthRepository:
 
     # -- throttle + audit --------------------------------------------------
 
-    def record_attempt(
-        self, *, email_normalized: str, ip_hash: str, succeeded: bool, now: datetime
-    ) -> None:
+    def record_attempt(self, *, email_normalized: str, ip_hash: str, succeeded: bool, now: datetime) -> None:
         with self._sessions() as session:
             session.add(
                 LoginAttemptORM(

@@ -37,9 +37,7 @@ def bootstrap_admin(
     validate_email_shape(normalized)
     validate_password(password)
     moment = now or datetime.now(UTC)
-    return repository.bootstrap_admin(
-        email=normalized, password_hash=hash_password(password), now=moment
-    )
+    return repository.bootstrap_admin(email=normalized, password_hash=hash_password(password), now=moment)
 
 
 def main(argv: list[str] | None = None) -> int:

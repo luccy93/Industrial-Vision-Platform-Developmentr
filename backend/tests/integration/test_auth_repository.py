@@ -141,9 +141,7 @@ def test_throttle_counters_and_audit(tmp_path) -> None:  # type: ignore[no-untyp
     repo = _repo(tmp_path)
     now = datetime.now(UTC)
     for _ in range(3):
-        repo.record_attempt(
-            email_normalized="op@example.com", ip_hash="ip1", succeeded=False, now=now
-        )
+        repo.record_attempt(email_normalized="op@example.com", ip_hash="ip1", succeeded=False, now=now)
     repo.record_attempt(email_normalized="op@example.com", ip_hash="ip1", succeeded=True, now=now)
     account, ip_wide = repo.count_recent_failures(
         email_normalized="op@example.com", ip_hash="ip1", since=now - timedelta(minutes=15)

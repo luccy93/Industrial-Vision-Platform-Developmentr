@@ -1,0 +1,35 @@
+{
+  "title": "Industrial Vision Platform",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Request Rate",
+      "targets": [{"expr": "sum(rate(ivp_http_requests_total[5m]))"}],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Error Rate",
+      "targets": [{"expr": "sum(rate(ivp_http_errors_total[5m]))"}],
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "API Latency p95",
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(ivp_http_request_duration_seconds_bucket[5m])) by (le))"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "In-flight Requests",
+      "targets": [{"expr": "sum(ivp_http_requests_in_flight)"}],
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0}
+    }
+  ]
+}

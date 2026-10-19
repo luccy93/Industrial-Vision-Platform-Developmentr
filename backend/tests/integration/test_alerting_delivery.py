@@ -305,9 +305,7 @@ def test_failed_email_does_not_hide_in_app(tmp_path) -> None:
     notification_id = _notification(repo, rule_id)
     repo.ensure_delivery(notification_id=notification_id, channel="in_app")
     repo.ensure_delivery(notification_id=notification_id, channel="email")
-    worker = _worker(
-        url, adapters={"email": FakeChannelAdapter(name="email", configured=False)}
-    )
+    worker = _worker(url, adapters={"email": FakeChannelAdapter(name="email", configured=False)})
     stats = worker.drain_once()
     assert stats["delivered"] == 1  # in-app
     assert stats["terminal"] == 1  # email unconfigured

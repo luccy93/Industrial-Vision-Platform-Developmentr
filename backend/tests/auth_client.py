@@ -38,9 +38,7 @@ class AuthTestClient(TestClient):
         scope = _scope_for_ws_url(url)
         issued = self.post("/api/v1/auth/ws-ticket", json={"scope": scope})
         if issued.status_code != 200:
-            raise RuntimeError(
-                f"AuthTestClient ticket issuance failed ({issued.status_code}): {issued.text}"
-            )
+            raise RuntimeError(f"AuthTestClient ticket issuance failed ({issued.status_code}): {issued.text}")
         ticket = str(issued.json().get("ticket", ""))
         if not ticket:
             raise RuntimeError("AuthTestClient ticket issuance returned no ticket.")

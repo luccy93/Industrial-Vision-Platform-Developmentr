@@ -111,9 +111,5 @@ def test_session_lifetime_logic() -> None:
     assert session_is_live(now=now, **base) is True
     assert session_is_live(now=now, **{**base, "revoked_at": now}) is False
     assert session_is_live(now=now, **{**base, "expires_at": now}) is False
-    assert (
-        session_is_live(now=now, **{**base, "last_seen_at": now - timedelta(minutes=16)}) is False
-    )
-    assert (
-        session_is_live(now=now, **{**base, "created_at": now - timedelta(hours=13)}) is False
-    )
+    assert session_is_live(now=now, **{**base, "last_seen_at": now - timedelta(minutes=16)}) is False
+    assert session_is_live(now=now, **{**base, "created_at": now - timedelta(hours=13)}) is False

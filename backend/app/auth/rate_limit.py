@@ -56,9 +56,7 @@ def login_throttle(
         email_normalized="", ip_hash=ip_digest, since=now - ip_window
     )[1]
     if ip_failures >= ip_max:
-        latest = repository.latest_failure_at(
-            email_normalized=None, ip_hash=ip_digest, since=now - ip_window
-        )
+        latest = repository.latest_failure_at(email_normalized=None, ip_hash=ip_digest, since=now - ip_window)
         retry = _remaining(latest, now, ip_window) if latest else int(ip_window.total_seconds())
         return False, retry
 

@@ -61,9 +61,7 @@ def hash_ip(value: str) -> str:
     return hashlib.sha256(f"ivp-ip:{value}".encode()).hexdigest()[:32]
 
 
-def session_expiry(
-    now: datetime, idle_minutes: int, absolute_hours: int
-) -> tuple[datetime, datetime]:
+def session_expiry(now: datetime, idle_minutes: int, absolute_hours: int) -> tuple[datetime, datetime]:
     """Return ``(expires_at, last_seen_at)`` for a fresh session."""
     return now + timedelta(hours=absolute_hours), now
 

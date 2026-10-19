@@ -1,0 +1,25 @@
+groups:
+  - name: industrial-vision
+    rules:
+      - alert: HighApiErrorRate
+        expr: sum(rate(ivp_http_errors_total[5m])) / clamp_min(sum(rate(ivp_http_requests_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated API error rate"
+          description: "More than 5% of requests are errors over the last 5 minutes."
+      - alert: ApiLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(ivp_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained API latency degradation"
+      - alert: WorkerStale
+        expr: time() - ivp_worker_last_success_timestamp_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker has not succeeded recently"

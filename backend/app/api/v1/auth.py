@@ -155,9 +155,7 @@ def login(
     except ValueError:
         normalized, shape_ok = "", False
     ip = resolve_client_ip(request, list(settings.auth_trusted_proxies or []))
-    allowed, retry_after = login_throttle(
-        repo, settings, email_normalized=normalized, ip=ip, now=now
-    )
+    allowed, retry_after = login_throttle(repo, settings, email_normalized=normalized, ip=ip, now=now)
     if not allowed:
         return _throttled(retry_after)
     user = repo.get_user_by_email(normalized) if shape_ok else None
@@ -286,9 +284,7 @@ def change_password(
     try:
         new_hash = hash_password(body.new_password)
     except PasswordPolicyError as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": exc.code, "message": str(exc)}
-        ) from None
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from None
     # Documented policy: other sessions are invalidated; the current one
     # survives and is re-stamped as freshly authenticated.
     repo.set_password_hash(
@@ -298,9 +294,7 @@ def change_password(
         revoke_others=False,
         now=now,
     )
-    repo.revoke_user_sessions(
-        user_id=principal.user.id, now=now, except_session_id=principal.session_id
-    )
+    repo.revoke_user_sessions(user_id=principal.user.id, now=now, except_session_id=principal.session_id)
     repo.refresh_session_auth(session_id=principal.session_id, now=now)
     repo.audit(
         actor_user_id=principal.user.id,
@@ -387,9 +381,7 @@ def create_user(
     enforce_allowed_origin(request, list(settings.cors_allowed_origins or []))
     principal = _principal(request)
     _check_csrf(request, principal, repo)
-    check_recent_auth(
-        principal, within_minutes=int(settings.auth_recent_auth_minutes)
-    )
+    check_recent_auth(principal, within_minutes=int(settings.auth_recent_auth_minutes))
     try:
         normalized = normalize_email(body.email)
         validate_email_shape(normalized)
@@ -408,9 +400,7 @@ def create_user(
     try:
         new_hash = hash_password(body.password)
     except PasswordPolicyError as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": exc.code, "message": str(exc)}
-        ) from None
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from None
     try:
         created = repo.create_user(
             email=normalized,
@@ -505,9 +495,7 @@ def patch_user(
             return {"user": found.public_dict()}
         return {"user": updated.public_dict()}
     except LastAdminError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "last_admin", "message": str(exc)}
-        ) from None
+        raise HTTPException(status_code=409, detail={"code": "last_admin", "message": str(exc)}) from None
     except UserNotFoundError:
         raise HTTPException(status_code=404, detail=f"user not found: {user_id}") from None
 

@@ -76,9 +76,7 @@ async def operations_socket(websocket: WebSocket) -> None:
     assert settings is not None  # authorized is only set when settings exist
     auth_user_id = str(authorized["user"].id)
     auth_session_id = str(authorized["session_id"])
-    revalidate_every = max(
-        1, int(int(settings.auth_ws_revalidate_seconds) // OPERATIONS_TICK_SECONDS)
-    )
+    revalidate_every = max(1, int(int(settings.auth_ws_revalidate_seconds) // OPERATIONS_TICK_SECONDS))
     ticks = 0
     ws_manager = getattr(app_state, "ws_manager", None)
     bus = getattr(app_state, "event_bus", None)

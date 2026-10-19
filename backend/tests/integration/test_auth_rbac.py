@@ -35,9 +35,7 @@ def _clients(client: Any) -> dict[str, TestClient]:
         ("viewer", "viewer@example.com"),
     ]:
         logged = TestClient(client.app)
-        res = logged.post(
-            "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
-        )
+        res = logged.post("/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD})
         assert res.status_code == 200, (name, res.text)
         logged.headers["X-CSRF-Token"] = res.json()["csrf_token"]
         out[name] = logged
@@ -59,9 +57,7 @@ def test_reads_open_to_all_roles_denied_anon(client: Any) -> None:
 def test_incident_lifecycle_operator_allowed_viewer_denied(client: Any) -> None:
     parties = _clients(client)
     payload = {"title": "RBAC probe", "description": "matrix check", "priority": "P2"}
-    assert (
-        parties["anon"].post("/api/v1/incidents", json=payload).status_code == 401
-    )
+    assert parties["anon"].post("/api/v1/incidents", json=payload).status_code == 401
     denied = parties["viewer"].post("/api/v1/incidents", json=payload)
     assert denied.status_code == 403, denied.text
     created = parties["operator"].post("/api/v1/incidents", json=payload)
@@ -101,9 +97,7 @@ def test_zones_and_suppression_admin_only(client: Any) -> None:
     res = parties["operator"].post("/api/v1/cameras/cam-01/zones", json=zone)
     assert res.status_code == 403, res.text
     assert parties["anon"].post("/api/v1/cameras/cam-01/zones", json=zone).status_code == 401
-    suppress = parties["operator"].post(
-        "/api/v1/cameras/cam-01/safety/suppress/evt-1", json={}
-    )
+    suppress = parties["operator"].post("/api/v1/cameras/cam-01/safety/suppress/evt-1", json={})
     assert suppress.status_code == 403, suppress.text
 
 
@@ -144,10 +138,15 @@ def test_user_admin_locked_down_and_mass_assignment_rejected(client: Any) -> Non
     parties = _clients(client)
     assert parties["anon"].get("/api/v1/auth/users").status_code == 401
     assert parties["viewer"].get("/api/v1/auth/users").status_code == 403
-    assert parties["operator"].post(
-        "/api/v1/auth/users",
-        json={"email": "x@example.com", "password": TEST_PASSWORD, "role": "VIEWER"},
-    ).status_code == 403
+    assert (
+        parties["operator"]
+        .post(
+            "/api/v1/auth/users",
+            json={"email": "x@example.com", "password": TEST_PASSWORD, "role": "VIEWER"},
+        )
+        .status_code
+        == 403
+    )
     listed = parties["admin"].get("/api/v1/auth/users")
     assert listed.status_code == 200 and listed.json()["total"] >= 3
     # Unsupported fields (hashes, ids, timestamps) are rejected, not stored.

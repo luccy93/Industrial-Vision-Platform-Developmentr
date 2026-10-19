@@ -42,9 +42,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
 
 #: Admin operations that additionally require recent authentication
 #: (session ``authenticated_at`` within the step-up window).
-SENSITIVE_USER_OPS = frozenset(
-    {"user.create", "user.role", "user.deactivate", "session.revoke_others"}
-)
+SENSITIVE_USER_OPS = frozenset({"user.create", "user.role", "user.deactivate", "session.revoke_others"})
 
 
 def normalize_role(value: object) -> Role:
@@ -68,6 +66,4 @@ def can(role: Role | str, capability: str) -> bool:
 def capabilities_for(role: Role | str) -> frozenset[str]:
     """Return every capability granted to ``role``."""
     parsed = normalize_role(role)
-    return frozenset(
-        capability for capability, roles in ROLE_CAPABILITIES.items() if parsed in roles
-    )
+    return frozenset(capability for capability, roles in ROLE_CAPABILITIES.items() if parsed in roles)

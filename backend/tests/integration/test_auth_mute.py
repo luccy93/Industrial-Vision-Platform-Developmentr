@@ -57,25 +57,18 @@ def test_mute_endpoint_roundtrip(client: Any) -> None:
     auth_repo = AuthRepository(get_session_factory(url))
     create_test_user(auth_repo, "op2@example.com", role=Role.OPERATOR)
     logged = TestClient(client.app)
-    login = logged.post(
-        "/api/v1/auth/login", json={"email": "op2@example.com", "password": TEST_PASSWORD}
-    )
+    login = logged.post("/api/v1/auth/login", json={"email": "op2@example.com", "password": TEST_PASSWORD})
     assert login.status_code == 200, login.text
     logged.headers["X-CSRF-Token"] = login.json()["csrf_token"]
     alerts = AlertRepository(get_session_factory(url))
     rule_id = str(alerts.create_rule(name="R", channels=["in_app"]).id)
-    created = alerts.create_notification(
-        rule_id=rule_id, source_event_id="evt-ep", title="t", message="m"
-    )
+    created = alerts.create_notification(rule_id=rule_id, source_event_id="evt-ep", title="t", message="m")
     assert created is not None
-    res = logged.post(
-        f"/api/v1/alerting/notifications/{created.id}/mute", json={"minutes": 60}
-    )
+    res = logged.post(f"/api/v1/alerting/notifications/{created.id}/mute", json={"minutes": 60})
     assert res.status_code == 200, res.text
     assert res.json()["muted_until"] is not None
-    assert logged.post(
-        f"/api/v1/alerting/notifications/{created.id}/mute", json={"minutes": 0}
-    ).status_code == 422
-    assert logged.post(
-        "/api/v1/alerting/notifications/missing/mute", json={"minutes": 10}
-    ).status_code == 404
+    assert (
+        logged.post(f"/api/v1/alerting/notifications/{created.id}/mute", json={"minutes": 0}).status_code
+        == 422
+    )
+    assert logged.post("/api/v1/alerting/notifications/missing/mute", json={"minutes": 10}).status_code == 404

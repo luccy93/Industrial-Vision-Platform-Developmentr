@@ -80,9 +80,7 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
         "login_attempts",
         "auth_audit",
     } <= _tables(url)
-    assert "muted_until" in {
-        str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")
-    }
+    assert "muted_until" in {str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")}
     # V14 (007) time indexes exist for the analytics range queries
     # (created_at has been indexed since 005).
     assert {

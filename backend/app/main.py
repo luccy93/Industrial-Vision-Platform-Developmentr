@@ -325,6 +325,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service=settings.service_name,
         environment=settings.app_env.value,
     )
+    # V18 tracing (optional, disabled by default).
+    try:
+        from backend.app.core.tracing import init_tracing, instrument_app
+
+        if init_tracing(settings):
+            # Instrument after app creation below; store flag.
+            app_state_tracing = True
+        else:
+            app_state_tracing = False
+    except Exception:
+        app_state_tracing = False
 
     app = FastAPI(
         title="Industrial AI Vision & Safety Intelligence Platform",
@@ -339,14 +350,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = get_session_factory(settings.database_url)
     app.state.supervisor = _app_supervisor()
     # V18 metrics init
+    app.state.metrics_initialized = False
     try:
-        from backend.app.core.metrics import app_info, app_start_time
         import time as _t
+
+        from backend.app.core.metrics import app_info, app_start_time
+
         app.state.metrics_initialized = True
         app_info.info({"service": settings.service_name, "environment": settings.app_env.value})
         app_start_time.set(_t.time())
     except Exception:
         app.state.metrics_initialized = False
+    # V18 tracing: instrument app if enabled.
+    if globals().get("app_state_tracing", False) or locals().get("app_state_tracing", False):
+        try:
+            from backend.app.core.tracing import instrument_app
+
+            instrument_app(app)
+        except Exception:
+            pass
     from backend.app.inference.manager import ModelManager
     from backend.app.inference.worker import InferenceSupervisor
 
@@ -653,11 +675,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
-        from backend.app.core.logging import get_log_context, set_log_context, reset_log_context
+        from backend.app.core.logging import get_log_context, reset_log_context, set_log_context
         from backend.app.core.metrics import (
             http_requests_in_flight,
             record_request,
-            status_class,
         )
         from backend.app.core.request_context import (
             REQUEST_ID_HEADER,
