@@ -6,9 +6,15 @@ Never user/camera/incident IDs, raw URLs, IPs or exception messages.
 
 from __future__ import annotations
 
+import time
+
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, Counter, Gauge, Histogram, Info, generate_latest
 
 SERVICE_LABEL = "service"
+
+#: Process start (unix seconds) for the uptime gauge. Set by ``mark_start``
+#: when the app is created; falls back to module import time.
+_PROCESS_START = time.time()
 
 http_requests_total = Counter(
     "ivp_http_requests_total",
@@ -118,6 +124,61 @@ def record_request(service, method, route, status_code, duration_seconds):
     )
     if int(status_code) >= 400:
         http_errors_total.labels(service=service, route=route, status_class=sc).inc()
+
+
+def _service(service: str | None = None) -> str:
+    """Bounded service label; resolved from settings when not supplied."""
+    if service:
+        return str(service)
+    try:
+        from backend.app.core.config import get_settings
+
+        return str(get_settings().service_name)
+    except Exception:
+        return "unknown"
+
+
+def mark_start(ts: float | None = None) -> None:
+    """Record process start time for ``ivp_app_uptime_seconds``."""
+    global _PROCESS_START
+    _PROCESS_START = time.time() if ts is None else float(ts)
+    app_start_time.set(_PROCESS_START)
+
+
+def refresh_uptime(service: str | None = None) -> None:
+    """Update the uptime gauge (called on each scrape)."""
+    app_uptime_seconds.set(max(0.0, time.time() - _PROCESS_START))
+
+
+def record_worker_heartbeat(worker: str, service: str | None = None) -> None:
+    """Mark a successful worker cycle (worker staleness alert input)."""
+    worker_last_success_timestamp.labels(service=_service(service), worker=str(worker)).set(time.time())
+
+
+def record_worker_failure(worker: str, error_category: str, service: str | None = None) -> None:
+    worker_failures_total.labels(
+        service=_service(service),
+        worker=str(worker),
+        error_category=(str(error_category)[:64] or "unknown"),
+    ).inc()
+
+
+def record_outbox_processed(outcome: str, service: str | None = None) -> None:
+    outbox_processed_total.labels(service=_service(service), outcome=str(outcome)).inc()
+
+
+def record_notification_delivery(channel: str, outcome: str, service: str | None = None) -> None:
+    notification_delivery_total.labels(
+        service=_service(service), channel=str(channel), outcome=str(outcome)
+    ).inc()
+
+
+def record_redis_error(operation: str, service: str | None = None) -> None:
+    redis_errors_total.labels(service=_service(service), operation=str(operation)).inc()
+
+
+def record_db_error(operation: str, service: str | None = None) -> None:
+    db_errors_total.labels(service=_service(service), operation=str(operation)).inc()
 
 
 def metrics_payload() -> bytes:

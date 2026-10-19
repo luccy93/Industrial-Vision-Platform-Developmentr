@@ -30,6 +30,7 @@ from backend.app.alerting.channels import (
     sign_webhook_payload,
 )
 from backend.app.alerting.repository import AlertRepository
+from backend.app.core.metrics import record_db_error, record_notification_delivery
 from backend.app.domain.common import utcnow
 from backend.app.workers.base import ManagedWorker, WorkerState
 
@@ -326,6 +327,7 @@ class DeliveryWorker(ManagedWorker):
             due = self._alerts.claim_due_deliveries(limit=self._batch_size, now=reference)
         except Exception as exc:
             logger.warning("delivery claim failed: %s", type(exc).__name__)
+            record_db_error("delivery_claim")
             return stats
         stats["claimed"] = len(due)
         for row in due:
@@ -341,16 +343,19 @@ class DeliveryWorker(ManagedWorker):
             self._alerts.mark_delivery(str(row.id), status="failed", error=ERROR_NOT_CONFIGURED)
             stats["terminal"] += 1
             self._failed += 1
+            record_notification_delivery(channel, "unconfigured")
             return
         notification = self._notification_payload(row.notification_id)
         if notification is None:
             self._alerts.mark_delivery(str(row.id), status="failed", error="notification_missing")
             stats["terminal"] += 1
             self._failed += 1
+            record_notification_delivery(channel, "notification_missing")
             return
         if self._is_muted(notification, now):
             # V16 operator mute: leave pending, no attempt consumed.
             stats["skipped"] += 1
+            record_notification_delivery(channel, "muted")
             return
         try:
             result = adapter.send(
@@ -364,6 +369,7 @@ class DeliveryWorker(ManagedWorker):
             self._alerts.mark_delivery(str(row.id), status="sent", delivered=True)
             stats["delivered"] += 1
             self._delivered += 1
+            record_notification_delivery(channel, "delivered")
             return
         attempts = int(row.attempts or 0) + 1
         if not result.retryable or attempts >= self._max_attempts:
@@ -372,6 +378,7 @@ class DeliveryWorker(ManagedWorker):
             )
             stats["terminal"] += 1
             self._failed += 1
+            record_notification_delivery(channel, "terminal")
             logger.warning("delivery terminal channel=%s error=%s", row.channel, result.error_category)
         else:
             backoff = self._retry_base * (2.0 ** min(attempts, 6))
@@ -384,6 +391,7 @@ class DeliveryWorker(ManagedWorker):
                 next_retry_at=now + timedelta(seconds=backoff),
             )
             stats["retried"] += 1
+            record_notification_delivery(channel, "retried")
 
     def _is_muted(self, notification: dict[str, Any], now: datetime) -> bool:
         """True while a V16 operator mute window is in effect."""

@@ -178,6 +178,20 @@ RETENTION_DAYS` bounds history. Tune against the deterministic fake in
 real-Redis smoke runs only with an explicit service, else SKIPPED.
 Full guide: `docs/DATA_RELIABILITY.md`.
 
+## Production hardening (V20)
+
+Configuration is **strict in production, permissive in dev/test**. Failing
+production rules (all enforced by `Settings.validate_startup()` at startup):
+explicit non-wildcard `CORS_ALLOWED_ORIGINS` with credentials, PostgreSQL
+`DATABASE_URL` with a non-default password, `METRICS_ACCESS=internal`,
+valid `AUTH_TRUSTED_PROXIES`, and `http(s)`-only alerting webhooks. Secrets
+are excluded from `repr(settings)` and redacted from logs/tracebacks. The API
+adds security headers (incl. HSTS in production) and the web image ships a
+report-only CSP by default (`CSP_ENFORCE=true` to enforce). Shutdown is
+ordered and idempotent; a partial-startup failure still tears down started
+threads. Full guides: `docs/PRODUCTION_OPERATIONS.md` and
+`docs/OBSERVABILITY.md`.
+
 ## Docker
 
 ```powershell
@@ -194,7 +208,8 @@ Full guide: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 ## Environments
 
 `APP_ENV=development|testing|production`. `testing` must pass with no external
-Postgres/Redis/GPU. Production requires real `DATABASE_URL`/`REDIS_URL` via env/secrets.
+Postgres/Redis/GPU. Production requires real `DATABASE_URL`/`REDIS_URL` via env/secrets
+and enforces the V20 strict rules above (see `docs/PRODUCTION_OPERATIONS.md`).
 
 ## Troubleshooting
 

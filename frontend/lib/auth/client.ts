@@ -1,6 +1,7 @@
 import { appConfig } from "../config";
 import {
   ApiError,
+  dispatchUnauthorized,
   getCsrfToken,
   setCsrfToken,
   type LoginResult,
@@ -25,6 +26,12 @@ async function authFetch<T>(path: string, init?: RequestInit): Promise<{ data: T
     throw new Error(`API unreachable (${path}): ${e instanceof Error ? e.message : e}`);
   }
   if (!res.ok) {
+    // A 401 on any authenticated call means the session is gone: notify the
+    // app so it can redirect. Login itself is excluded (bad credentials are
+    // an ordinary form error, not an expired session).
+    if (res.status === 401 && !path.includes("/auth/login")) {
+      dispatchUnauthorized();
+    }
     let detail = `${path} → ${res.status}`;
     let code: string | null = null;
     try {

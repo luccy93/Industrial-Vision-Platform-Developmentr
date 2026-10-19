@@ -19,6 +19,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
+from backend.app.core.metrics import record_db_error, record_outbox_processed, record_redis_error
 from backend.app.domain.common import utcnow
 from backend.app.events.bus import EventBus
 from backend.app.events.envelope import EventEnvelope
@@ -103,6 +104,7 @@ class OutboxPublisher(ManagedWorker):
             due = self._outbox.claim_due(limit=self._batch_size, now=reference)
         except Exception as exc:
             logger.warning("outbox claim failed: %s", type(exc).__name__)
+            record_db_error("outbox_claim")
             return stats
         stats["claimed"] = len(due)
         for row in due:
@@ -121,6 +123,7 @@ class OutboxPublisher(ManagedWorker):
             self._outbox.mark_failed(row_id, f"invalid envelope: {exc}")
             stats["invalid"] += 1
             self._failed += 1
+            record_outbox_processed("invalid")
             return
         try:
             self._bus.deliver_durable(envelope)
@@ -130,6 +133,7 @@ class OutboxPublisher(ManagedWorker):
                 self._outbox.mark_failed(row_id, f"attempts exhausted: {type(exc).__name__}")
                 stats["dead"] += 1
                 self._failed += 1
+                record_outbox_processed("dead")
                 logger.warning(
                     "outbox intent dead event_id=%s attempts=%d",
                     row.get("event_id"),
@@ -140,10 +144,12 @@ class OutboxPublisher(ManagedWorker):
                 self._outbox.mark_failed(row_id, f"{type(exc).__name__}")
                 self._outbox.requeue_failed(row_id, now + timedelta(seconds=backoff))
                 stats["retried"] += 1
+                record_outbox_processed("retried")
             return
         self._outbox.mark_sent(row_id)
         stats["delivered"] += 1
         self._delivered += 1
+        record_outbox_processed("delivered")
 
     def delivery_stats(self) -> dict[str, int]:
         with self._state_lock:
@@ -245,6 +251,7 @@ class RedisEventSubscriber(ManagedWorker):
             handle.subscribe(self._channel)
         except Exception as exc:
             self._record_failure(f"{type(exc).__name__}: {exc}")
+            record_redis_error("subscribe")
             return None
         self._handle = handle
         return handle
@@ -278,6 +285,7 @@ class RedisEventSubscriber(ManagedWorker):
                     message = handle.get_message(timeout=self._poll_timeout)
                 except Exception as exc:
                     self._record_failure(f"{type(exc).__name__}: {exc}")
+                    record_redis_error("subscribe_poll")
                     break
                 if message is None:
                     break

@@ -11,22 +11,13 @@ import {
   type IntelligenceWsMessage,
 } from "../../lib/websocket/useIntelligenceSocket";
 import { useAuth } from "../../components/auth/AuthProvider";
-import { appConfig } from "../../lib/config";
+import { apiFetch } from "../../lib/operations/client";
 import type {
   CameraItem,
   IntelligenceStatus,
   RiskClusterView,
   UnifiedEvent,
 } from "../../types";
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${appConfig.apiUrl}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json" },
-  });
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return (await res.json()) as T;
-}
 
 const DOMAINS = ["ALL", "SAFETY", "SPATIAL", "QUALITY", "AUTONOMOUS"] as const;
 
@@ -64,8 +55,8 @@ export default function IntelligencePage() {
   const refresh = useCallback(async () => {
     try {
       const [s, cams] = await Promise.all([
-        api<IntelligenceStatus>("/api/v1/intelligence/status"),
-        api<{ items: CameraItem[] }>("/api/v1/cameras"),
+        apiFetch<IntelligenceStatus>("/api/v1/intelligence/status"),
+        apiFetch<{ items: CameraItem[] }>("/api/v1/cameras"),
       ]);
       setStatus(s);
       setCameras(cams.items);
@@ -74,13 +65,13 @@ export default function IntelligencePage() {
       if (selected) {
         if (!cameraId) setCameraId(selected);
         const [ev, cl, rk] = await Promise.all([
-          api<{ events: UnifiedEvent[] }>(
+          apiFetch<{ events: UnifiedEvent[] }>(
             `/api/v1/cameras/${selected}/intelligence/events?status=all&limit=100`
           ),
-          api<{ clusters: RiskClusterView[] }>(
+          apiFetch<{ clusters: RiskClusterView[] }>(
             `/api/v1/cameras/${selected}/intelligence/clusters?status=all&limit=50`
           ),
-          api<{ risk_level: string; risk_score: number; priority: string }>(
+          apiFetch<{ risk_level: string; risk_score: number; priority: string }>(
             `/api/v1/cameras/${selected}/intelligence/risk`
           ),
         ]);

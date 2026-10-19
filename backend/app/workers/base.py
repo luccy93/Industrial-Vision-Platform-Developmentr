@@ -39,6 +39,15 @@ class WorkerState(str, Enum):
     FAILED = "FAILED"
 
 
+def _error_category(message: str) -> str:
+    """Bounded error label from a ``"<ExcType>: detail"`` failure message."""
+    text = str(message).strip()
+    head = text.split(":", 1)[0].strip() if ":" in text else ""
+    if head and head.replace("_", "").isalnum():
+        return head[:64]
+    return "error"
+
+
 @dataclass
 class WorkerSnapshot:
     """Supervision view of one worker (§22)."""
@@ -139,12 +148,27 @@ class ManagedWorker(abc.ABC):
                 self._stopped_at = now
 
     def _report_heartbeat(self) -> None:
+        now = utcnow()
         with self._state_lock:
-            self._last_heartbeat = utcnow()
+            self._last_heartbeat = now
+        # V20: expose the heartbeat as a metric so the worker-staleness alert
+        # has a real signal (the series existed but was never emitted).
+        try:
+            from backend.app.core.metrics import record_worker_heartbeat
+
+            record_worker_heartbeat(self._worker_name)
+        except Exception:
+            pass
 
     def _record_failure(self, message: str) -> None:
         with self._state_lock:
             self._last_error = str(message)[:1024]
+        try:
+            from backend.app.core.metrics import record_worker_failure
+
+            record_worker_failure(self._worker_name, _error_category(message))
+        except Exception:
+            pass
 
     def _record_restart(self) -> None:
         with self._state_lock:

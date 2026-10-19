@@ -1,4 +1,5 @@
 import { apiFetch } from "../operations/client";
+import { dispatchUnauthorized } from "../auth/session";
 import type {
   AnalyticsBreakdown,
   AnalyticsFilters,
@@ -108,6 +109,7 @@ export function exportUrl(query: AnalyticsQuery, report: ExportReportType): stri
 export async function downloadExport(url: string, fallbackName: string): Promise<void> {
   // Cookie-authenticated like every other API call (V16).
   const res = await fetch(url, { credentials: "include" });
+  if (res.status === 401) dispatchUnauthorized();
   if (!res.ok) {
     let detail = `Export failed (${res.status})`;
     try {

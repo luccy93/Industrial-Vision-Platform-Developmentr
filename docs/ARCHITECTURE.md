@@ -236,6 +236,34 @@ Dashboard
 - No cache (documented), no Streams/locks, V10 pagination frozen. See
   `docs/DATA_RELIABILITY.md`.
 
+## V20 — Implemented (production hardening & operational readiness)
+
+- Config/secret hardening in `backend/app/core/config.py`: strict production
+  validators (explicit non-wildcard CORS origins with credentials, real
+  PostgreSQL DSN with a non-default password, `METRICS_ACCESS=internal`,
+  trusted-proxy IP/CIDR shapes, `http(s)`-only alerting webhooks),
+  `repr=False` on secret fields. Never infers production from hostname;
+  dev/test stay permissive.
+- HTTP security headers middleware in `main.py` (nosniff, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, `X-Permitted-Cross-Domain-Policies`,
+  API CSP, HSTS in production); the web image ships a report-only CSP by
+  default (`CSP_ENFORCE` to enforce).
+- Log redaction in `core/logging.py`: Bearer/Basic/Digest authorization,
+  cookies/CSRF/WS tickets, DSN/RTSP passwords, structured extras, and
+  tracebacks.
+- Resilience: lifespan `try/finally` teardown (no orphaned threads on partial
+  startup), single stop of stream/inference supervisors, `dispose_engine`
+  clears the session-factory cache, `init_db` disposes its engine.
+- Observability wiring (`core/metrics.py`): emits the pre-declared worker
+  heartbeat/failure, outbox, notification, Redis-error, and DB-error series
+  (no new names) and refreshes uptime; `monitoring/prometheus/alerts.yml`
+  fixes `WorkerStale` (`absent()` guard) and adds worker-failure, outbox-dead,
+  notification-failure, DB-error, and Redis-error alerts.
+- Frontend resilience: bounded WebSocket reconnect with 4401/4403 terminal
+  handling and global unauthorized dispatch (operations + intelligence
+  sockets); REST 401s dispatch unauthorized. No contract changes.
+- See `docs/PRODUCTION_OPERATIONS.md` and `docs/OBSERVABILITY.md`.
+
 ## Future volumes (explicitly NOT in V01–V12)
 
 | Stage | Status | Notes |

@@ -16,10 +16,55 @@ groups:
           severity: warning
         annotations:
           summary: "Sustained API latency degradation"
+          description: "p95 request latency has exceeded 2s for 5 minutes."
+      # Worker staleness: fires when a worker has not reported success inside
+      # the window, and also when the series is entirely absent (no worker has
+      # ever run) so a silently-dead heartbeat cannot hide the problem.
       - alert: WorkerStale
-        expr: time() - ivp_worker_last_success_timestamp_seconds > 300
+        expr: (time() - ivp_worker_last_success_timestamp_seconds > 300) or absent(ivp_worker_last_success_timestamp_seconds)
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "Worker has not succeeded recently"
+          description: "A supervised worker has not completed a cycle in over 5 minutes (or none is running)."
+      - alert: WorkerFailures
+        expr: sum by (worker) (rate(ivp_worker_failures_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Worker reporting repeated failures"
+          description: "A worker has been failing for 10 minutes; check its logs and dependency health."
+      - alert: OutboxDeadEvents
+        expr: sum(increase(ivp_outbox_processed_total{outcome="dead"}[10m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox events exhausted retries"
+          description: "Durable outbox intents became dead (attempts exhausted); events may be undelivered."
+      - alert: NotificationDeliveryFailures
+        expr: sum by (channel) (increase(ivp_notification_delivery_total{outcome=~"terminal|unconfigured"}[10m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Notification delivery failing"
+          description: "Alert notifications are failing terminally or are unconfigured for a channel."
+      - alert: DatabaseErrorRate
+        expr: sum(rate(ivp_db_errors_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database operation errors"
+          description: "Database operations are erroring; verify connectivity and pool health."
+      - alert: RedisErrorRate
+        expr: sum(rate(ivp_redis_errors_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis operation errors"
+          description: "Redis operations are erroring; distributed delivery may be degraded."

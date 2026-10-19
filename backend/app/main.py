@@ -229,6 +229,12 @@ def _redis_readiness(app: FastAPI) -> tuple[Any, str]:
     try:
         reachable = bool(manager.ping())
     except Exception:
+        try:
+            from backend.app.core.metrics import record_redis_error
+
+            record_redis_error("ping")
+        except Exception:
+            pass
         return HealthStatus.NOT_READY, "redis probe failed"
     if reachable:
         return HealthStatus.READY, "redis reachable"
@@ -253,62 +259,61 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = app.state.runtime
     logger = get_logger("industrial-vision")
     logger.info("startup service=%s env=%s", settings.app_name, settings.app_env.value)
-    # Best-effort schema init (Alembic owns prod; never block startup).
     try:
-        from backend.app.infrastructure.db import init_db
+        # Best-effort schema init (Alembic owns prod; never block startup).
+        try:
+            from backend.app.infrastructure.db import init_db
 
-        init_db(settings.database_url)
-    except Exception:
-        logger.warning("database init skipped (unreachable?)", exc_info=True)
-    _load_spatial_configuration(app, logger)
-    _load_quality_configuration(app, logger)
-    _load_autonomous_configuration(app, logger)
-    # V12: start durable-distribution threads (lifespan only, so tests that
-    # build apps without a lifespan context never leak threads). The
-    # publisher drains in both modes; the subscriber only exists when
-    # distributed delivery is configured.
-    publisher = getattr(app.state, "outbox_publisher", None)
-    if publisher is not None:
-        try:
-            publisher.start()
+            init_db(settings.database_url)
         except Exception:
-            logger.warning("outbox publisher start failed", exc_info=True)
-    subscriber = getattr(app.state, "redis_subscriber", None)
-    if subscriber is not None:
+            logger.warning("database init skipped (unreachable?)", exc_info=True)
+        _load_spatial_configuration(app, logger)
+        _load_quality_configuration(app, logger)
+        _load_autonomous_configuration(app, logger)
+        # V12: start durable-distribution threads (lifespan only, so tests that
+        # build apps without a lifespan context never leak threads). The
+        # publisher drains in both modes; the subscriber only exists when
+        # distributed delivery is configured.
+        publisher = getattr(app.state, "outbox_publisher", None)
+        if publisher is not None:
+            try:
+                publisher.start()
+            except Exception:
+                logger.warning("outbox publisher start failed", exc_info=True)
+        subscriber = getattr(app.state, "redis_subscriber", None)
+        if subscriber is not None:
+            try:
+                subscriber.start()
+            except Exception:
+                logger.warning("redis subscriber start failed", exc_info=True)
+        for key in ("alerting_evaluator", "alerting_delivery"):
+            worker = getattr(app.state, key, None)
+            if worker is None:
+                continue
+            try:
+                worker.start()
+            except Exception:
+                logger.warning("%s start failed", key, exc_info=True)
+        yield
+    finally:
+        # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
+        # then run the ordered idempotent runtime shutdown. The `finally` also
+        # guarantees cleanup of any worker threads started before a
+        # partial-startup failure, so a failed boot never leaks threads. The
+        # ordered phases already stop the stream/inference supervisors, so no
+        # second stop_all() is issued here.
+        ws_manager = getattr(app.state, "ws_manager", None)
+        if ws_manager is not None:
+            try:
+                report = await ws_manager.shutdown("server shutdown")
+                logger.info("websockets drained: %s", report)
+            except Exception:
+                logger.warning("websocket drain failed", exc_info=True)
         try:
-            subscriber.start()
+            runtime.shutdown()
         except Exception:
-            logger.warning("redis subscriber start failed", exc_info=True)
-    for key in ("alerting_evaluator", "alerting_delivery"):
-        worker = getattr(app.state, key, None)
-        if worker is None:
-            continue
-        try:
-            worker.start()
-        except Exception:
-            logger.warning("%s start failed", key, exc_info=True)
-    yield
-    # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
-    # then run the ordered idempotent runtime shutdown.
-    ws_manager = getattr(app.state, "ws_manager", None)
-    if ws_manager is not None:
-        try:
-            report = await ws_manager.shutdown("server shutdown")
-            logger.info("websockets drained: %s", report)
-        except Exception:
-            logger.warning("websocket drain failed", exc_info=True)
-    try:
-        runtime.shutdown()
-    except Exception:
-        logger.warning("runtime shutdown failed", exc_info=True)
-    for key in ("inference_supervisor", "supervisor"):
-        try:
-            supervisor = getattr(app.state, key, None)
-            if supervisor is not None:
-                supervisor.stop_all()
-        except Exception:
-            logger.debug("%s shutdown failed", key, exc_info=True)
-    logger.info("shutdown service=%s", settings.app_name)
+            logger.warning("runtime shutdown failed", exc_info=True)
+        logger.info("shutdown service=%s", settings.app_name)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -352,11 +357,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     try:
         import time as _t
 
-        from backend.app.core.metrics import app_info, app_start_time
+        from backend.app.core.metrics import app_info, mark_start
 
         app.state.metrics_initialized = True
         app_info.info({"service": settings.service_name, "environment": settings.app_env.value})
-        app_start_time.set(_t.time())
+        mark_start(_t.time())
     except Exception:
         app.state.metrics_initialized = False
     # V18 tracing: instrument app if enabled.
@@ -847,7 +852,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def metrics_endpoint(request: Request):
         from fastapi.responses import Response
 
-        from backend.app.core.metrics import metrics_content_type, metrics_payload
+        from backend.app.core.metrics import metrics_content_type, metrics_payload, refresh_uptime
 
         if not settings.metrics_enabled:
             return Response(status_code=404, content="metrics disabled")
@@ -864,6 +869,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return Response(status_code=403, content="forbidden")
         # Exclude self from request metrics: mark route so middleware skips recording.
         request.state._skip_metrics = True
+        refresh_uptime()
         return Response(content=metrics_payload(), media_type=metrics_content_type())
 
     @app.get("/live", tags=["health"], summary="Liveness probe")

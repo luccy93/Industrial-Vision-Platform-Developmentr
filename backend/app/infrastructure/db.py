@@ -79,12 +79,17 @@ def get_session_factory(
 
 
 def dispose_engine(factory: sessionmaker[Session]) -> bool:
-    """Dispose the engine behind a factory (shutdown path). Idempotent."""
+    """Dispose the engine behind a factory (shutdown path). Idempotent.
+
+    Also clears the factory cache so a disposed engine is never handed back
+    out; the next caller rebuilds a fresh engine from the same settings.
+    """
     try:
         engine = factory.kw.get("bind")  # type: ignore[union-attr]
         if engine is None:
             return False
         engine.dispose()
+        _session_factory.cache_clear()
         return True
     except Exception:
         return False
@@ -136,6 +141,12 @@ def get_db(request: Request) -> Iterator[Session]:
         session.commit()
     except Exception:
         session.rollback()
+        try:
+            from backend.app.core.metrics import record_db_error
+
+            record_db_error("session")
+        except Exception:
+            pass
         raise
     finally:
         session.close()
@@ -146,4 +157,9 @@ def init_db(database_url: str | None = None) -> None:
     url = database_url or get_settings().database_url
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
     engine = create_engine(url, connect_args=connect_args)
-    Base.metadata.create_all(engine)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        # The engine is only needed for schema creation here; pool resources
+        # from the main app engine are unaffected (separate engine instance).
+        engine.dispose()

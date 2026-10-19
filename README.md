@@ -91,6 +91,26 @@ attempts and retries, idempotent evaluation with cooldown audit, and an
 operator UI. No synthetic events, no new models, no auth/RBAC (V16) —
 operators only, on trusted networks.
 **V15 = Alerting & Notifications.**
+V20 hardens the platform for **production operations**: strict
+fail-fast configuration (explicit non-wildcard CORS origins, real
+PostgreSQL credentials, `internal` metrics access, validated proxies and
+`http(s)`-only alerting webhooks), secret redaction in logs/tracebacks, HTTP
+and frontend security headers (report-only CSP by default, opt-in HSTS),
+ordered/idempotent shutdown with no orphaned threads on partial startup,
+emitted worker/outbox/notification/Redis/DB metrics with corrected Prometheus
+alerts, and bounded frontend WebSocket reconnect with 401/4401/4403 handling.
+No new domain features and no API/WebSocket contract changes.
+**V20 = Production Hardening.**
+
+## Features (V20)
+
+- Strict-in-production / permissive-in-dev config validation at startup; secrets excluded from `repr(settings)` and redacted from structured logs and exception tracebacks
+- API security headers (nosniff, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Permitted-Cross-Domain-Policies`, CSP, production HSTS); web image ships a report-only CSP by default (`CSP_ENFORCE` to enforce)
+- Ordered, idempotent shutdown; `try/finally` lifespan teardown so partial startup leaves no orphaned workers; `dispose_engine` clears the session-factory cache
+- Prometheus reliability series emitted (worker heartbeat/failure, outbox, notification delivery, Redis errors, DB errors) with no new metric names; `WorkerStale` `absent()` guard plus worker-failure/outbox-dead/notification-failure/DB-error/Redis-error alerts
+- Frontend resilience: bounded WebSocket reconnect, terminal 4401/4403 handling, global unauthorized dispatch on 401 (operations + intelligence sockets and REST clients)
+- Compose requires an explicit `POSTGRES_PASSWORD`; docs: `docs/PRODUCTION_OPERATIONS.md`, `docs/OBSERVABILITY.md`
+- Documented non-claims: no auth changes (V16 owns RBAC), no new external delivery guarantees, no dependency upgrades
 
 ## Features (V15)
 
@@ -285,6 +305,9 @@ All keys documented in `.env.example`:
 GPU_ENABLED, MODEL_DEVICE, MODEL_CONFIDENCE_THRESHOLD, WEBSOCKET_ENABLED,
 TARGET_PROCESSING_FPS, FRAME_SKIP, BUFFER_SIZE`,
 plus V05 safety (`SAFETY_*`) and V06 spatial (`SPATIAL_*`) keys.
+V20 production keys: `POSTGRES_PASSWORD` (required by compose), and, for the
+web image, `CSP_ENFORCE` and `HSTS_ENABLED`; monitoring adds
+`GRAFANA_ADMIN_PASSWORD`. See `docs/PRODUCTION_OPERATIONS.md`.
 
 ## Video Ingestion Quickstart (V02)
 
@@ -321,6 +344,9 @@ docker compose -f compose.yaml up --build
 ```
 
 Full guide: `docs/DOCKER_GPU_DEPLOYMENT.md`.
+Production operations and observability: `docs/PRODUCTION_OPERATIONS.md`
+(configuration/secrets, health/readiness, migrations/backup, deploy modes)
+and `docs/OBSERVABILITY.md` (metrics, alerts, logging).
 
 ## Project Roadmap
 
