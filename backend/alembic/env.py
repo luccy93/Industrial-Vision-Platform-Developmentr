@@ -44,6 +44,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    from sqlalchemy import text
+
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = _database_url()
     connectable = engine_from_config(
@@ -52,6 +54,16 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        # V17: alembic's default version table is VARCHAR(32), but this
+        # project's revision ids are longer (e.g.
+        # 004_create_autonomous_perception_profiles). Pre-create the table
+        # with a wide column on fresh databases; IF NOT EXISTS leaves
+        # existing databases — and SQLite, which ignores lengths —
+        # untouched. Historical migrations are never rewritten for this.
+        connection.execute(
+            text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY)")
+        )
+        connection.commit()
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()

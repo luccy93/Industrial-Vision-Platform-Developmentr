@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -40,6 +39,14 @@ def test_backend_dockerfile_production_grade() -> None:
     assert ".env" not in body  # no environment files baked into the image
     assert "backend/tests" not in body
     assert 'CMD ["uvicorn", "backend.app.main:app"' in body
+    # CPU-only torch (default PyPI wheels bundle ~6 GB of CUDA libraries).
+    assert "download.pytorch.org/whl/cpu" in body
+    # Build-time guard asserts the local +cpu build stayed installed.
+    assert "'+cpu' in torch.__version__" in body
+    # Two-pass install with constraints (mixed-index single resolve trips
+    # pip hash checks; unconstrained pass 2 replaces torch with CUDA).
+    assert "constraints" in body
+    assert "python -m venv /opt/venv" in body
 
 
 def test_gpu_dockerfile_pins_cu126_and_stays_non_root() -> None:
@@ -47,6 +54,7 @@ def test_gpu_dockerfile_pins_cu126_and_stays_non_root() -> None:
     assert "torch==2.13.0" in body
     assert "torchvision==0.28.0" in body
     assert "https://download.pytorch.org/whl/cu126" in body
+    assert "'+cu126' in torch.__version__" in body
     assert "USER appuser" in body
     assert "MODEL_DEVICE=cuda" in body
 

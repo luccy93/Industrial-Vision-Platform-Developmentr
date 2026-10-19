@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
+from typing import Annotated
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class AppEnv(str, Enum):
@@ -358,16 +359,13 @@ class Settings(BaseSettings):
             raise ConfigurationError("ALERTING_WEBHOOK_URLS supports at most 5 destinations.")
         # V16 auth: sane policy ranges, production cookie/CORS posture.
         if self.auth_password_min_length > self.auth_password_max_length:
-            raise ConfigurationError(
-                "AUTH_PASSWORD_MIN_LENGTH must not exceed AUTH_PASSWORD_MAX_LENGTH."
-            )
+            raise ConfigurationError("AUTH_PASSWORD_MIN_LENGTH must not exceed AUTH_PASSWORD_MAX_LENGTH.")
         if self.auth_cookie_samesite not in ("Lax", "Strict"):
             raise ConfigurationError("AUTH_COOKIE_SAMESITE must be Lax or Strict.")
         if self.app_env == AppEnv.production:
             if self.auth_cookie_secure is False:
                 raise ConfigurationError(
-                    "AUTH_COOKIE_SECURE=false is forbidden in production; "
-                    "sessions require Secure cookies."
+                    "AUTH_COOKIE_SECURE=false is forbidden in production; sessions require Secure cookies."
                 )
             if not self.cors_allow_credentials:
                 raise ConfigurationError(
@@ -448,7 +446,7 @@ class Settings(BaseSettings):
     websocket_enabled: bool = Field(default=True)
 
     # --- V11 backend hardening ---
-    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = Field(default=False)
     worker_heartbeat_timeout_seconds: float = Field(default=30.0, gt=0.0)
     websocket_queue_max_size: int = Field(default=100, ge=1, le=10000)
@@ -481,12 +479,39 @@ class Settings(BaseSettings):
     # Explicitly trusted proxies allowed to supply X-Forwarded-For for
     # client-IP accounting. Empty = direct peer only; arbitrary forwarded
     # values are never trusted.
-    auth_trusted_proxies: list[str] = Field(default_factory=list)
+    auth_trusted_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # --- V02 video ingestion ---
     target_processing_fps: float = Field(default=10.0, ge=0.0)
     frame_skip: int = Field(default=0, ge=0)
     buffer_size: int = Field(default=30, ge=1, le=1000)
+
+    @field_validator("cors_allowed_origins", "auth_trusted_proxies", mode="before")
+    @classmethod
+    def _split_env_list(cls, value: object) -> object:
+        """Accept comma-separated env strings for list fields (V17).
+
+        pydantic-settings requires JSON for complex fields, but operators
+        write `HOSTS=a,b`. Try JSON first, fall back to comma-splitting so
+        `.env` and Compose interpolation keep working. Without this, any
+        env-provided origin list fails at startup (found in V17 container
+        smoke: SettingsError on CORS_ALLOWED_ORIGINS).
+        """
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                import json as _json
+
+                try:
+                    parsed = _json.loads(text)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [str(item) for item in parsed]
+            return [part.strip() for part in text.split(",") if part.strip()]
+        return value
 
     @field_validator("log_level")
     @classmethod

@@ -9,8 +9,9 @@
 #
 # Pinned pair verified against the PyTorch cu126 index (V17):
 #   torch==2.13.0+cu126, torchvision==0.28.0+cu126
-# requirements.txt is installed afterwards; its `torch>=2.0` constraint
-# is already satisfied so pip keeps the CUDA build (order matters).
+# Same two-pass + constraints install as the CPU image: bare == pins
+# satisfy PEP 440 against the +cu126 local builds and stop pass 2 from
+# replacing the CUDA wheels with PyPI defaults.
 
 ARG PYTHON_BASE=python:3.11-slim-bookworm
 ARG TORCH_VERSION=2.13.0
@@ -18,6 +19,8 @@ ARG TORCHVISION_VERSION=0.28.0
 
 FROM ${PYTHON_BASE} AS builder
 
+ARG TORCH_VERSION
+ARG TORCHVISION_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -28,11 +31,18 @@ RUN apt-get update \
 
 WORKDIR /code
 COPY backend/requirements.txt ./backend-requirements.txt
-RUN pip install --no-cache-dir --prefix=/install \
-        torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
+# Two-pass install with a constraints pin (same rationale as the CPU
+# image): an unconstrained second pass would upgrade torch past the
+# verified cu126 pair.
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 \
         --index-url https://download.pytorch.org/whl/cu126 \
-    && pip install --no-cache-dir --prefix=/install -r backend-requirements.txt \
-    && PYTHONPATH=/install/lib/python3.11/site-packages python -c "import torch; assert '+cu126' in torch.__version__, torch.__version__"
+        torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
+    && printf "torch==${TORCH_VERSION}\ntorchvision==${TORCHVISION_VERSION}\n" > /tmp/cu-constraints.txt \
+    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 \
+        --constraint /tmp/cu-constraints.txt -r backend-requirements.txt \
+    && /opt/venv/bin/python -c "import torch; assert '+cu126' in torch.__version__, torch.__version__"
 
 FROM ${PYTHON_BASE} AS runtime
 
@@ -42,12 +52,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MODEL_DEVICE=cuda
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 \
+    && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 libgl1 libxcb1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /usr/sbin/nologin appuser
 
 WORKDIR /code
-COPY --from=builder /install /usr/local
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 COPY backend ./backend
 RUN mkdir -p /code/models /code/data && chown -R appuser:appuser /code
 

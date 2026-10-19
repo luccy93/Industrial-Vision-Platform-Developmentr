@@ -52,3 +52,28 @@ def test_invalid_log_level_rejected() -> None:
 def test_confidence_threshold_bounds_enforced() -> None:
     with pytest.raises(ValueError):
         Settings(model_confidence_threshold=1.5, _env_file=None)  # type: ignore[call-arg]
+
+
+def test_env_list_fields_accept_comma_separated_strings(monkeypatch) -> None:
+    """V17: operators write CORS_ALLOWED_ORIGINS=a,b in .env/Compose.
+
+    pydantic-settings would require JSON for complex fields; the custom
+    NoDecode + validator accepts the ergonomic comma form (and spaces).
+    """
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://a:3000, http://b:3000")
+    monkeypatch.setenv("AUTH_TRUSTED_PROXIES", "10.0.0.1,10.0.0.2")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.cors_allowed_origins == ["http://a:3000", "http://b:3000"]
+    assert settings.auth_trusted_proxies == ["10.0.0.1", "10.0.0.2"]
+
+
+def test_env_list_fields_accept_json_arrays(monkeypatch) -> None:
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", '["http://a:3000", "http://b:3000"]')
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.cors_allowed_origins == ["http://a:3000", "http://b:3000"]
+
+
+def test_env_list_fields_accept_empty_string(monkeypatch) -> None:
+    monkeypatch.setenv("AUTH_TRUSTED_PROXIES", "")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.auth_trusted_proxies == []
