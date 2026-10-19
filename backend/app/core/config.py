@@ -22,6 +22,55 @@ class AppEnv(str, Enum):
     production = "production"
 
 
+#: Database passwords that must never appear in a production ``DATABASE_URL``.
+#: Kept deliberately small and documented; matched case-insensitively.
+_WEAK_DB_PASSWORDS = frozenset(
+    {
+        "postgres",
+        "postgresql",
+        "password",
+        "passwd",
+        "changeme",
+        "change_me",
+        "admin",
+        "root",
+        "secret",
+        "ivp",
+        "industrial_vision",
+        "test",
+        "example",
+    }
+)
+
+_ORIGIN_SCHEMES = frozenset({"http", "https"})
+
+
+def _is_valid_origin(origin: str) -> bool:
+    """True for a real browser origin (``scheme://host[:port]``).
+
+    Rejects wildcards, missing hosts, credentials, and any path, query,
+    or fragment — CORS entries must be origins, not arbitrary URLs.
+    """
+    parsed = urlparse(origin)
+    if parsed.scheme not in _ORIGIN_SCHEMES or not parsed.hostname:
+        return False
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    return True
+
+
+def _is_valid_ip_or_cidr(value: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_network(str(value).strip(), strict=False)
+        return True
+    except ValueError:
+        return False
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -53,10 +102,12 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000)
 
     # --- Data layer (ready, not mandatory in V01) ---
+    # repr=False: credentials must never leak through repr(settings) or logs.
     database_url: str = Field(
-        default="postgresql+psycopg2://postgres:postgres@localhost:5432/industrial_vision"
+        default="postgresql+psycopg2://postgres:postgres@localhost:5432/industrial_vision",
+        repr=False,
     )
-    redis_url: str = Field(default="redis://localhost:6379/0")
+    redis_url: str = Field(default="redis://localhost:6379/0", repr=False)
 
     # --- V12 PostgreSQL pool reliability (non-sqlite only) ---
     db_pool_size: int = Field(default=5, ge=1, le=50)
@@ -96,12 +147,12 @@ class Settings(BaseSettings):
     alerting_smtp_host: str = Field(default="")
     alerting_smtp_port: int = Field(default=587, ge=1, le=65535)
     alerting_smtp_tls_mode: str = Field(default="starttls")
-    alerting_smtp_username: str = Field(default="")
-    alerting_smtp_password: str = Field(default="")
+    alerting_smtp_username: str = Field(default="", repr=False)
+    alerting_smtp_password: str = Field(default="", repr=False)
     alerting_smtp_from: str = Field(default="")
-    alerting_smtp_to: str = Field(default="")
-    alerting_webhook_urls: str = Field(default="")
-    alerting_webhook_secret: str = Field(default="")
+    alerting_smtp_to: str = Field(default="", repr=False)
+    alerting_webhook_urls: str = Field(default="", repr=False)
+    alerting_webhook_secret: str = Field(default="", repr=False)
     alerting_webhook_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
     alerting_app_base_url: str = Field(default="http://localhost:3000")
 
@@ -361,6 +412,13 @@ class Settings(BaseSettings):
             )
         if self.app_env == AppEnv.production and not origins:
             raise ConfigurationError("production requires at least one CORS_ALLOWED_ORIGINS entry.")
+        # Origins must be real origins (scheme://host[:port]) in every
+        # environment; a wildcard entry is the only non-origin value allowed.
+        for origin in origins:
+            if origin != "*" and not _is_valid_origin(origin):
+                raise ConfigurationError(
+                    f"invalid CORS origin (expected scheme://host[:port] with no path/query): {origin}"
+                )
         # V15 alerting: TLS mode allowlist; webhook destinations validated
         # (scheme + count cap). Secrets themselves are never validated for
         # content here — only presence is reported, never values.
@@ -384,6 +442,29 @@ class Settings(BaseSettings):
                     "production requires CORS_ALLOW_CREDENTIALS=true with explicit "
                     "origins so browser sessions function."
                 )
+            # V20: no insecure production fallbacks. The database must be
+            # PostgreSQL with a non-default password (a broken/short-lived
+            # dependency is an outage, handled by readiness — not a config
+            # error — but a weak or wrong-dialect DSN is a config error).
+            parsed_db = urlparse(str(self.database_url or ""))
+            if parsed_db.scheme.split("+", 1)[0] not in ("postgresql", "postgres"):
+                raise ConfigurationError(
+                    "production requires a PostgreSQL DATABASE_URL (postgresql+driver://...)."
+                )
+            db_password = parsed_db.password
+            if not db_password or db_password.strip().lower() in _WEAK_DB_PASSWORDS:
+                raise ConfigurationError(
+                    "production DATABASE_URL must include a non-default database password."
+                )
+            # Metrics are an operational surface: never scrapeable publicly.
+            if self.metrics_access != "internal":
+                raise ConfigurationError(
+                    "METRICS_ACCESS must be 'internal' in production (public scraping is forbidden)."
+                )
+            # Trusted proxies must be explicit, well-formed addresses.
+            for proxy in self.auth_trusted_proxies or []:
+                if not _is_valid_ip_or_cidr(str(proxy)):
+                    raise ConfigurationError(f"AUTH_TRUSTED_PROXIES entry must be an IP or CIDR: {proxy}")
         # CORS policy itself raises ConfigurationError when violated.
         notes.append(f"env={self.app_env.value}")
         notes.append(f"cors_origins={len(self.cors_allowed_origins or [])}")
@@ -391,7 +472,14 @@ class Settings(BaseSettings):
 
     @property
     def alerting_webhook_allowlist(self) -> list[str]:
-        """Parsed, validated webhook destination allowlist (exact URLs)."""
+        """Parsed, validated webhook destination allowlist (exact URLs).
+
+        Invalid entries raise :class:`ConfigurationError` (the app error
+        hierarchy) with a redacted message — the path/query may carry a
+        token and is never echoed.
+        """
+        from backend.app.core.exceptions import ConfigurationError
+
         urls: list[str] = []
         for part in str(self.alerting_webhook_urls or "").split(","):
             candidate = part.strip()
@@ -399,7 +487,10 @@ class Settings(BaseSettings):
                 continue
             parsed = urlparse(candidate)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
-                raise ValueError(f"invalid webhook URL (http|https with host required): {candidate}")
+                raise ConfigurationError(
+                    "invalid alerting webhook URL (http|https with host required): "
+                    f"scheme={parsed.scheme or '<none>'} host={parsed.hostname or '<none>'}"
+                )
             urls.append(candidate)
         return urls
 
@@ -419,9 +510,11 @@ class Settings(BaseSettings):
 
     @property
     def alerting_webhook_configured(self) -> bool:
+        from backend.app.core.exceptions import ConfigurationError
+
         try:
             return len(self.alerting_webhook_allowlist) > 0
-        except ValueError:
+        except ConfigurationError:
             return False
 
     @field_validator("event_bus_mode")

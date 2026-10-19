@@ -27,8 +27,8 @@ htmlcov/
 
 # Env / secrets — never commit real credentials
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # IDE / OS
 .idea/

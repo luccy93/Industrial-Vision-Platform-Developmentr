@@ -108,9 +108,7 @@ def _load_autonomous_configuration(app: FastAPI, logger: Any) -> None:
         for camera in cameras:
             loaded = sync_camera_perception(autonomous, profiles, camera.camera_id)
             if loaded:
-                logger.info(
-                    "loaded %s perception profile(s) for camera %s", len(loaded), camera.camera_id
-                )
+                logger.info("loaded %s perception profile(s) for camera %s", len(loaded), camera.camera_id)
     except Exception:
         logger.warning("autonomous configuration load skipped", exc_info=True)
 
@@ -169,12 +167,8 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
             return f"{label}: stop failed ({type(exc).__name__})"
         return f"{label}: stopped"
 
-    runtime.register_phase(
-        "mark_draining", lambda: "draining: new background work refused", shutdown=True
-    )
-    runtime.register_phase(
-        "stop_background_work", lambda: "no standalone background pool", shutdown=True
-    )
+    runtime.register_phase("mark_draining", lambda: "draining: new background work refused", shutdown=True)
+    runtime.register_phase("stop_background_work", lambda: "no standalone background pool", shutdown=True)
     runtime.register_phase(
         "stop_camera_streams",
         lambda: _stop_all(state.supervisor, "stream supervisor"),
@@ -185,6 +179,7 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         lambda: _stop_all(state.inference_supervisor, "inference supervisor"),
         shutdown=True,
     )
+
     def _stop_event_bus() -> str:
         # Consumers stop before the resources they need (§6): publisher +
         # subscriber first, Redis client after (close_redis phase).
@@ -220,9 +215,7 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         runtime.register_phase(_phase, lambda m=_message: m, shutdown=True)
     runtime.register_phase("stop_event_bus", _stop_event_bus, shutdown=True)
     runtime.register_phase("close_redis", _close_redis, shutdown=True)
-    runtime.register_phase(
-        "close_database", lambda: _dispose_engine(state), shutdown=True
-    )
+    runtime.register_phase("close_database", lambda: _dispose_engine(state), shutdown=True)
     runtime.register_phase("mark_stopped", lambda: "runtime STOPPED", shutdown=True)
 
 
@@ -252,6 +245,7 @@ def _dispose_engine(state: Any) -> str:
         return "no engine to dispose"
     except Exception as exc:
         return f"dispose skipped ({type(exc).__name__})"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -319,6 +313,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    # V20: fail fast on invalid security configuration BEFORE constructing
+    # engines, pools, or connections. A temporary dependency outage stays an
+    # outage (handled by readiness); an invalid policy never starts.
+    settings.validate_startup()
     configure_logging(
         settings.log_level,
         fmt=settings.effective_log_format,
@@ -462,9 +460,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.runtime.readiness import ReadinessManager, database_check_factory
 
     readiness = ReadinessManager(app.state.runtime)
-    readiness.register_check(
-        "database", lambda: database_check_factory(app.state.session_factory)()
-    )
+    readiness.register_check("database", lambda: database_check_factory(app.state.session_factory)())
 
     def _workers_check() -> tuple[HealthStatus, str]:
         # Only FAILED supervision fails readiness; DEGRADED/stale optional
@@ -659,11 +655,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             origin = str(request.headers.get("origin", "") or "").strip()
             if origin:
-                origins = [
-                    str(o).strip()
-                    for o in (settings.cors_allowed_origins or [])
-                    if str(o).strip()
-                ]
+                origins = [str(o).strip() for o in (settings.cors_allowed_origins or []) if str(o).strip()]
                 if "*" not in origins and origin not in origins:
                     request_id = _sanitize_origin(request.headers.get(_ORIGIN_RID))
                     return JSONResponse(
@@ -701,8 +693,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         in_flight_labels = {"service": service, "method": method}
         http_requests_in_flight.labels(**in_flight_labels).inc()
         log_token = set_log_context(
-            {"request_id": request_id, "method": method, "route": "unmatched", "status": 500, "duration_ms": 0.0,
-             "service": service, "environment": settings.app_env.value}
+            {
+                "request_id": request_id,
+                "method": method,
+                "route": "unmatched",
+                "status": 500,
+                "duration_ms": 0.0,
+                "service": service,
+                "environment": settings.app_env.value,
+            }
         )
         status_code = 500
         route_template = "unmatched"
@@ -717,7 +716,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             duration = time.monotonic() - started
             # Update log context before completion log.
             ctx = get_log_context()
-            ctx.update({"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)})
+            ctx.update(
+                {"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)}
+            )
             set_log_context(ctx)
             from backend.app.core.logging import get_logger
 
@@ -732,7 +733,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 route_template = str(route.path)
             status_code = 500
             ctx = get_log_context()
-            ctx.update({"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)})
+            ctx.update(
+                {"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)}
+            )
             set_log_context(ctx)
             from backend.app.core.logging import get_logger
 
@@ -744,7 +747,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             route = request.scope.get("route")
             if route is not None and getattr(route, "path", None):
                 route_template = str(route.path)
-            if (not skip) and route_template != settings.metrics_path and request.url.path != settings.metrics_path:
+            if (
+                (not skip)
+                and route_template != settings.metrics_path
+                and request.url.path != settings.metrics_path
+            ):
                 try:
                     record_request(service, method, route_template, status_code, duration)
                 except Exception:
@@ -752,6 +759,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             http_requests_in_flight.labels(**in_flight_labels).dec()
             reset_request_context(token)
             reset_log_context(log_token)
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # V20: baseline security headers on every HTTP response. The API is
+        # JSON-only; the interactive docs UIs (Swagger/ReDoc) need inline
+        # scripts/styles, so the restrictive API CSP is skipped there.
+        response = await call_next(request)
+        path = request.url.path
+        is_docs = path == "/docs" or path.startswith("/docs/") or path == "/redoc" or path == "/openapi.json"
+        headers = response.headers
+        headers.setdefault("X-Content-Type-Options", "nosniff")
+        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+        if not is_docs:
+            headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            )
+        if settings.is_production:
+            # HTTPS is implied by production (Secure cookies are required).
+            headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return response
 
     register_exception_handlers(app)
     app.include_router(v1_router)
@@ -823,7 +854,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Access policy: internal = loopback or monitoring-network only.
         if settings.metrics_access == "internal":
             client_host = request.client.host if request.client else ""
-            allowed = client_host in ("127.0.0.1", "::1", "localhost") or client_host.startswith("172.") or client_host.startswith("10.") or client_host.startswith("192.168.")
+            allowed = (
+                client_host in ("127.0.0.1", "::1", "localhost")
+                or client_host.startswith("172.")
+                or client_host.startswith("10.")
+                or client_host.startswith("192.168.")
+            )
             if not allowed:
                 return Response(status_code=403, content="forbidden")
         # Exclude self from request metrics: mark route so middleware skips recording.
@@ -852,9 +888,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             verdict = {"ready": False, "status": "not_ready", "checks": {}, "failing": ["readiness"]}
         payload["ready"] = bool(verdict["ready"])
         payload["readiness"] = verdict
-        return JSONResponse(
-            status_code=200 if verdict["ready"] else 503, content=payload
-        )
+        return JSONResponse(status_code=200 if verdict["ready"] else 503, content=payload)
 
     @app.get("/", tags=["health"], summary="Service root")
     def root() -> dict:

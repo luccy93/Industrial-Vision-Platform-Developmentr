@@ -15,12 +15,20 @@ from typing import Any
 from pythonjsonlogger.json import JsonFormatter
 
 _SENSITIVE_PATTERNS = (
+    # Authorization / bearer tokens: redact the credential, not just the
+    # scheme. Listed before the generic `authorization` rule so the token
+    # is removed even though it is separated from the keyword by a space.
+    re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S+"),
+    re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/\-=]+"),
     re.compile(r"(?i)(password\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(passwd\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(token\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(secret\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(authorization\s*[:=]\s*)\S+"),
+    # Generic authorization scheme. Bearer is handled above; Basic/Digest
+    # carry their credential in trailing tokens, so redact the rest of the
+    # line for those schemes instead of just the first token.
+    re.compile(r"(?i)(authorization\s*[:=]\s*)(?!bearer\b)(?:(?:basic|digest)\b.*|\S+)"),
     re.compile(r"(?i)(cookie\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(csrf\s*[:=]\s*)\S+"),
     re.compile(r"(?i)(ws[_-]?ticket\s*[:=]\s*)\S+"),
@@ -28,6 +36,11 @@ _SENSITIVE_PATTERNS = (
     re.compile(r"(?i)(://[^/\s:]+:)[^@\s]+(@)"),
     # RTSP URLs with credentials
     re.compile(r"(?i)(rtsp://[^/\s:]+:)[^@\s]+(@)"),
+)
+
+#: Structured record attributes that are never treated as free-form extras.
+_STRUCTURAL_RECORD_ATTRS = frozenset(
+    {"msg", "args", "exc_info", "exc_text", "stack_info", "message", "asctime"}
 )
 
 
@@ -77,6 +90,25 @@ class RedactingFilter(logging.Filter):
                     }
                 elif isinstance(record.args, tuple):
                     record.args = tuple(redact(str(a)) if isinstance(a, str) else a for a in record.args)
+        except Exception:
+            pass
+        # Redact exception tracebacks. Setting `exc_text` (and leaving
+        # `exc_info`) makes both the text and JSON formatters reuse the
+        # redacted stack rather than formatting the raw one.
+        try:
+            if record.exc_info and not record.exc_text:
+                record.exc_text = redact(logging.Formatter().formatException(record.exc_info))
+        except Exception:
+            pass
+        # Redact free-form structured extras (string-valued attributes set
+        # via `logger.info(..., extra={...})` or the log context).
+        try:
+            for key, value in list(record.__dict__.items()):
+                if key in _STRUCTURAL_RECORD_ATTRS or not isinstance(value, str):
+                    continue
+                cleaned = redact(value)
+                if cleaned != value:
+                    setattr(record, key, cleaned)
         except Exception:
             pass
         return True

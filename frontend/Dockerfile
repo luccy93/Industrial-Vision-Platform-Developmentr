@@ -11,6 +11,10 @@
 ARG NODE_BASE=node:20-alpine
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000
+# V20 security-header build switches (report-only CSP by default; HSTS off
+# until the deployment confirms HTTPS termination).
+ARG CSP_ENFORCE=false
+ARG HSTS_ENABLED=false
 
 FROM ${NODE_BASE} AS deps
 WORKDIR /app
@@ -22,7 +26,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend ./
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
-    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL} \
+    CSP_ENFORCE=${CSP_ENFORCE} \
+    HSTS_ENABLED=${HSTS_ENABLED}
 RUN npm run build
 
 FROM ${NODE_BASE} AS runner

@@ -60,8 +60,12 @@ def test_webhook_allowlist_parsing_and_cap() -> None:
 
 def test_webhook_rejects_non_http_urls_at_startup() -> None:
     settings = _settings(alerting_webhook_urls="ftp://files.example.com/hook")
-    with pytest.raises(ValueError):
+    # V20: invalid destinations raise the app error hierarchy, not a bare
+    # ValueError, and never echo the full URL (path/query may hold a token).
+    with pytest.raises(ConfigurationError) as excinfo:
         settings.alerting_webhook_allowlist
+    # The path/query (which may carry a token) is never echoed.
+    assert "/hook" not in str(excinfo.value)
 
 
 def test_email_recipients_parsed_without_discovery() -> None:
@@ -91,11 +95,13 @@ def test_smtp_configured_gate() -> None:
 
 def test_production_env_still_constructible() -> None:
     # V16 production posture: explicit origins AND credentialed CORS
-    # (browser sessions require both).
+    # (browser sessions require both). V20: production also requires a
+    # PostgreSQL DSN with a non-default password and internal metrics.
     settings = _settings(
         app_env=AppEnv.production,
         cors_allowed_origins=["https://ops.example.com"],
         cors_allow_credentials=True,
+        database_url="postgresql+psycopg2://ivp:S3cure-Prod-Pass@db.internal:5432/industrial_vision",
     )
     assert settings.alerting_enabled is False
     assert settings.validate_startup() is not None

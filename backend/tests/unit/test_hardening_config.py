@@ -48,6 +48,7 @@ def test_production_requires_explicit_origin() -> None:
         app_env=AppEnv.production,
         cors_allowed_origins=["https://vision.example.com"],
         cors_allow_credentials=True,
+        database_url="postgresql+psycopg2://ivp:S3cure-Prod-Pass@db.internal:5432/industrial_vision",
     )
     assert settings.validate_startup() != []
 
