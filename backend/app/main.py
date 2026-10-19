@@ -319,7 +319,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(
+        settings.log_level,
+        fmt=settings.effective_log_format,
+        service=settings.service_name,
+        environment=settings.app_env.value,
+    )
 
     app = FastAPI(
         title="Industrial AI Vision & Safety Intelligence Platform",
@@ -333,6 +338,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.session_factory = get_session_factory(settings.database_url)
     app.state.supervisor = _app_supervisor()
+    # V18 metrics init
+    try:
+        from backend.app.core.metrics import app_info, app_start_time
+        import time as _t
+        app.state.metrics_initialized = True
+        app_info.info({"service": settings.service_name, "environment": settings.app_env.value})
+        app_start_time.set(_t.time())
+    except Exception:
+        app.state.metrics_initialized = False
     from backend.app.inference.manager import ModelManager
     from backend.app.inference.worker import InferenceSupervisor
 
@@ -639,6 +653,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
+        from backend.app.core.logging import get_log_context, set_log_context, reset_log_context
+        from backend.app.core.metrics import (
+            http_requests_in_flight,
+            record_request,
+            status_class,
+        )
         from backend.app.core.request_context import (
             REQUEST_ID_HEADER,
             RequestContext,
@@ -649,20 +669,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         request_id = sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
         request.state.request_id = request_id
-        request.state.started_monotonic = time.monotonic()
+        started = time.monotonic()
+        request.state.started_monotonic = started
         token = set_request_context(
-            RequestContext(
-                request_id=request_id, method=request.method, path=request.url.path
-            )
+            RequestContext(request_id=request_id, method=request.method, path=request.url.path)
         )
+        settings = app.state.settings
+        service = settings.service_name
+        method = request.method
+        in_flight_labels = {"service": service, "method": method}
+        http_requests_in_flight.labels(**in_flight_labels).inc()
+        log_token = set_log_context(
+            {"request_id": request_id, "method": method, "route": "unmatched", "status": 500, "duration_ms": 0.0,
+             "service": service, "environment": settings.app_env.value}
+        )
+        status_code = 500
+        route_template = "unmatched"
         try:
             response = await call_next(request)
+            status_code = getattr(response, "status_code", 200)
+            # Resolve route template after routing.
+            route = request.scope.get("route")
+            if route is not None and getattr(route, "path", None):
+                route_template = str(route.path)
+            response.headers[REQUEST_ID_HEADER] = request_id
+            duration = time.monotonic() - started
+            # Update log context before completion log.
+            ctx = get_log_context()
+            ctx.update({"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)})
+            set_log_context(ctx)
+            from backend.app.core.logging import get_logger
+
+            get_logger("industrial-vision.http").info(
+                "request completed",
+            )
+            return response
         except BaseException:
-            reset_request_context(token)
+            duration = time.monotonic() - started
+            route = request.scope.get("route")
+            if route is not None and getattr(route, "path", None):
+                route_template = str(route.path)
+            status_code = 500
+            ctx = get_log_context()
+            ctx.update({"route": route_template, "status": status_code, "duration_ms": round(duration * 1000.0, 2)})
+            set_log_context(ctx)
+            from backend.app.core.logging import get_logger
+
+            get_logger("industrial-vision.http").exception("request failed")
             raise
-        reset_request_context(token)
-        response.headers[REQUEST_ID_HEADER] = request_id
-        return response
+        finally:
+            duration = time.monotonic() - started
+            skip = bool(getattr(request.state, "_skip_metrics", False))
+            route = request.scope.get("route")
+            if route is not None and getattr(route, "path", None):
+                route_template = str(route.path)
+            if (not skip) and route_template != settings.metrics_path and request.url.path != settings.metrics_path:
+                try:
+                    record_request(service, method, route_template, status_code, duration)
+                except Exception:
+                    pass
+            http_requests_in_flight.labels(**in_flight_labels).dec()
+            reset_request_context(token)
+            reset_log_context(log_token)
 
     register_exception_handlers(app)
     app.include_router(v1_router)
@@ -711,7 +779,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload["runtime"] = app.state.runtime.health()
         except Exception:
             payload["runtime"] = {"state": "UNKNOWN", "ready": False}
+        # V18: metrics initialization status (additive).
+        try:
+            payload["metrics"] = {
+                "enabled": bool(settings.metrics_enabled),
+                "path": settings.metrics_path,
+                "initialized": getattr(app.state, "metrics_initialized", False),
+            }
+        except Exception:
+            payload["metrics"] = {"enabled": False, "initialized": False}
         return payload
+
+    # V18: Prometheus scrape endpoint (access policy enforced).
+    @app.get(settings.metrics_path, tags=["observability"], summary="Prometheus metrics")
+    def metrics_endpoint(request: Request):
+        from fastapi.responses import Response
+
+        from backend.app.core.metrics import metrics_content_type, metrics_payload
+
+        if not settings.metrics_enabled:
+            return Response(status_code=404, content="metrics disabled")
+        # Access policy: internal = loopback or monitoring-network only.
+        if settings.metrics_access == "internal":
+            client_host = request.client.host if request.client else ""
+            allowed = client_host in ("127.0.0.1", "::1", "localhost") or client_host.startswith("172.") or client_host.startswith("10.") or client_host.startswith("192.168.")
+            if not allowed:
+                return Response(status_code=403, content="forbidden")
+        # Exclude self from request metrics: mark route so middleware skips recording.
+        request.state._skip_metrics = True
+        return Response(content=metrics_payload(), media_type=metrics_content_type())
 
     @app.get("/live", tags=["health"], summary="Liveness probe")
     def live() -> dict:

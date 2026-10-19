@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     app_name: str = Field(default="industrial-vision-platform")
     app_env: AppEnv = Field(default=AppEnv.development)
     log_level: str = Field(default="INFO")
+    # V18: structured log output format ("text" | "json"). Default JSON in
+    # production, text in dev/test for readability.
+    log_format: str = Field(default="text")
+    service_name: str = Field(default="industrial-vision-platform")
+    # V18: Prometheus metrics.
+    metrics_enabled: bool = Field(default=True)
+    metrics_path: str = Field(default="/metrics")
+    # "public" | "internal" (internal = loopback/monitoring-network only).
+    metrics_access: str = Field(default="internal")
+    # V18: OpenTelemetry tracing (opt-in; disabled by default).
+    tracing_enabled: bool = Field(default=False)
+    trace_exporter_endpoint: str | None = Field(default=None)
 
     # --- API ---
     api_host: str = Field(default="0.0.0.0")
@@ -513,6 +525,22 @@ class Settings(BaseSettings):
             return [part.strip() for part in text.split(",") if part.strip()]
         return value
 
+    @field_validator("log_format")
+    @classmethod
+    def _normalize_log_format(cls, value: str) -> str:
+        v = str(value).strip().lower()
+        if v not in ("text", "json"):
+            raise ValueError("log_format must be 'text' or 'json'")
+        return v
+
+    @field_validator("metrics_access")
+    @classmethod
+    def _normalize_metrics_access(cls, value: str) -> str:
+        v = str(value).strip().lower()
+        if v not in ("public", "internal"):
+            raise ValueError("metrics_access must be 'public' or 'internal'")
+        return v
+
     @field_validator("log_level")
     @classmethod
     def _normalize_log_level(cls, value: str) -> str:
@@ -529,6 +557,15 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == AppEnv.production
+
+    @property
+    def effective_log_format(self) -> str:
+        # Default: JSON in production, text elsewhere, unless explicitly set.
+        if self.log_format != "text":
+            return self.log_format
+        if self.app_env == AppEnv.production:
+            return "json"
+        return "text"
 
     @property
     def is_distributed(self) -> bool:

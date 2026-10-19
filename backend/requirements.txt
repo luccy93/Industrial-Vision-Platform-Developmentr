@@ -26,3 +26,7 @@ argon2-cffi>=23.1,<26
 # V12 Redis coordination + event distribution (sync client; backend is sync).
 # Imported lazily — the API boots and tests pass without a server.
 redis>=5.0,<6
+# V18 observability: Prometheus metrics client (maintained).
+prometheus-client>=0.20,<1
+# V18 structured JSON logging (maintained).
+python-json-logger>=2.0,<5
