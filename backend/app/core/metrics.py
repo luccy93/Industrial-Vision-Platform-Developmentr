@@ -6,8 +6,7 @@ Never user/camera/incident IDs, raw URLs, IPs or exception messages.
 
 from __future__ import annotations
 
-from prometheus_client import Counter, Gauge, Histogram, Info, REGISTRY
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, Counter, Gauge, Histogram, Info, generate_latest
 
 SERVICE_LABEL = "service"
 
@@ -114,7 +113,9 @@ def status_class(code: int) -> str:
 def record_request(service, method, route, status_code, duration_seconds):
     sc = status_class(int(status_code))
     http_requests_total.labels(service=service, method=method, route=route, status_class=sc).inc()
-    http_request_duration_seconds.labels(service=service, method=method, route=route).observe(duration_seconds)
+    http_request_duration_seconds.labels(service=service, method=method, route=route).observe(
+        duration_seconds
+    )
     if int(status_code) >= 400:
         http_errors_total.labels(service=service, route=route, status_class=sc).inc()
 

@@ -7,12 +7,9 @@ contextvar so log lines carry request_id, route template, status, etc.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-import time
 from contextvars import ContextVar
-from datetime import datetime, timezone
 from typing import Any
 
 from pythonjsonlogger.json import JsonFormatter
@@ -75,7 +72,9 @@ class RedactingFilter(logging.Filter):
         try:
             if record.args:
                 if isinstance(record.args, dict):
-                    record.args = {k: (redact(str(v)) if isinstance(v, str) else v) for k, v in record.args.items()}
+                    record.args = {
+                        k: (redact(str(v)) if isinstance(v, str) else v) for k, v in record.args.items()
+                    }
                 elif isinstance(record.args, tuple):
                     record.args = tuple(redact(str(a)) if isinstance(a, str) else a for a in record.args)
         except Exception:
@@ -92,8 +91,12 @@ class _TextFormatter(logging.Formatter):
             return original
 
 
-def configure_logging(level: str = "INFO", fmt: str = "text", service: str = "industrial-vision-platform",
-                     environment: str = "development") -> logging.Logger:
+def configure_logging(
+    level: str = "INFO",
+    fmt: str = "text",
+    service: str = "industrial-vision-platform",
+    environment: str = "development",
+) -> logging.Logger:
     """Configure root logging once; return the app logger."""
     root = logging.getLogger()
     if getattr(root, "_ivp_configured", False):
@@ -131,12 +134,22 @@ def get_logger(name: str) -> logging.Logger:
 def log_api_error(logger, *, request_id, method, path, status, latency_ms, code="", message=""):
     logger.warning(
         "api_error request_id=%s method=%s path=%s status=%s latency_ms=%.2f code=%s message=%s",
-        request_id, method, path, status, max(0.0, float(latency_ms)), code, redact(str(message))[:512],
+        request_id,
+        method,
+        path,
+        status,
+        max(0.0, float(latency_ms)),
+        code,
+        redact(str(message))[:512],
     )
 
 
 def log_worker_error(logger, *, worker, component, error_type, message="", camera_id=None):
     logger.warning(
         "worker_error worker=%s component=%s error_type=%s camera_id=%s message=%s",
-        worker, component, error_type, camera_id or "-", redact(str(message))[:512],
+        worker,
+        component,
+        error_type,
+        camera_id or "-",
+        redact(str(message))[:512],
     )
