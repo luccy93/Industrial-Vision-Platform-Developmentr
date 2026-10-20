@@ -28,7 +28,7 @@ export function safeNext(value: string | null | undefined): string {
 export async function getSessionUser(): Promise<AuthUser | null> {
   let cookieHeader = "";
   try {
-    cookieHeader = cookies().toString();
+    cookieHeader = (await cookies()).toString();
   } catch {
     return null;
   }

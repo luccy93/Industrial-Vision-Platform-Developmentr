@@ -23,7 +23,7 @@ const PUBLIC_PATHS = new Set(["/", "/login"]);
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   let pathname = "/";
   try {
-    pathname = headers().get("x-pathname") ?? "/";
+    pathname = (await headers()).get("x-pathname") ?? "/";
   } catch {
     pathname = "/";
   }

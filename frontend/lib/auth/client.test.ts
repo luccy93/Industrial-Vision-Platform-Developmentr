@@ -5,7 +5,7 @@ import {
   login,
   logout,
 } from "./client";
-import { ApiError, getCsrfToken } from "./session";
+import { ApiError, UNAUTHORIZED_EVENT, getCsrfToken } from "./session";
 
 function mockFetchOnce(body: unknown, status = 200, headers: Record<string, string> = {}) {
   const response = new Response(JSON.stringify(body), {
@@ -71,5 +71,35 @@ describe("auth client", () => {
       expect((e as ApiError).status).toBe(403);
       expect((e as ApiError).code).toBe("recent_auth_required");
     }
+  });
+
+  it("signals unauthorized on a 401 from an authenticated call", async () => {
+    mockFetchOnce({ error: { code: "unauthenticated", message: "no session" } }, 401);
+    const events: string[] = [];
+    const handler = () => void events.push(UNAUTHORIZED_EVENT);
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    try {
+      await fetchMe();
+    } catch {
+      // Expected.
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+    }
+    expect(events).toContain(UNAUTHORIZED_EVENT);
+  });
+
+  it("does not signal unauthorized for a failed login", async () => {
+    mockFetchOnce({ error: { code: "invalid_credentials", message: "bad" } }, 401);
+    const events: string[] = [];
+    const handler = () => void events.push(UNAUTHORIZED_EVENT);
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    try {
+      await login("op@example.com", "wrong");
+    } catch {
+      // Expected.
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+    }
+    expect(events).toHaveLength(0);
   });
 });

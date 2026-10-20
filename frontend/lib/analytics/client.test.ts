@@ -6,6 +6,7 @@ import {
   exportUrl,
 } from "./client";
 import type { AnalyticsFilters } from "../../types";
+import { UNAUTHORIZED_EVENT } from "../auth/session";
 
 function filters(overrides: Partial<AnalyticsFilters> = {}): AnalyticsFilters {
   return {
@@ -152,5 +153,26 @@ describe("downloadExport", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("signals unauthorized when the export request is rejected with 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "unauthenticated", message: "no session" } }),
+      }))
+    );
+    const events: string[] = [];
+    const handler = () => void events.push(UNAUTHORIZED_EVENT);
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    try {
+      await expect(downloadExport("/x", "f.csv")).rejects.toThrow();
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+      vi.unstubAllGlobals();
+    }
+    expect(events).toContain(UNAUTHORIZED_EVENT);
   });
 });

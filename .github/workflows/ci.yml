@@ -15,7 +15,15 @@ jobs:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: pytest backend/tests -v
-      - run: ruff check backend || true
+      - name: Lint (ruff)
+        run: |
+          ruff check backend
+          ruff format --check backend
+      # Informational: the repository carries pre-existing type errors
+      # outside V20's scope. Surfaced here without blocking the build.
+      - name: Type check (mypy, informational)
+        continue-on-error: true
+        run: python -m mypy backend/app
 
   frontend:
     runs-on: ubuntu-latest
@@ -24,12 +32,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: cd frontend && npm ci && npm run typecheck && npm run build
+      - run: cd frontend && npm ci && npm run typecheck && npm run test:run && npm run build
 
   deploy:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-validate
+      GRAFANA_ADMIN_PASSWORD: ci-validate
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f compose.yaml config
       - run: docker compose -f compose.yaml -f compose.dev.yaml config
       - run: docker compose -f compose.yaml -f compose.gpu.yaml config
+      - run: docker compose -f compose.yaml -f compose.monitoring.yaml config

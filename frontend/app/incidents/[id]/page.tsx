@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, use, useState } from "react";
 import Link from "next/link";
 import { Card } from "../../../components/ui/Card";
 import { PriorityBadge, RiskBadge } from "../../../components/intelligence/RiskBadge";
@@ -60,7 +60,8 @@ const input =
  * Every action button is gated by the backend's `allowed_actions`
  * (single source of truth — the UI never second-guesses the state machine).
  */
-export default function IncidentDetailPage({ params }: { params: { id: string } }) {
+export default function IncidentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [detail, setDetail] = useState<IncidentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -82,13 +83,13 @@ export default function IncidentDetailPage({ params }: { params: { id: string } 
 
   const refresh = useCallback(async () => {
     try {
-      const d = await api<IncidentDetail>(`/api/v1/incidents/${params.id}`);
+      const d = await api<IncidentDetail>(`/api/v1/incidents/${id}`);
       setDetail(d);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "API unreachable");
     }
-  }, [params.id]);
+  }, [id]);
 
   useEffect(() => {
     void refresh();
@@ -107,7 +108,7 @@ export default function IncidentDetailPage({ params }: { params: { id: string } 
     setBusy(true);
     setActionError(null);
     try {
-      await api(`/api/v1/incidents/${params.id}${path}`, {
+      await api(`/api/v1/incidents/${id}${path}`, {
         method: "POST",
         body: JSON.stringify({ actor_id: actor.trim() || null, ...payload }),
       });
@@ -377,7 +378,7 @@ export default function IncidentDetailPage({ params }: { params: { id: string } 
                 onClick={() => {
                   setBusy(true);
                   setActionError(null);
-                  api(`/api/v1/incidents/${params.id}`, {
+                  api(`/api/v1/incidents/${id}`, {
                     method: "PATCH",
                     body: JSON.stringify({ title: editTitle.trim(), description: editDescription }),
                   })
@@ -456,7 +457,7 @@ export default function IncidentDetailPage({ params }: { params: { id: string } 
                   onClick={() => {
                     setBusy(true);
                     setActionError(null);
-                    api(`/api/v1/incidents/${params.id}/evidence/${e.id}`, { method: "DELETE" })
+                    api(`/api/v1/incidents/${id}/evidence/${e.id}`, { method: "DELETE" })
                       .then(() => refresh())
                       .catch((err: unknown) =>
                         setActionError(err instanceof Error ? err.message : "Delete failed")
@@ -501,7 +502,7 @@ export default function IncidentDetailPage({ params }: { params: { id: string } 
               onClick={() => {
                 setBusy(true);
                 setActionError(null);
-                api(`/api/v1/incidents/${params.id}/evidence`, {
+                api(`/api/v1/incidents/${id}/evidence`, {
                   method: "POST",
                   body: JSON.stringify({
                     evidence_type: evidenceType,
