@@ -57,3 +57,12 @@ def test_build_bev_unknown_risk_without_assessment() -> None:
     obj = make_object()
     view = build_bev([obj], [], [], [], utc(0))
     assert view.objects[0].risk_level is RiskLevel.UNKNOWN
+
+
+def test_build_bev_ignores_unavailable_risk_assessment() -> None:
+    from backend.app.autonomous.schemas import CollisionRisk
+
+    obj = make_object()
+    risk = CollisionRisk(object_ids=["track-1", "track-2"], risk_level=RiskLevel.UNKNOWN)
+    view = build_bev([obj], [], [], [risk], utc(0))
+    assert view.objects[0].risk_level is RiskLevel.UNKNOWN

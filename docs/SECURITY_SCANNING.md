@@ -1,8 +1,11 @@
-# Security Scanning and Release Gates (V21)
+# Security Scanning and Release Gates (V21, extended in V22)
 
 V21 turns "we meant to scan" into "the pipeline scans and fails". Every gate
 below runs **both** on a developer machine and in CI, with the same tools and
-the same thresholds, so a red CI job is reproducible locally.
+the same thresholds, so a red CI job is reproducible locally. V22 adds
+supply-chain controls on top: every workflow action is pinned to a commit SHA,
+scanner images are pinned by digest, and published images carry SBOMs and
+GitHub attestations (see `docs/RELEASES.md`).
 
 ## Why this volume
 
@@ -28,7 +31,9 @@ The V20 upgrade left three things unproven:
 | Secret scan (`gitleaks`) | yes | any | `ci` / `security` |
 | Filesystem + IaC scan (`trivy fs`) | yes | CRITICAL, HIGH | `ci` / `security` |
 | Image scan (`trivy image`, api + web) | yes | CRITICAL, HIGH | `ci` / `image-scan` |
-| Release (tag `v*`) | yes | same gates + GHCR publish | `release` workflow |
+| Release image scan (`trivy image`, api + web + api-gpu) | yes | CRITICAL, HIGH | `release` / `publish` |
+| Workflow pinning audit (actions + scanner images) | yes | unpinned | `ci` / `security`, `release` / `gates` |
+| Release (tag `v*`) | yes | same gates + GHCR publish + SBOM/attestation | `release` workflow |
 
 `mypy` stays informational (pre-existing type errors are outside this volume's
 scope). All scanners ignore findings without a published fix
@@ -50,14 +55,19 @@ python -m pip_audit -r backend/requirements-dev.txt --progress-spinner off
 # Frontend dependency audit (production dependency tree only)
 cd frontend; npm audit --omit=dev --audit-level=high
 
-# Secret scan (full git history, secrets redacted)
-docker run --rm -v "${PWD}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 `
+# Secret scan (full git history, secrets redacted; digest-pinned)
+docker run --rm -v "${PWD}:/repo" `
+  ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f `
   git /repo --redact --no-banner
 
 # Filesystem + IaC scan (Dockerfile / Compose misconfiguration + lockfiles)
 docker run --rm -v "${PWD}:/repo" -v trivy-cache:/root/.cache/trivy `
-  ghcr.io/aquasecurity/trivy:latest fs --scanners vuln,misconfig `
+  ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222 `
+  fs --scanners vuln,misconfig `
   --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 /repo
+
+# Workflow action/image pinning audit
+python -m tools.release.cli audit-workflows --root .
 ```
 
 Notes for Windows hosts:
@@ -92,6 +102,13 @@ api image : 0 vulnerabilities (debian 12.15 base + 104 python packages)
 web image : 0 vulnerabilities (alpine 3.23.4 base + application packages)
 ```
 
+V22 re-validated all release artifacts with trivy 0.76.0 after hardening
+`backend/Dockerfile.gpu` to the same install-time tooling treatment:
+`api`, `web` and `api-gpu` each reported 0 CRITICAL/HIGH vulnerabilities with
+a fix available, and SPDX JSON SBOMs were generated for all three. The GPU
+image is now a first-class release artifact; its scan is blocking before any
+push.
+
 ## Accepted risks
 
 ### Dev-only frontend advisories (15)
@@ -117,17 +134,37 @@ rebuild can pull new base packages. The image-scan gate is the control that
 makes this visible: a new base release with a CRITICAL/HIGH advisory fails
 `ci` / `image-scan` before it reaches a deployment.
 
-## Release automation
+### Third-party action pinning
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`:
+Every `uses:` reference in `.github/workflows/*.yml` is pinned to a full
+40-character commit SHA; version comments record the human-readable release.
+The `audit-workflows` step fails CI and the release `gates` job on an
+unpinned action. `.github/dependabot.yml` opens weekly PRs for action updates
+so pins do not silently age. Local actions (`./...`) are exempt, and scanner
+container images must be digest-pinned (`name@sha256:<64 hex>`).
 
-1. `gates` - the same backend/frontend/security gates as `ci`.
-2. `publish` - builds `backend/Dockerfile` and `frontend/Dockerfile` from the
-   repository root, scans both images (blocking at CRITICAL/HIGH), tags them
-   `v<version>` and `sha-<short-sha>` and pushes them to
-   `ghcr.io/<owner>/<repo>/api` and `ghcr.io/<owner>/<repo>/web`.
-3. `release` - opens a GitHub Release with the auto-generated change notes
-   plus the published image tags and digests.
+Dependabot cannot update the SHA of a Docker image used by `docker run`; the
+digest pins in the workflows are updated manually with the release note.
 
-The GHCR images are the release artifact; `docs/PRODUCTION_OPERATIONS.md`
-describes the deployment side.
+## Release automation (V22)
+
+Pushing a strict stable SemVer tag (`vMAJOR.MINOR.PATCH`) runs
+`.github/workflows/release.yml`:
+
+1. `validate` - tag grammar, tag/commit identity, `origin/main` reachability,
+   and a fail-closed GitHub check that no release or matching GHCR tag exists.
+2. `gates` - the same backend/frontend/security gates as `ci`, plus the
+   workflow pinning audit.
+3. `publish` - builds **api**, **web** and **api-gpu**, scans all three
+   (blocking at CRITICAL/HIGH with a fix available), then pushes
+   `v<version>` + `sha-<short-sha>` to
+   `ghcr.io/<owner>/<repo>/{api,web,api-gpu}`. It re-pulls each image by
+   digest and compares image IDs, generates SPDX SBOMs, and pushes GitHub
+   provenance and SBOM attestations.
+4. `release` - re-validates the manifest and creates the GitHub Release with
+   `--verify-tag`, attaching the manifest, SBOMs, attestation bundles and scan
+   logs.
+
+`latest` is not published. Deploy by digest, not by a version tag; see
+`docs/RELEASES.md` for verification, GPU runtime validation (recorded as
+`not_run` on the hosted runner) and rollback.

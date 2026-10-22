@@ -43,6 +43,8 @@ def build_bev(
     risk_by_object: dict[str, RiskLevel] = {}
     order = [RiskLevel.NONE, RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
     for risk in risks:
+        if risk.risk_level is RiskLevel.UNKNOWN:
+            continue
         for object_id in risk.object_ids:
             current = risk_by_object.get(object_id, RiskLevel.NONE)
             if order.index(risk.risk_level) > order.index(current):

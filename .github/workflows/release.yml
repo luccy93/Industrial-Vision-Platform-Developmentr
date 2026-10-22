@@ -183,6 +183,7 @@ jobs:
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "${PWD}/release-artifacts:/artifacts" \
+              -v trivy-cache:/root/.cache/trivy \
               "$TRIVY_IMAGE" image \
               --scanners vuln \
               --severity CRITICAL,HIGH \
@@ -255,6 +256,7 @@ jobs:
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "${PWD}/release-artifacts:/artifacts" \
+              -v trivy-cache:/root/.cache/trivy \
               "$TRIVY_IMAGE" image \
               --format spdx-json \
               --no-progress \

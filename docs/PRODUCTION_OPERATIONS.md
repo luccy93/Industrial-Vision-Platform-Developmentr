@@ -107,32 +107,46 @@ docker compose exec postgres pg_dump -U ivp industrial_vision > backup.sql
 
 Full container details: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 
-## Release images and scanning (V21)
+## Release images and digest deployment (V22)
 
-A `v*` tag publishes both production images to GHCR:
+A strict stable SemVer tag (`vMAJOR.MINOR.PATCH`) publishes **api**, **web**
+and **api-gpu** to GHCR. Tags are `v<version>` and `sha-<short-sha>`; `latest`
+is intentionally not published. The release manifest records the digest,
+image ID, SBOM and attestation for each image; deploy by digest.
 
 ```powershell
-# Published tags: v<version> and sha-<short-sha>
-docker pull ghcr.io/<owner>/<repo>/api:v1.0.0
-docker pull ghcr.io/<owner>/<repo>/web:v1.0.0
+$env:IVP_API_IMAGE="ghcr.io/<owner>/<repo>/api@sha256:<digest>"
+$env:IVP_WEB_IMAGE="ghcr.io/<owner>/<repo>/web@sha256:<digest>"
+docker compose -f compose.yaml -f compose.release.yaml pull
+docker compose -f compose.yaml -f compose.release.yaml up -d
 ```
+
+For a CUDA host, use `compose.gpu.release.yaml` with
+`IVP_CPU_API_IMAGE`, `IVP_GPU_API_IMAGE` and `IVP_WEB_IMAGE`. Do not add
+`compose.gpu.yaml` (it restores local builds and defeats digest pinning).
 
 The release workflow re-runs every gate (tests, ruff, eslint, typecheck,
-frontend build, pip-audit, npm audit, gitleaks, trivy) and scans the built
-images before publishing; an image with a CRITICAL/HIGH advisory and a
-published fix blocks the release. The GitHub Release records the published
-image digests.
+frontend build, pip-audit, npm audit, gitleaks, trivy), builds all three
+images, scans them (blocking at CRITICAL/HIGH with a fix available), re-pulls
+each by digest and compares image IDs, then publishes SBOMs and GitHub
+attestations. The GitHub Release records the results.
 
-Production hosts should pull the pinned `sha-<short-sha>` tag (or the digest
-recorded in the release notes) rather than a floating version tag, and should
-run the same image scan against what they pulled:
+Verify before deploying and re-scan what you pulled:
 
 ```powershell
-docker save -o api.tar ghcr.io/<owner>/<repo>/api:sha-<short-sha>
+gh attestation verify oci://ghcr.io/<owner>/<repo>/api@sha256:<digest> `
+  --repo <owner>/<repo>
+docker save -o api.tar ghcr.io/<owner>/<repo>/api@sha256:<digest>
 docker run --rm -v "${PWD}:/imgs" -v trivy-cache:/root/.cache/trivy `
-  ghcr.io/aquasecurity/trivy:latest image --input /imgs/api.tar `
-  --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1
+  ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222 `
+  image --input /imgs/api.tar --scanners vuln --severity CRITICAL,HIGH `
+  --ignore-unfixed --exit-code 1
 ```
+
+Rollback is a digest change: redeploy the previous manifest's digests. Do not
+reverse migrations automatically; restore the pre-upgrade backup if the older
+application is incompatible with the current schema. Never move or delete a
+release tag. Full procedure: `docs/RELEASES.md`.
 
 Base images (`node:20-alpine`, `python:3.11-slim-bookworm`) are not
 digest-pinned, so a rebuild may pull new base packages; the image scan is the

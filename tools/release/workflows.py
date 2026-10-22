@@ -43,9 +43,16 @@ def _registry_images(line: str) -> list[str]:
     except ValueError:
         return []
     images: list[str] = []
+    previous = ""
     for token in tokens:
+        taken_by_flag = previous in {"-v", "--volume", "--mount", "--env-file", "--name"}
+        previous = token
+        if taken_by_flag:
+            continue
         if token.startswith(("-", "$", "/", ".", "~")):
             continue
+        if ":" in token and token.split(":", 1)[1].startswith("/"):
+            continue  # host bind / volume spec, not an image reference
         head = token.split("/", 1)[0]
         if "." not in head and ":" not in head:
             continue
@@ -58,6 +65,8 @@ def _registry_images(line: str) -> list[str]:
 def audit_workflow_text(path_label: str, text: str) -> list[str]:
     """Return policy violations for one workflow body."""
     errors: list[str] = []
+    buffer = ""
+    buffer_line = 1
     for line_number, line in enumerate(text.splitlines(), 1):
         match = USES_PATTERN.match(line)
         if match is not None:
@@ -67,10 +76,28 @@ def audit_workflow_text(path_label: str, text: str) -> list[str]:
                     f"{path_label}:{line_number}: action {reference} is not pinned to a "
                     "40-character commit SHA"
                 )
-        for image in _registry_images(line):
+
+        # Shell continuations split a `docker run` across physical lines; join
+        # them so the image argument is still inspected.
+        if not buffer:
+            buffer_line = line_number
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1] + " "
+            continue
+        combined = buffer + stripped
+        buffer = ""
+        for image in _registry_images(combined):
             if DIGEST_PIN_PATTERN.search(image) is None:
                 errors.append(
-                    f"{path_label}:{line_number}: container image {image} is not digest-pinned "
+                    f"{path_label}:{buffer_line}: container image {image} is not digest-pinned "
+                    "(expected name@sha256:<64 hex>)"
+                )
+    if buffer:
+        for image in _registry_images(buffer):
+            if DIGEST_PIN_PATTERN.search(image) is None:
+                errors.append(
+                    f"{path_label}:{buffer_line}: container image {image} is not digest-pinned "
                     "(expected name@sha256:<64 hex>)"
                 )
     return errors

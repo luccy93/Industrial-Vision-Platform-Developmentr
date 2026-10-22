@@ -43,6 +43,27 @@ def test_locally_built_image_is_not_treated_as_a_registry_pull() -> None:
     assert audit_workflow_text("workflow.yml", "  - run: docker run --rm ivp-api:ci\n") == []
 
 
+def test_continued_docker_run_is_still_audited() -> None:
+    text = (
+        "  - run: |\n      docker run --rm \\\n        ghcr.io/example/scanner:1.2.3 \\\n        scan /repo\n"
+    )
+    problems = audit_workflow_text("workflow.yml", text)
+    assert len(problems) == 1
+    assert "not digest-pinned" in problems[0]
+
+    pinned = text.replace("ghcr.io/example/scanner:1.2.3", f"ghcr.io/example/scanner@{DIGEST}")
+    assert audit_workflow_text("workflow.yml", pinned) == []
+
+
+def test_volume_mounts_are_not_mistaken_for_images() -> None:
+    text = (
+        "  - run: |\n"
+        "      docker run --rm -v trivy-cache:/root/.cache/trivy \\\n"
+        f"        ghcr.io/example/scanner@{DIGEST} scan /repo\n"
+    )
+    assert audit_workflow_text("workflow.yml", text) == []
+
+
 def test_workflow_files_accept_repo_root_or_workflows_directory(tmp_path: Path) -> None:
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)

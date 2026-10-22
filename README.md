@@ -102,6 +102,16 @@ alerts, and bounded frontend WebSocket reconnect with 401/4401/4403 handling.
 No new domain features and no API/WebSocket contract changes.
 **V20 = Production Hardening.**
 
+## Features (V22)
+
+- Strict stable SemVer release tags (`vMAJOR.MINOR.PATCH` only); tag/commit identity and `origin/main` reachability are verified, existing releases and GHCR tags fail closed, and tags are never moved
+- Fail-closed publishing of **api**, **web** and **api-gpu**: build, blocking CRITICAL/HIGH scan, digest capture, pull-by-digest image-ID proof, SPDX SBOM, and GitHub provenance + SBOM attestations before any push; `latest` is intentionally not published
+- Release manifest (JSON + schema) records tag, commit, workflow run, digests, image IDs, scan/SBOM/attestation evidence; attached to the GitHub Release with verification commands
+- Digest-pinned `compose.release.yaml` / `compose.gpu.release.yaml` overlays remove every `build:` definition; deployment by digest and rollback are documented in `docs/RELEASES.md`
+- Supply-chain pinning: all workflow actions use full commit SHAs, scanner images use digests, an automated `audit-workflows` gate rejects drift, and Dependabot tracks action updates
+- GPU image hardened to the same install-time tooling treatment as the CPU image; GPU runtime smoke is recorded as `not_run` on the hosted runner with an explicit reason
+- Documented non-claims: no release tag was created in this volume; the first live release remains to be run
+
 ## Features (V21)
 
 - Working noninteractive frontend lint gate: ESLint 9 flat config (`frontend/eslint.config.mjs`) wired to `eslint . --max-warnings=0`; `next lint` is deprecated in Next 15 and prompted for setup, so CI could never run it unattended

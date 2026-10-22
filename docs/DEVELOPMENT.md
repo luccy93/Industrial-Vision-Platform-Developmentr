@@ -192,7 +192,7 @@ ordered and idempotent; a partial-startup failure still tears down started
 threads. Full guides: `docs/PRODUCTION_OPERATIONS.md` and
 `docs/OBSERVABILITY.md`.
 
-## Security scanning and release gates (V21)
+## Security scanning and release gates (V21, extended in V22)
 
 The frontend lint gate is `eslint . --max-warnings=0` (flat config in
 `frontend/eslint.config.mjs`, `next lint` is deprecated in Next 15 and prompts
@@ -204,13 +204,17 @@ container scanning run locally with the same tools CI uses:
 python -m pip_audit -r backend/requirements.txt --progress-spinner off
 # Frontend production dependencies
 cd frontend; npm audit --omit=dev --audit-level=high
-# Secrets (full git history)
-docker run --rm -v "${PWD}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner
+# Secrets (full git history, digest-pinned)
+docker run --rm -v "${PWD}:/repo" ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact --no-banner
+# Workflow/action pinning policy
+python -m tools.release.cli audit-workflows --root .
 ```
 
-Pushing a `v*` tag publishes the api/web images to GHCR and opens a GitHub
-Release. Full gate list, severity policy and the accepted-risk register:
-`docs/SECURITY_SCANNING.md`.
+Pushing a strict `vMAJOR.MINOR.PATCH` tag runs the full gate set and publishes
+api, web and api-gpu to GHCR with SBOMs, GitHub attestations and a release
+manifest, then opens a GitHub Release. Full gate list, severity policy and the
+accepted-risk register: `docs/SECURITY_SCANNING.md`. Tagging, verification,
+digest deployment, rollback and known limitations: `docs/RELEASES.md`.
 
 ## Docker
 

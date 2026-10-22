@@ -59,6 +59,20 @@ def test_gpu_dockerfile_pins_cu126_and_stays_non_root() -> None:
     assert "MODEL_DEVICE=cuda" in body
 
 
+def test_gpu_dockerfile_matches_cpu_security_hardening() -> None:
+    body = _read("backend/Dockerfile.gpu")
+    # V22: the GPU image is a release artifact and must carry the same
+    # install-time tooling treatment as the CPU image.
+    assert body.count('"setuptools>=78.1.1,<81" wheel') == 2
+    assert "apt-get upgrade -y --no-install-recommends" in body
+    assert "python -m pip uninstall -y pip" in body
+    assert "/opt/venv/bin/pip uninstall -y pip" in body
+    assert body.index("pip uninstall -y pip") < body.index("ENV PATH")
+    # Hardening must not disturb the verified cu126 pair.
+    assert "torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION}" in body
+    assert "download.pytorch.org/whl/cu126" in body
+
+
 def test_frontend_dockerfile_standalone_runner() -> None:
     body = _read("frontend/Dockerfile")
     assert "npm ci" in body
