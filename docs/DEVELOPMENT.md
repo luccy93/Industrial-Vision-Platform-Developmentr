@@ -38,7 +38,7 @@ npm run dev
 # Backend (from repo root; SQLite-backed, no USB/RTSP/GPU needed):
 pytest backend/tests -v
 # Frontend gates:
-cd frontend; npm run typecheck; npm run build
+cd frontend; npm run lint; npm run typecheck; npm run build
 # Lint / types (repo-wide; the stray root main.py is excluded via pyproject.toml):
 ruff check .; ruff format --check .; python -m mypy .
 ```
@@ -191,6 +191,26 @@ report-only CSP by default (`CSP_ENFORCE=true` to enforce). Shutdown is
 ordered and idempotent; a partial-startup failure still tears down started
 threads. Full guides: `docs/PRODUCTION_OPERATIONS.md` and
 `docs/OBSERVABILITY.md`.
+
+## Security scanning and release gates (V21)
+
+The frontend lint gate is `eslint . --max-warnings=0` (flat config in
+`frontend/eslint.config.mjs`, `next lint` is deprecated in Next 15 and prompts
+for setup, so it could never run unattended). Dependency, secret, IaC and
+container scanning run locally with the same tools CI uses:
+
+```powershell
+# Python dependencies
+python -m pip_audit -r backend/requirements.txt --progress-spinner off
+# Frontend production dependencies
+cd frontend; npm audit --omit=dev --audit-level=high
+# Secrets (full git history)
+docker run --rm -v "${PWD}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner
+```
+
+Pushing a `v*` tag publishes the api/web images to GHCR and opens a GitHub
+Release. Full gate list, severity policy and the accepted-risk register:
+`docs/SECURITY_SCANNING.md`.
 
 ## Docker
 

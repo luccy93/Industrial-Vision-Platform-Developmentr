@@ -1,0 +1,150 @@
+name: release
+
+# V21 release automation: a semantic-version tag runs the full gate set,
+# rebuilds both production images, scans them, publishes them to GHCR and
+# opens a GitHub Release that records the published image tags and digests.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ${{ github.repository }}/api
+  IMAGE_WEB: ${{ github.repository }}/web
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - run: pytest backend/tests -v
+      - run: ruff check backend && ruff format --check backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run lint && npm run typecheck && npm run test:run && npm run build
+      - name: Python dependency audit (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt --progress-spinner off
+          pip-audit -r backend/requirements-dev.txt --progress-spinner off
+      - name: Frontend dependency audit (npm audit, production deps)
+        run: cd frontend && npm audit --omit=dev --audit-level=high
+      - name: Secret scan (gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git /repo --redact --no-banner
+      - name: Filesystem + IaC scan (trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  publish:
+    needs: gates
+    runs-on: ubuntu-latest
+    outputs:
+      api_digest: ${{ steps.push.outputs.api_digest }}
+      web_digest: ${{ steps.push.outputs.web_digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build api image
+        run: docker build -f backend/Dockerfile -t ivp-api:release .
+      - name: Build web image
+        run: docker build -f frontend/Dockerfile -t ivp-web:release .
+      - name: Scan api image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ivp-api:release
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ivp-web:release
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Tag and push images
+        id: push
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          API_TARGET="${REGISTRY}/${IMAGE_API}:${VERSION}"
+          API_SHORT="${REGISTRY}/${IMAGE_API}:sha-${SHORT_SHA}"
+          WEB_TARGET="${REGISTRY}/${IMAGE_WEB}:${VERSION}"
+          WEB_SHORT="${REGISTRY}/${IMAGE_WEB}:sha-${SHORT_SHA}"
+
+          docker tag ivp-api:release "${API_TARGET}"
+          docker tag ivp-api:release "${API_SHORT}"
+          docker tag ivp-web:release "${WEB_TARGET}"
+          docker tag ivp-web:release "${WEB_SHORT}"
+
+          docker push "${API_TARGET}" | tee /tmp/push-api.log
+          docker push "${API_SHORT}" > /dev/null
+          docker push "${WEB_TARGET}" | tee /tmp/push-web.log
+          docker push "${WEB_SHORT}" > /dev/null
+
+          API_DIGEST=$(grep -o 'sha256:[0-9a-f]\{64\}' /tmp/push-api.log | tail -n 1)
+          WEB_DIGEST=$(grep -o 'sha256:[0-9a-f]\{64\}' /tmp/push-web.log | tail -n 1)
+          echo "api_digest=${API_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "web_digest=${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          WEB_DIGEST: ${{ needs.publish.outputs.web_digest }}
+        run: |
+          set -euo pipefail
+          NOTES=$(mktemp)
+          AUTO=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${VERSION}" --jq .body)
+          {
+            echo "## Images"
+            echo ""
+            echo "| Image | Tags | Digest |"
+            echo "| --- | --- | --- |"
+            echo "| \`${REGISTRY}/${IMAGE_API}\` | \`${VERSION}\`, \`sha-${GITHUB_SHA::7}\` | \`${API_DIGEST}\` |"
+            echo "| \`${REGISTRY}/${IMAGE_WEB}\` | \`${VERSION}\`, \`sha-${GITHUB_SHA::7}\` | \`${WEB_DIGEST}\` |"
+            echo ""
+            echo "Gates that ran before publishing: backend tests, ruff, frontend lint/typecheck/tests/build,"
+            echo "pip-audit, npm audit (production deps), gitleaks, trivy (filesystem, IaC, images)."
+            echo ""
+            echo "## Changes"
+            echo ""
+            echo "$AUTO"
+          } > "$NOTES"
+          gh release create "${VERSION}" --title "${VERSION}" --notes-file "$NOTES"
+          gh release view "${VERSION}" --json url --jq .url

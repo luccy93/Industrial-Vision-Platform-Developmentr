@@ -37,7 +37,7 @@ COPY backend/requirements.txt ./backend-requirements.txt
 # keeps it. The bare == constraints satisfy PEP 440 against the +cpu
 # local builds; --prefix targets are invisible to pip's detection.
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 --upgrade pip "setuptools>=78.1.1,<81" wheel \
     && /opt/venv/bin/pip install --no-cache-dir --timeout 100 \
         --index-url https://download.pytorch.org/whl/cpu \
         torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
@@ -53,13 +53,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # Runtime libraries for CPU torch + OpenCV wheels (no X/Qt stack).
+# `apt-get upgrade` picks up Debian point releases (the base image snapshot
+# shipped a libexpat1 with published HIGH advisories).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 libgl1 libxcb1 \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /usr/sbin/nologin appuser
 
 WORKDIR /code
 COPY --from=builder /opt/venv /opt/venv
+# V21 image scan: pip/setuptools/wheel are install-time tooling. Keep the
+# packaging libs current, then drop pip (system + venv) — the app never
+# installs packages at runtime, and pip vendors its own msgpack/urllib3/
+# setuptools copies that would otherwise be scanned as vulnerable.
+RUN python -m pip install --no-cache-dir --upgrade "setuptools>=78.1.1,<81" wheel \
+    && python -m pip uninstall -y pip \
+    && /opt/venv/bin/pip uninstall -y pip \
+    && rm -rf /root/.cache/pip
 ENV PATH=/opt/venv/bin:$PATH
 COPY backend ./backend
 RUN mkdir -p /code/models /code/data && chown -R appuser:appuser /code

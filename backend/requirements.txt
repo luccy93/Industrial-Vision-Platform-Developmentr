@@ -20,6 +20,12 @@ torch>=2.0
 ultralytics>=8.0
 python-multipart>=0.0.9
 httpx>=0.27
+# V21 image scan: requests (via ultralytics) pulls urllib3 only transitively;
+# declare the fixed floor explicitly (CVE-2026-97687, CVE-2026-97689).
+urllib3>=2.8.0,<3
+# V21 image scan: pillow arrives transitively (ultralytics); pin the fixed
+# floor explicitly (CVE-2026-112403 and the 2026-1123xx/1128xx series).
+pillow>=13.0.0
 # V16 authentication: Argon2id password hashing (argon2-cffi). Pinned to
 # the maintained v23+ API (PasswordHasher); stored hashes are portable.
 argon2-cffi>=23.1,<26

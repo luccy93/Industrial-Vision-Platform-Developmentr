@@ -208,7 +208,7 @@ describe("NotificationsPage", () => {
   it("surfaces retry errors without losing the detail view", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("WebSocket", MockSocket);
-    mockFetch((url: string, init?: RequestInit) => {
+    mockFetch((url: string, _init?: RequestInit) => {
       if (url.includes("/alerting/status")) return STATUS;
       if (url.includes("/alerting/rules")) return { rules: [], total: 0, page: 1, page_size: 20 };
       if (url.includes("/alerting/notifications/")) return DETAIL;

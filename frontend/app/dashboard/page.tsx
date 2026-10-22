@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -68,7 +68,7 @@ function readMetrics(status: unknown): Record<string, unknown> {
 }
 
 /**
- * Operations command center — V13.
+ * Operations command center â€” V13.
  *
  * REST snapshots are authoritative; the shared operations socket applies
  * incremental timeline updates. Reconnects re-baseline from REST.
@@ -299,7 +299,7 @@ export default function DashboardPage() {
     return cameras.map((row) => ({ ...row, events: counts.get(row.camera_id) ?? 0 }));
   }, [cameras, timeline]);
 
-  const panelState = (name: string, empty: boolean, emptyText: string) => {
+  const panelState = (name: string, empty: boolean) => {
     const panel = panels[name];
     if (panel?.error) return { state: "error" as const, error: panel.error };
     if (!panel?.at) return { state: "loading" as const, error: null };
@@ -312,7 +312,7 @@ export default function DashboardPage() {
       : !summary.health.ready || summary.health.status !== "ok"
         ? "degraded"
         : "ok";
-  const summaryState = panelState("summary", false, "");
+  const summaryState = panelState("summary", false);
   const stale = (name: string, intervalMs: number) =>
     isStale(panels[name]?.at ?? null, intervalMs * 2);
 
@@ -351,7 +351,7 @@ export default function DashboardPage() {
 
       {(summaryState.state === "error" || stale("summary", SUMMARY_MS)) && (
         <p className="text-sm text-amber-300" role="status">
-          {panels.summary?.error ?? "Summary data may be stale"} — other panels keep their own state.
+          {panels.summary?.error ?? "Summary data may be stale"} â€” other panels keep their own state.
         </p>
       )}
 
@@ -370,7 +370,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title={`Cameras (${cameras.length})`}>
           <DataState
-            state={panelState("cameras", cameras.length === 0, "").state}
+            state={panelState("cameras", cameras.length === 0).state}
             emptyText="No cameras configured."
             error={panels.cameras?.error}
           >
@@ -382,8 +382,8 @@ export default function DashboardPage() {
         </Card>
         <Card title="Incident queue (read-only)">
           <DataState
-            state={panelState("incidents", incidents.length === 0, "").state}
-            emptyText="No open incidents — genuine zero."
+            state={panelState("incidents", incidents.length === 0).state}
+            emptyText="No open incidents â€” genuine zero."
             error={panels.incidents?.error}
           >
             <IncidentQueue incidents={incidents} openTotal={openTotal} />

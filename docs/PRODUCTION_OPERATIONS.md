@@ -107,6 +107,38 @@ docker compose exec postgres pg_dump -U ivp industrial_vision > backup.sql
 
 Full container details: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 
+## Release images and scanning (V21)
+
+A `v*` tag publishes both production images to GHCR:
+
+```powershell
+# Published tags: v<version> and sha-<short-sha>
+docker pull ghcr.io/<owner>/<repo>/api:v1.0.0
+docker pull ghcr.io/<owner>/<repo>/web:v1.0.0
+```
+
+The release workflow re-runs every gate (tests, ruff, eslint, typecheck,
+frontend build, pip-audit, npm audit, gitleaks, trivy) and scans the built
+images before publishing; an image with a CRITICAL/HIGH advisory and a
+published fix blocks the release. The GitHub Release records the published
+image digests.
+
+Production hosts should pull the pinned `sha-<short-sha>` tag (or the digest
+recorded in the release notes) rather than a floating version tag, and should
+run the same image scan against what they pulled:
+
+```powershell
+docker save -o api.tar ghcr.io/<owner>/<repo>/api:sha-<short-sha>
+docker run --rm -v "${PWD}:/imgs" -v trivy-cache:/root/.cache/trivy `
+  ghcr.io/aquasecurity/trivy:latest image --input /imgs/api.tar `
+  --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1
+```
+
+Base images (`node:20-alpine`, `python:3.11-slim-bookworm`) are not
+digest-pinned, so a rebuild may pull new base packages; the image scan is the
+control that surfaces that before a deployment. Gate list, severity policy and
+the accepted-risk register: `docs/SECURITY_SCANNING.md`.
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

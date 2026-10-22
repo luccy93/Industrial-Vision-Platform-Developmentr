@@ -102,6 +102,15 @@ alerts, and bounded frontend WebSocket reconnect with 401/4401/4403 handling.
 No new domain features and no API/WebSocket contract changes.
 **V20 = Production Hardening.**
 
+## Features (V21)
+
+- Working noninteractive frontend lint gate: ESLint 9 flat config (`frontend/eslint.config.mjs`) wired to `eslint . --max-warnings=0`; `next lint` is deprecated in Next 15 and prompted for setup, so CI could never run it unattended
+- Repeatable scanning, blocking in CI and reproducible locally: pip-audit (Python prod + dev requirements), `npm audit --omit=dev`, gitleaks (full git history), trivy (filesystem, Dockerfile/Compose IaC, built images)
+- Container hardening driven by scan findings: npm/corepack removed from the web runner, `apk upgrade` in the base layer, `setuptools>=78.1.1,<81` + `wheel` in the api venv with `pip` removed from the runtime image, explicit `pillow>=13.0.0` and `urllib3>=2.8.0,<3` floors - both production images now scan clean at CRITICAL/HIGH
+- Release automation: a `v*` tag runs the full gate set, scans both images, publishes `ghcr.io/<owner>/<repo>/{api,web}` as `v<version>` + `sha-<short-sha>`, and opens a GitHub Release with the image digests
+- Tracked decisions: dev-only npm advisories (vitest/tailwindcss/eslint-config-next majors) accepted with reasons and review triggers; docs: `docs/SECURITY_SCANNING.md`, `docs/PRODUCTION_OPERATIONS.md`
+- Documented non-claims: no new domain features, no API/WebSocket contract changes, no production schema changes
+
 ## Features (V20)
 
 - Strict-in-production / permissive-in-dev config validation at startup; secrets excluded from `repr(settings)` and redacted from structured logs and exception tracebacks

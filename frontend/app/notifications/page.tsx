@@ -26,11 +26,6 @@ import type {
   NotificationItem,
 } from "../../types";
 
-const DOMAINS = ["SAFETY", "SPATIAL", "QUALITY", "AUTONOMOUS", "INTELLIGENCE", "INCIDENT"];
-const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
-const STATUSES = ["OPEN", "ACKNOWLEDGED", "INVESTIGATING", "MITIGATED", "RESOLVED", "CLOSED"];
-const CHANNELS = ["in_app", "email", "webhook"];
-
 function toggle(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }

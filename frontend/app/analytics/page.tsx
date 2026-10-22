@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Card } from "../../components/ui/Card";
-import { DataState, SectionBadge } from "../../components/operations/primitives";
+import { DataState } from "../../components/operations/primitives";
 import { BreakdownBars, TrendChart } from "../../components/analytics/Charts";
 import {
   buildAnalyticsQuery,
@@ -161,10 +161,8 @@ export default function AnalyticsPage() {
     void run();
   }, [filters, metric, dataset, groupBy]);
 
-  useEffect(() => {
-    // Deliberate submit model: no fetch on keystroke; initial load applies defaults once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Deliberate submit model: no fetch on keystroke; initial load applies
+  // defaults once (see the `run` effect above).
 
   const doExport = useCallback(async () => {
     if (!applied) return;
