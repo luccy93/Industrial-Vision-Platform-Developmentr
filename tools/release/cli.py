@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from tools.release.identity import (
+    REQUIRED_IMAGES,
     IdentityError,
     release_conflicts,
     validate_tag,
@@ -33,9 +35,11 @@ from tools.release.manifest import (
     ManifestError,
     build_manifest,
     load_manifest,
+    render_summary,
     validate_manifest,
     write_manifest,
 )
+from tools.release.registry import RegistryError, check_release_conflicts
 from tools.release.workflows import audit_workflows
 
 
@@ -87,6 +91,14 @@ def _build_parser() -> argparse.ArgumentParser:
     conflict_parser.add_argument("--release-exists", type=_parse_bool, required=True)
     conflict_parser.add_argument("--image-tags-exist", type=_parse_bool, required=True)
 
+    release_parser = subparsers.add_parser(
+        "check-release",
+        help="fail closed unless GitHub proves the release tag and GHCR tags are new",
+    )
+    release_parser.add_argument("--repo", required=True)
+    release_parser.add_argument("--tag", required=True)
+    release_parser.add_argument("--images", default=",".join(REQUIRED_IMAGES))
+
     generate_parser = subparsers.add_parser(
         "generate", help="build and validate the release manifest from observed facts"
     )
@@ -99,6 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--artifacts-dir", type=Path)
     validate_parser.add_argument("--tag")
     validate_parser.add_argument("--commit")
+
+    summary_parser = subparsers.add_parser(
+        "summary", help="render the release-notes artifact/digest/verification section"
+    )
+    summary_parser.add_argument("--manifest", type=Path, required=True)
 
     audit_parser = subparsers.add_parser(
         "audit-workflows", help="reject unpinned actions and container images"
@@ -127,6 +144,20 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"conflict: {conflict}", file=sys.stderr)
                 return 1
             print(f"release {args.tag} is new; no conflicting release or image tags")
+        elif args.command == "check-release":
+            images = [part.strip() for part in args.images.split(",") if part.strip()]
+            unknown = sorted(set(images) - set(REQUIRED_IMAGES))
+            if unknown:
+                raise IdentityError(f"unknown release images: {', '.join(unknown)}")
+            token = os.environ.get("GITHUB_TOKEN", "")
+            if not token:
+                raise RegistryError("GITHUB_TOKEN is required to verify release immutability")
+            conflicts = check_release_conflicts(args.repo, args.tag, images, token)
+            if conflicts:
+                for conflict in conflicts:
+                    print(f"conflict: {conflict}", file=sys.stderr)
+                return 1
+            print(f"release {args.tag} is new; no conflicting release or GHCR tags")
         elif args.command == "generate":
             manifest = build_manifest(_load_inputs(args.inputs), args.artifacts_dir)
             write_manifest(manifest, args.output)
@@ -139,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
                 expected_commit=args.commit,
             )
             print(f"release manifest is valid: {args.manifest}")
+        elif args.command == "summary":
+            sys.stdout.write(render_summary(load_manifest(args.manifest)))
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -146,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(problem, file=sys.stderr)
                 return 1
             print("workflows are pinned")
-    except (IdentityError, ManifestError, OSError) as exc:
+    except (IdentityError, ManifestError, RegistryError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0

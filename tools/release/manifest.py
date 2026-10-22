@@ -119,6 +119,41 @@ def write_manifest(manifest: Mapping[str, Any], path: Path) -> None:
     path.write_text(canonical_json(manifest), encoding="utf-8", newline="\n")
 
 
+def render_summary(manifest: Mapping[str, Any]) -> str:
+    """Render the release-notes section that records digests and verification."""
+    release = manifest.get("release") or {}
+    images = manifest.get("images") or []
+    lines = [
+        "## Release artifacts",
+        "",
+        "| Image | Repository | Tags | Digest |",
+        "| --- | --- | --- | --- |",
+    ]
+    for image in images:
+        tags = ", ".join(f"`{tag}`" for tag in image.get("tags") or [])
+        lines.append(
+            f"| `{image.get('name')}` | `{image.get('repository')}` | {tags} | `{image.get('digest')}` |"
+        )
+    lines += ["", "## Verify before deployment", "", "```bash"]
+    for image in images:
+        lines.append(image["provenance"]["verification_command"])
+        lines.append(image["sbom_attestation"]["verification_command"])
+    lines += ["```", ""]
+    gpu = (manifest.get("variants") or {}).get("gpu") or {}
+    if gpu.get("runtime_smoke") == "not_run":
+        lines += [
+            f"**GPU runtime smoke: NOT RUN** - {gpu.get('runtime_smoke_reason', '')}",
+            "",
+        ]
+    lines += [
+        f"Release tag `{release.get('tag')}` targets commit `{release.get('commit')}`.",
+        "Images are published by version tag and `sha-<short>`; deploy by digest.",
+        "Scan policy: CRITICAL,HIGH with --ignore-unfixed. SBOM format: SPDX JSON.",
+        "See `docs/RELEASES.md` for verification, digest deployment, and rollback.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _check_keys(value: Any, expected: Sequence[str], label: str, errors: list[str]) -> bool:
     if not isinstance(value, dict):
         errors.append(f"{label} must be an object")

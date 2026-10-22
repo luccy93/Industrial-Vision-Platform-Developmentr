@@ -1,52 +1,108 @@
 name: release
 
-# V21 release automation: a semantic-version tag runs the full gate set,
-# rebuilds both production images, scans them, publishes them to GHCR and
-# opens a GitHub Release that records the published image tags and digests.
+# V22 release automation: only a strict stable SemVer tag (vMAJOR.MINOR.PATCH)
+# can publish. The run is fail-closed: tag identity, branch reachability,
+# existing-release immutability, the full V21 gate set, blocking image scans,
+# digest association, SBOMs, and attestations must all succeed before any
+# image is pushed or a GitHub Release is created.
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-  packages: write
+# No default permissions: each job requests only what it needs.
+permissions: {}
+
+# Serialize runs for the same tag; never cancel a release part-way through.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_API: ${{ github.repository }}/api
-  IMAGE_WEB: ${{ github.repository }}/web
+  # Scanner images are pinned by digest, not tag (see tools/release/workflows.py).
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 
 jobs:
-  gates:
+  validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          # Reachability and tag resolution require the tagged commit and
+          # the deployment branch in the local history.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-      - run: pytest backend/tests -v
-      - run: ruff check backend && ruff format --check backend
-      - uses: actions/setup-node@v4
+      - name: Validate release tag and commit
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python -m tools.release.cli validate-tag --tag "$TAG"
+          python -m tools.release.cli verify-tag-commit \
+            --tag "$TAG" --commit "$COMMIT" --repo-root . --main-ref origin/main
+      - name: Refuse existing release or published tags
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Fails closed: a 403/network error is not treated as "tag absent".
+          python -m tools.release.cli check-release --repo "$REPO" --tag "$TAG"
+
+  # Same blocking gates as ci.yml. Kept explicit (rather than a reusable
+  # workflow) so branch-protection check names and local reproducibility are
+  # unchanged; tools/release/workflows.py rejects unpinned actions.
+  gates:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Backend tests
+        run: pytest backend/tests -v
+      - name: Backend lint and formatting
+        run: |
+          ruff check backend tools
+          ruff format --check backend tools
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm run lint && npm run typecheck && npm run test:run && npm run build
+      - name: Frontend gates
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test:run
+          npm run build
       - name: Python dependency audit (pip-audit)
         run: |
-          pip install pip-audit
           pip-audit -r backend/requirements.txt --progress-spinner off
           pip-audit -r backend/requirements-dev.txt --progress-spinner off
-      - name: Frontend dependency audit (npm audit, production deps)
+      - name: Frontend dependency audit (production deps)
         run: cd frontend && npm audit --omit=dev --audit-level=high
       - name: Secret scan (gitleaks)
         run: |
-          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+          docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
             git /repo --redact --no-banner
-      - name: Filesystem + IaC scan (trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Filesystem and IaC scan (trivy)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           scan-type: fs
           scan-ref: .
@@ -54,97 +110,367 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+      - name: Workflow pinning audit
+        run: python -m tools.release.cli audit-workflows --root .
 
   publish:
     needs: gates
     runs-on: ubuntu-latest
-    outputs:
-      api_digest: ${{ steps.push.outputs.api_digest }}
-      web_digest: ${{ steps.push.outputs.web_digest }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Prepare runner disk for the CUDA image
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          docker image prune -af || true
+          df -h /
+          # Three images (including CUDA torch) plus trivy must fit. Fail
+          # before building rather than part-way through a release.
+          AVAILABLE_KB=$(df --output=avail -k / | tail -n 1)
+          if [ "$AVAILABLE_KB" -lt 20971520 ]; then
+            echo "::error::insufficient disk space (20 GiB required) for release images"
+            exit 1
+          fi
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build api image
-        run: docker build -f backend/Dockerfile -t ivp-api:release .
-      - name: Build web image
-        run: docker build -f frontend/Dockerfile -t ivp-web:release .
-      - name: Scan api image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ivp-api:release
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Scan web image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ivp-web:release
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Tag and push images
-        id: push
+      - name: Resolve lowercase image references
+        id: meta
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
+          REPO_LC=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "repo=${REPO_LC}"
+            echo "api=${REGISTRY}/${REPO_LC}/api"
+            echo "web=${REGISTRY}/${REPO_LC}/web"
+            echo "api_gpu=${REGISTRY}/${REPO_LC}/api-gpu"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build release images
+        env:
+          COMMIT: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          LABELS=(
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+            --label "org.opencontainers.image.revision=${COMMIT}"
+            --label "org.opencontainers.image.version=${VERSION}"
+          )
+          docker build -f backend/Dockerfile "${LABELS[@]}" -t ivp-api:release .
+          docker build -f frontend/Dockerfile "${LABELS[@]}" -t ivp-web:release .
+          docker build -f backend/Dockerfile.gpu "${LABELS[@]}" -t ivp-api-gpu:release .
+      - name: Scan release images (blocking)
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          TRIVY_VERSION=$(docker run --rm "$TRIVY_IMAGE" --version | awk '/^Version:/ {print $2}')
+          if [ -z "$TRIVY_VERSION" ]; then
+            echo "::error::could not determine the trivy version"
+            exit 1
+          fi
+          printf '%s\n' "$TRIVY_VERSION" > release-artifacts/trivy-version.txt
+          for image in api web api-gpu; do
+            echo "Scanning ivp-${image}:release"
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${PWD}/release-artifacts:/artifacts" \
+              "$TRIVY_IMAGE" image \
+              --scanners vuln \
+              --severity CRITICAL,HIGH \
+              --ignore-unfixed \
+              --exit-code 1 \
+              --no-progress \
+              --timeout 40m \
+              --format table \
+              --output "/artifacts/${image}.scan.txt" \
+              "ivp-${image}:release"
+          done
+      - name: Publish images and prove digest association
+        id: push
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          REPO_LC=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           SHORT_SHA="${GITHUB_SHA::7}"
-          API_TARGET="${REGISTRY}/${IMAGE_API}:${VERSION}"
-          API_SHORT="${REGISTRY}/${IMAGE_API}:sha-${SHORT_SHA}"
-          WEB_TARGET="${REGISTRY}/${IMAGE_WEB}:${VERSION}"
-          WEB_SHORT="${REGISTRY}/${IMAGE_WEB}:sha-${SHORT_SHA}"
+          for image in api web api-gpu; do
+            REPOSITORY="${REGISTRY}/${REPO_LC}/${image}"
+            LOCAL="ivp-${image}:release"
+            TARGET="${REPOSITORY}:${TAG}"
+            SHORT_TARGET="${REPOSITORY}:sha-${SHORT_SHA}"
+            LOCAL_ID=$(docker image inspect --format '{{.Id}}' "$LOCAL")
+            SIZE=$(docker image inspect --format '{{.Size}}' "$LOCAL")
 
-          docker tag ivp-api:release "${API_TARGET}"
-          docker tag ivp-api:release "${API_SHORT}"
-          docker tag ivp-web:release "${WEB_TARGET}"
-          docker tag ivp-web:release "${WEB_SHORT}"
+            docker tag "$LOCAL" "$TARGET"
+            docker tag "$LOCAL" "$SHORT_TARGET"
+            docker push "$TARGET" | tee "release-artifacts/${image}.push.log"
+            docker push "$SHORT_TARGET" > /dev/null
 
-          docker push "${API_TARGET}" | tee /tmp/push-api.log
-          docker push "${API_SHORT}" > /dev/null
-          docker push "${WEB_TARGET}" | tee /tmp/push-web.log
-          docker push "${WEB_SHORT}" > /dev/null
+            # Query the registry for the authoritative digest instead of
+            # parsing human-readable push output.
+            DIGEST=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$TARGET")
+            if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+              echo "::error::could not resolve a valid registry digest for ${image}"
+              exit 1
+            fi
 
-          API_DIGEST=$(grep -o 'sha256:[0-9a-f]\{64\}' /tmp/push-api.log | tail -n 1)
-          WEB_DIGEST=$(grep -o 'sha256:[0-9a-f]\{64\}' /tmp/push-web.log | tail -n 1)
-          echo "api_digest=${API_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "web_digest=${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
+            # Drop every local reference, then re-pull by digest. Matching
+            # image IDs prove the digest points at the image that was scanned.
+            docker image rm "$LOCAL" "$TARGET" "$SHORT_TARGET" > /dev/null 2>&1 || true
+            docker pull "${REPOSITORY}@${DIGEST}" > /dev/null
+            PULLED_ID=$(docker image inspect --format '{{.Id}}' "${REPOSITORY}@${DIGEST}")
+            if [ "$PULLED_ID" != "$LOCAL_ID" ]; then
+              echo "::error::digest association failed for ${image}: built ${LOCAL_ID}, pulled ${PULLED_ID}"
+              exit 1
+            fi
+
+            {
+              echo "${image}_digest=${DIGEST}"
+              echo "${image}_image_id=${PULLED_ID}"
+              echo "${image}_size=${SIZE}"
+            } >> "$GITHUB_OUTPUT"
+          done
+      - name: Generate SPDX SBOMs from published digests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for image in api web api-gpu; do
+            case "$image" in
+              api) DIGEST="${{ steps.push.outputs.api_digest }}" ;;
+              web) DIGEST="${{ steps.push.outputs.web_digest }}" ;;
+              api-gpu) DIGEST="${{ steps.push.outputs.api-gpu_digest }}" ;;
+            esac
+            REPOSITORY="${{ steps.meta.outputs.repo }}"
+            echo "Generating SBOM for ${image}@${DIGEST}"
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${PWD}/release-artifacts:/artifacts" \
+              "$TRIVY_IMAGE" image \
+              --format spdx-json \
+              --no-progress \
+              --timeout 40m \
+              --output "/artifacts/${image}.spdx.json" \
+              "${REGISTRY}/${REPOSITORY}/${image}@${DIGEST}"
+            docker image rm "${REGISTRY}/${REPOSITORY}/${image}@${DIGEST}" > /dev/null 2>&1 || true
+          done
+      - name: Attest provenance (api)
+        id: attest_api_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.api }}
+          subject-digest: ${{ steps.push.outputs.api_digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest SBOM (api)
+        id: attest_api_sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.api }}
+          subject-digest: ${{ steps.push.outputs.api_digest }}
+          sbom-path: release-artifacts/api.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest provenance (web)
+        id: attest_web_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.web }}
+          subject-digest: ${{ steps.push.outputs.web_digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest SBOM (web)
+        id: attest_web_sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.web }}
+          subject-digest: ${{ steps.push.outputs.web_digest }}
+          sbom-path: release-artifacts/web.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest provenance (api-gpu)
+        id: attest_gpu_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.api_gpu }}
+          subject-digest: ${{ steps.push.outputs.api-gpu_digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest SBOM (api-gpu)
+        id: attest_gpu_sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.api_gpu }}
+          subject-digest: ${{ steps.push.outputs.api-gpu_digest }}
+          sbom-path: release-artifacts/api-gpu.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Collect attestation evidence
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest_api_provenance.outputs.bundle-path }}" release-artifacts/api.provenance.jsonl
+          cp "${{ steps.attest_api_sbom.outputs.bundle-path }}" release-artifacts/api.sbom-attestation.jsonl
+          cp "${{ steps.attest_web_provenance.outputs.bundle-path }}" release-artifacts/web.provenance.jsonl
+          cp "${{ steps.attest_web_sbom.outputs.bundle-path }}" release-artifacts/web.sbom-attestation.jsonl
+          cp "${{ steps.attest_gpu_provenance.outputs.bundle-path }}" release-artifacts/api-gpu.provenance.jsonl
+          cp "${{ steps.attest_gpu_sbom.outputs.bundle-path }}" release-artifacts/api-gpu.sbom-attestation.jsonl
+      - name: Generate and validate release manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SCAN_VERSION=$(cat release-artifacts/trivy-version.txt)
+          REPO_LC=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n \
+            --arg tag "$TAG" \
+            --arg commit "$COMMIT" \
+            --arg source_repository "$GITHUB_REPOSITORY" \
+            --arg run_url "$RUN_URL" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg created_at "$CREATED_AT" \
+            --arg scan_version "$SCAN_VERSION" \
+            --arg api_digest "${{ steps.push.outputs.api_digest }}" \
+            --arg api_image_id "${{ steps.push.outputs.api_image_id }}" \
+            --argjson api_size "${{ steps.push.outputs.api_size }}" \
+            --arg web_digest "${{ steps.push.outputs.web_digest }}" \
+            --arg web_image_id "${{ steps.push.outputs.web_image_id }}" \
+            --argjson web_size "${{ steps.push.outputs.web_size }}" \
+            --arg gpu_digest "${{ steps.push.outputs.api-gpu_digest }}" \
+            --arg gpu_image_id "${{ steps.push.outputs.api-gpu_image_id }}" \
+            --argjson gpu_size "${{ steps.push.outputs.api-gpu_size }}" \
+            '{
+              tag: $tag,
+              commit: $commit,
+              source_repository: $source_repository,
+              workflow: ".github/workflows/release.yml",
+              workflow_run_url: $run_url,
+              workflow_run_id: ($run_id | tonumber),
+              workflow_run_attempt: ($run_attempt | tonumber),
+              created_at: $created_at,
+              gpu_runtime_smoke: "not_run",
+              gpu_runtime_smoke_reason: "GPU infrastructure unavailable on the GitHub-hosted release runner",
+              images: [
+                {
+                  name: "api",
+                  digest: $api_digest,
+                  image_id: $api_image_id,
+                  pulled_image_id: $api_image_id,
+                  platform: "linux/amd64",
+                  size_bytes: ($api_size | tonumber),
+                  sbom_file: "api.spdx.json",
+                  scan_log_file: "api.scan.txt",
+                  scan_version: $scan_version,
+                  provenance_bundle_file: "api.provenance.jsonl",
+                  sbom_attestation_bundle_file: "api.sbom-attestation.jsonl"
+                },
+                {
+                  name: "web",
+                  digest: $web_digest,
+                  image_id: $web_image_id,
+                  pulled_image_id: $web_image_id,
+                  platform: "linux/amd64",
+                  size_bytes: ($web_size | tonumber),
+                  sbom_file: "web.spdx.json",
+                  scan_log_file: "web.scan.txt",
+                  scan_version: $scan_version,
+                  provenance_bundle_file: "web.provenance.jsonl",
+                  sbom_attestation_bundle_file: "web.sbom-attestation.jsonl"
+                },
+                {
+                  name: "api-gpu",
+                  digest: $gpu_digest,
+                  image_id: $gpu_image_id,
+                  pulled_image_id: $gpu_image_id,
+                  platform: "linux/amd64",
+                  size_bytes: ($gpu_size | tonumber),
+                  sbom_file: "api-gpu.spdx.json",
+                  scan_log_file: "api-gpu.scan.txt",
+                  scan_version: $scan_version,
+                  provenance_bundle_file: "api-gpu.provenance.jsonl",
+                  sbom_attestation_bundle_file: "api-gpu.sbom-attestation.jsonl"
+                }
+              ]
+            }' > release-artifacts/release-inputs.json
+          python -m tools.release.cli generate \
+            --inputs release-artifacts/release-inputs.json \
+            --artifacts-dir release-artifacts \
+            --output release-artifacts/release-manifest.json
+          python -m tools.release.cli validate \
+            --manifest release-artifacts/release-manifest.json \
+            --artifacts-dir release-artifacts \
+            --tag "$TAG" \
+            --commit "$COMMIT"
+      - name: Upload release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-artifacts
+          path: release-artifacts/
+          retention-days: 90
+          if-no-files-found: error
 
   release:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-artifacts
+          path: release-artifacts
+      - name: Re-validate manifest before release
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python -m tools.release.cli validate \
+            --manifest release-artifacts/release-manifest.json \
+            --artifacts-dir release-artifacts \
+            --tag "$TAG" \
+            --commit "$COMMIT"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.ref_name }}
-          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
-          WEB_DIGEST: ${{ needs.publish.outputs.web_digest }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           NOTES=$(mktemp)
-          AUTO=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f tag_name="${VERSION}" --jq .body)
+          gh api "repos/${REPO}/releases/generate-notes" \
+            -f tag_name="${TAG}" --jq .body > "$NOTES"
           {
-            echo "## Images"
-            echo ""
-            echo "| Image | Tags | Digest |"
-            echo "| --- | --- | --- |"
-            echo "| \`${REGISTRY}/${IMAGE_API}\` | \`${VERSION}\`, \`sha-${GITHUB_SHA::7}\` | \`${API_DIGEST}\` |"
-            echo "| \`${REGISTRY}/${IMAGE_WEB}\` | \`${VERSION}\`, \`sha-${GITHUB_SHA::7}\` | \`${WEB_DIGEST}\` |"
-            echo ""
-            echo "Gates that ran before publishing: backend tests, ruff, frontend lint/typecheck/tests/build,"
-            echo "pip-audit, npm audit (production deps), gitleaks, trivy (filesystem, IaC, images)."
-            echo ""
-            echo "## Changes"
-            echo ""
-            echo "$AUTO"
-          } > "$NOTES"
-          gh release create "${VERSION}" --title "${VERSION}" --notes-file "$NOTES"
-          gh release view "${VERSION}" --json url --jq .url
+            echo
+            python -m tools.release.cli summary --manifest release-artifacts/release-manifest.json
+          } >> "$NOTES"
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES" \
+            release-artifacts/release-manifest.json \
+            release-artifacts/api.spdx.json \
+            release-artifacts/web.spdx.json \
+            release-artifacts/api-gpu.spdx.json \
+            release-artifacts/api.provenance.jsonl \
+            release-artifacts/api.sbom-attestation.jsonl \
+            release-artifacts/web.provenance.jsonl \
+            release-artifacts/web.sbom-attestation.jsonl \
+            release-artifacts/api-gpu.provenance.jsonl \
+            release-artifacts/api-gpu.sbom-attestation.jsonl \
+            release-artifacts/api.scan.txt \
+            release-artifacts/web.scan.txt \
+            release-artifacts/api-gpu.scan.txt

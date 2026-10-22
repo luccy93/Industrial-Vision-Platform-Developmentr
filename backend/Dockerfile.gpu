@@ -35,7 +35,7 @@ COPY backend/requirements.txt ./backend-requirements.txt
 # image): an unconstrained second pass would upgrade torch past the
 # verified cu126 pair.
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir --timeout 100 --upgrade pip "setuptools>=78.1.1,<81" wheel \
     && /opt/venv/bin/pip install --no-cache-dir --timeout 100 \
         --index-url https://download.pytorch.org/whl/cu126 \
         torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
@@ -53,11 +53,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 libgl1 libxcb1 \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /usr/sbin/nologin appuser
 
 WORKDIR /code
 COPY --from=builder /opt/venv /opt/venv
+RUN python -m pip install --no-cache-dir --upgrade "setuptools>=78.1.1,<81" wheel \
+    && python -m pip uninstall -y pip \
+    && /opt/venv/bin/pip uninstall -y pip \
+    && rm -rf /root/.cache/pip
 ENV PATH=/opt/venv/bin:$PATH
 COPY backend ./backend
 RUN mkdir -p /code/models /code/data && chown -R appuser:appuser /code
