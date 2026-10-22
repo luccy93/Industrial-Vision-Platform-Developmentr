@@ -51,6 +51,9 @@ frontend/dist/
 postgres-data/
 redis-data/
 
+# V22 release workflow output (manifests, SBOMs, evidence); never committed
+release-artifacts/
+
 # Alembic versions cache (keep versions/, ignore pycache only)
 # Logs
 *.log

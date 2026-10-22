@@ -17,8 +17,8 @@ jobs:
       - run: pytest backend/tests -v
       - name: Lint (ruff)
         run: |
-          ruff check backend
-          ruff format --check backend
+          ruff check backend tools
+          ruff format --check backend tools
       # Informational: the repository carries pre-existing type errors
       # outside V20's scope. Surfaced here without blocking the build.
       - name: Type check (mypy, informational)

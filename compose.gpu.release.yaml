@@ -1,0 +1,38 @@
+# V22 digest-pinned NVIDIA GPU deployment overlay.
+#
+#   IVP_CPU_API_IMAGE="ghcr.io/<owner>/<repo>/api@sha256:<cpu-digest>" \
+#   IVP_GPU_API_IMAGE="ghcr.io/<owner>/<repo>/api-gpu@sha256:<gpu-digest>" \
+#   IVP_WEB_IMAGE="ghcr.io/<owner>/<repo>/web@sha256:<web-digest>" \
+#     docker compose -f compose.yaml -f compose.gpu.release.yaml pull
+#   ... docker compose -f compose.yaml -f compose.gpu.release.yaml up -d
+#
+# The GPU image is published only after the same blocking scan, SBOM, and
+# attestation gates as the CPU images. Runtime GPU validation requires
+# compatible hardware; the release manifest records `runtime_smoke: not_run`
+# when it is unavailable.
+#
+# Do NOT combine this file with compose.gpu.yaml: that local-build overlay
+# restores a `build:` definition and defeats digest pinning.
+
+services:
+  migrate:
+    # Schema migration is device-independent: use the CPU api digest.
+    image: ${IVP_CPU_API_IMAGE:?set IVP_CPU_API_IMAGE to the release cpu api image by digest}
+    build: !reset null
+
+  api:
+    image: ${IVP_GPU_API_IMAGE:?set IVP_GPU_API_IMAGE to the release gpu api image by digest}
+    build: !reset null
+    environment:
+      MODEL_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu]
+
+  web:
+    image: ${IVP_WEB_IMAGE:?set IVP_WEB_IMAGE to the release web image by digest}
+    build: !reset null

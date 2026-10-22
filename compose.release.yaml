@@ -1,0 +1,25 @@
+# V22 digest-pinned CPU deployment overlay.
+#
+#   IVP_API_IMAGE="ghcr.io/<owner>/<repo>/api@sha256:<digest>" \
+#   IVP_WEB_IMAGE="ghcr.io/<owner>/<repo>/web@sha256:<digest>" \
+#     docker compose -f compose.yaml -f compose.release.yaml pull
+#   IVP_API_IMAGE=... IVP_WEB_IMAGE=... \
+#     docker compose -f compose.yaml -f compose.release.yaml up -d
+#
+# `build: !reset null` removes the local build definitions from compose.yaml,
+# so an accidental `up --build` cannot replace a verified release with
+# unreviewed source-built layers. The one-shot migrate service uses the CPU
+# api image (schema migration is device-independent).
+
+services:
+  migrate:
+    image: ${IVP_API_IMAGE:?set IVP_API_IMAGE to the release api image by digest}
+    build: !reset null
+
+  api:
+    image: ${IVP_API_IMAGE:?set IVP_API_IMAGE to the release api image by digest}
+    build: !reset null
+
+  web:
+    image: ${IVP_WEB_IMAGE:?set IVP_WEB_IMAGE to the release web image by digest}
+    build: !reset null
