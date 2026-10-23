@@ -102,14 +102,11 @@ jobs:
           docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
             git /repo --redact --no-banner
       - name: Filesystem and IaC scan (trivy)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm -v "$PWD:/repo" -v trivy-cache:/root/.cache/trivy \
+            "$TRIVY_IMAGE" fs /repo \
+            --scanners vuln,misconfig --severity CRITICAL,HIGH \
+            --ignore-unfixed --exit-code 1 --no-progress
       - name: Workflow pinning audit
         run: python -m tools.release.cli audit-workflows --root .
 

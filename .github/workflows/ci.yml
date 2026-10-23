@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Digest-pinned scanner container. The previous trivy-action pin resolved
+  # through an unpinned setup-trivy tag, which broke the security and
+  # image-scan jobs at runtime.
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -70,14 +76,11 @@ jobs:
       - name: Secret scan (gitleaks)
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact --no-banner
       - name: Filesystem + IaC scan (trivy)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm -v "$PWD:/repo" -v trivy-cache:/root/.cache/trivy \
+            "$TRIVY_IMAGE" fs /repo \
+            --scanners vuln,misconfig --severity CRITICAL,HIGH \
+            --ignore-unfixed --exit-code 1 --no-progress
 
   # V21 container gates: build both production images exactly as the release
   # workflow does and scan the results. Blocking on CRITICAL,HIGH with a fix
@@ -91,21 +94,15 @@ jobs:
       - name: Build web image
         run: docker build -f frontend/Dockerfile -t ivp-web:ci .
       - name: Trivy image scan (api)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ivp-api:ci
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/trivy "$TRIVY_IMAGE" image ivp-api:ci \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress
       - name: Trivy image scan (web)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ivp-web:ci
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/trivy "$TRIVY_IMAGE" image ivp-web:ci \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress
 
   deploy:
     runs-on: ubuntu-latest
