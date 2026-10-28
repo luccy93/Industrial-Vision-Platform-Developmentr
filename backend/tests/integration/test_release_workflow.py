@@ -67,9 +67,12 @@ def test_release_permissions_are_least_privilege() -> None:
         "attestations": "write",
     }
     assert jobs["release"]["permissions"] == {"contents": "write"}
+    assert jobs["recovery"]["permissions"] == {"contents": "read"}
     assert jobs["gates"]["needs"] == "validate"
     assert jobs["publish"]["needs"] == "gates"
     assert jobs["release"]["needs"] == "publish"
+    assert jobs["recovery"]["needs"] == ["publish", "release"]
+    assert jobs["recovery"]["if"] == "failure()"
 
 
 def test_every_release_action_is_sha_pinned() -> None:
@@ -228,3 +231,72 @@ def test_release_gpu_overlay_keeps_cuda_and_nvidia_reservation() -> None:
     assert "IVP_CPU_API_IMAGE" in overlay["services"]["migrate"]["image"]
     raw = _read("compose.gpu.release.yaml")
     assert "Do NOT combine" in raw
+
+
+def test_release_publish_fetches_history_and_sanitizes_gpu_outputs() -> None:
+    config = _workflow("release.yml")
+    publish = config["jobs"]["publish"]
+    first = _steps(publish)[0]
+    assert first["uses"].startswith("actions/checkout@")
+    assert first["with"]["fetch-depth"] == 0
+    raw = _release_raw()
+    assert "api-gpu_digest" not in raw
+    assert "steps.push.outputs.api_gpu_digest" in raw
+    assert "steps.push.outputs.api_gpu_image_id" in raw
+    assert "steps.push.outputs.api_gpu_size" in raw
+    assert "KEY=$(printf '%s' \"$image\" | tr '-' '_')" in raw
+
+
+def test_release_production_verification_gate_runs_after_manifest() -> None:
+    config = _workflow("release.yml")
+    publish = config["jobs"]["publish"]
+    names = _step_names(publish)
+    manifest_at = names.index("Generate and validate release manifest")
+    verify_at = names.index("Verify published artifacts and attestations (production)")
+    assert manifest_at < verify_at
+    step = _steps(publish)[verify_at]
+    assert step["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    body = step["run"]
+    assert "--profile production" in body
+    assert "--repo-root ." in body
+    assert "--main-ref origin/main" in body
+    assert "release-verification.json" in body
+
+
+def test_release_reports_publication_outcome_even_on_failure() -> None:
+    config = _workflow("release.yml")
+    publish = config["jobs"]["publish"]
+    names = _step_names(publish)
+    record_at = names.index("Record publication outcome")
+    upload_at = names.index("Upload publication outcome")
+    assert _steps(publish)[record_at]["if"] == "always()"
+    assert _steps(publish)[upload_at]["if"] == "always()"
+    body = "\n".join(step.get("run", "") for step in _steps(publish))
+    assert "published-images.jsonl" in body
+    assert "publication-report.json" in body
+    assert "push_started" in body
+
+
+def test_release_release_job_requires_production_report_and_complete_publication() -> None:
+    config = _workflow("release.yml")
+    release = config["jobs"]["release"]
+    body = "\n".join(step.get("run", "") for step in _steps(release))
+    assert "check-report" in body
+    assert "--require-production" in body
+    assert "publication-report" in body
+    assert "--fail-on-incomplete" in body
+    assert "release-verification.json" in body
+    create = next(step for step in _steps(release) if "gh release create" in step.get("run", ""))
+    assert "release-verification.json" in create["run"]
+    assert "publication-report.json" in create["run"]
+
+
+def test_release_recovery_job_explains_safe_recovery() -> None:
+    config = _workflow("release.yml")
+    recovery = config["jobs"]["recovery"]
+    assert recovery["if"] == "failure()"
+    body = "\n".join(step.get("run", "") for step in _steps(recovery))
+    assert "publication-summary" in body
+    assert "Never move, delete, or reuse the release tag" in body
+    assert "Inspect GHCR" in body
+    assert any(step.get("uses", "").startswith("actions/download-artifact@") for step in _steps(recovery))

@@ -143,6 +143,11 @@ def _is_placeholder_digest(value: Any) -> bool:
     return len(set(value.split(":", 1)[1])) == 1
 
 
+def is_placeholder_digest(value: Any) -> bool:
+    """Public form used by deployment checks."""
+    return _is_placeholder_digest(value)
+
+
 def _canonical(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 

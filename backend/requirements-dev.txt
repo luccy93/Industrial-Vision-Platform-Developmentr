@@ -8,3 +8,5 @@ types-redis>=4.6
 pyyaml>=6,<7
 # V21 dependency vulnerability scanning (pip-audit, offline-friendly local run).
 pip-audit>=2.7,<3
+# V23 post-deployment WebSocket smoke checks.
+websockets>=12,<16
