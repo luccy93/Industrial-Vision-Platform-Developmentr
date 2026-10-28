@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +23,15 @@ from tools.release.publication import build_publication_report, write_publicatio
 from tools.release.qualification import (
     ARTIFACT_FIELDS,
     CHECK_FIELDS,
+    DEPLOYMENT_REQUIRED_CHECKS,
     EVIDENCE_FIELDS,
     FAIL,
+    GPU_REQUIRED_CHECKS,
     NOT_RUN,
     PASS,
     QUALIFICATION_FIELDS,
     QUALIFICATION_PROFILES,
+    REHEARSAL_REQUIRED_CHECKS,
     SCOPES,
     SUBJECT_FIELDS,
     qualification_report_errors,
@@ -34,6 +39,7 @@ from tools.release.qualification import (
     render_qualification_summary,
     write_qualification_report,
 )
+from tools.release.rehearsal import STEP_NAMES
 from tools.release.verification import verify_release, write_verification_report
 
 GENERATED_AT = "2026-10-24T00:00:00Z"
@@ -105,6 +111,19 @@ def _publication(
     return path, report
 
 
+def _passing_checks(names: tuple[str, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "state": PASS,
+            "required": True,
+            "detail": "test evidence",
+            "command": None,
+        }
+        for name in names
+    ]
+
+
 def _deployment(
     artifacts: Path,
     manifest_path: Path,
@@ -118,7 +137,7 @@ def _deployment(
         "subject": _subject(manifest),
         "state": PASS,
         "gpu": True,
-        "checks": [],
+        "checks": _passing_checks(DEPLOYMENT_REQUIRED_CHECKS),
     }
     payload.update(overrides)
     path = artifacts / "deployment-report.json"
@@ -132,20 +151,62 @@ def _rehearsal(
     manifest: dict[str, Any],
     **overrides: Any,
 ) -> Path:
+    previous_sha = "sha256:" + "b" * 64
+    previous_subject = {
+        "tag": "v1.2.2",
+        "commit": "b" * 40,
+        "source_repository": SOURCE_REPOSITORY,
+    }
+    target_digests = {image["name"]: image["digest"] for image in manifest["images"]}
+    previous_digests = {
+        name: "sha256:" + hashlib.sha256(f"previous-{name}".encode()).hexdigest() for name in target_digests
+    }
+    evidence_path = artifacts / "previous-rollback-deployment.json"
+    evidence_path.write_text(
+        json.dumps({"kind": "previous-deployment", "state": PASS}) + "\n",
+        encoding="utf-8",
+    )
     payload: dict[str, Any] = {
         "schema_version": 1,
         "generated_at": GENERATED_AT,
+        "executed": True,
         "state": PASS,
         "verified": True,
         "manifest_sha256": sha256_file(manifest_path),
         "subject": _subject(manifest),
-        "previous_manifest_sha256": "sha256:" + "b" * 64,
-        "previous_subject": {
-            "tag": "v1.2.2",
-            "commit": "b" * 40,
-            "source_repository": SOURCE_REPOSITORY,
+        "previous_manifest_sha256": previous_sha,
+        "previous_subject": previous_subject,
+        "target": {
+            "manifest_sha256": sha256_file(manifest_path),
+            "subject": _subject(manifest),
+            "digests": target_digests,
         },
-        "checks": [],
+        "previous": {
+            "manifest_sha256": previous_sha,
+            "subject": previous_subject,
+            "digests": previous_digests,
+        },
+        "checks": _passing_checks(REHEARSAL_REQUIRED_CHECKS),
+        "steps": [
+            {
+                "name": name,
+                "state": PASS,
+                "detail": "test step",
+                "commands": [],
+                "checks": [],
+                "deployment": None,
+                "smoke": None,
+                "evidence": [],
+            }
+            for name in STEP_NAMES
+        ],
+        "evidence": [
+            {
+                "kind": "previous-deployment",
+                "path": evidence_path.name,
+                "sha256": sha256_file(evidence_path),
+            }
+        ],
     }
     payload.update(overrides)
     path = artifacts / "rollback-rehearsal.json"
@@ -159,15 +220,25 @@ def _gpu(
     manifest: dict[str, Any],
     **overrides: Any,
 ) -> Path:
+    api_gpu = next(image for image in manifest["images"] if image["name"] == "api-gpu")
     payload: dict[str, Any] = {
         "schema_version": 1,
         "generated_at": GENERATED_AT,
+        "executed": True,
         "state": PASS,
         "verified": True,
         "manifest_sha256": sha256_file(manifest_path),
         "subject": _subject(manifest),
-        "gpu": {"name": "NVIDIA A10", "runtime": "nvidia"},
-        "checks": [],
+        "gpu": {
+            "name": "NVIDIA A10",
+            "driver_version": "535.104.05",
+            "memory": "24564 MiB",
+            "runtime": "nvidia",
+            "image": f"{api_gpu['repository']}@{api_gpu['digest']}",
+            "image_digest": api_gpu["digest"],
+            "container_cuda": True,
+        },
+        "checks": _passing_checks(GPU_REQUIRED_CHECKS),
     }
     payload.update(overrides)
     path = artifacts / "gpu-runtime.json"
@@ -392,6 +463,9 @@ def test_check_qualification_accepts_full_production_report(tmp_path: Path) -> N
             require_production=True,
             verification_report_path=evidence["verification_report_path"],
             publication_report_path=evidence["publication_report_path"],
+            deployment_report_path=evidence["deployment_report_path"],
+            rehearsal_report_path=evidence["rehearsal_report_path"],
+            gpu_report_path=evidence["gpu_report_path"],
         )
         == []
     )
@@ -450,3 +524,229 @@ def test_qualification_schema_matches_contract() -> None:
     assert set(schema["$defs"]["evidence"]["required"]) == set(EVIDENCE_FIELDS)
     assert set(schema["properties"]["profile"]["enum"]) == set(QUALIFICATION_PROFILES)
     assert set(schema["properties"]["scope"]["enum"]) == set(SCOPES)
+    assert "manifest_sha256" in schema["$defs"]["deploymentBinding"]["required"]
+    assert "executed" in schema["$defs"]["rehearsalBinding"]["required"]
+    assert "executed" in schema["$defs"]["gpuBinding"]["required"]
+
+
+def _mutate(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def test_production_rejects_unexecuted_rollback_rehearsal(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest, evidence = _full_evidence(tmp_path)
+    evidence["rehearsal_report_path"] = _rehearsal(
+        artifacts,
+        manifest_path,
+        manifest,
+        executed=False,
+        state=NOT_RUN,
+        verified=False,
+    )
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["overall_state"] == FAIL
+    assert report["qualified"] is False
+    assert report["production_qualified"] is False
+    assert "rollback rehearsal was not executed" in " ".join(report["blockers"])
+
+
+def test_production_rejects_rehearsal_evidence_hash_mismatch(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+    evidence_file = artifacts / "previous-rollback-deployment.json"
+    evidence_file.write_text(
+        evidence_file.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "evidence hash does not match" in " ".join(report["blockers"])
+
+
+def test_production_rejects_missing_rehearsal_evidence_file(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+    (artifacts / "previous-rollback-deployment.json").unlink()
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "evidence file is missing" in " ".join(report["blockers"])
+
+
+def test_production_rejects_rehearsal_evidence_outside_report_directory(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+    report_path = evidence["rehearsal_report_path"]
+    nested = artifacts / "nested" / report_path.name
+    nested.parent.mkdir()
+    nested.write_text(report_path.read_text(encoding="utf-8"), encoding="utf-8")
+    evidence["rehearsal_report_path"] = nested
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "evidence file is missing" in " ".join(report["blockers"])
+
+
+def test_production_rejects_failed_rehearsal_step(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def fail_verify_target(payload: dict[str, Any]) -> None:
+        for step in payload["steps"]:
+            if step["name"] == "verify-target":
+                step["state"] = FAIL
+
+    _mutate(evidence["rehearsal_report_path"], fail_verify_target)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "rollback rehearsal step verify-target is 'FAIL', not PASS" in " ".join(report["blockers"])
+
+
+def test_production_rejects_rehearsal_target_digest_mismatch(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def change_target_digest(payload: dict[str, Any]) -> None:
+        payload["target"]["digests"]["api"] = "sha256:" + "9" * 64
+
+    _mutate(evidence["rehearsal_report_path"], change_target_digest)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "rollback rehearsal target digest for api does not match the manifest" in " ".join(
+        report["blockers"]
+    )
+
+
+def test_production_rejects_rehearsal_previous_digest_coverage_gap(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def drop_previous_digest(payload: dict[str, Any]) -> None:
+        payload["previous"]["digests"].pop("web")
+
+    _mutate(evidence["rehearsal_report_path"], drop_previous_digest)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "rollback rehearsal previous digests do not cover the target images" in " ".join(
+        report["blockers"]
+    )
+
+
+def test_production_rejects_cpu_only_deployment(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest, evidence = _full_evidence(tmp_path)
+    _deployment(artifacts, manifest_path, manifest, gpu=False)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert report["production_qualified"] is False
+    assert "deployment report does not prove a GPU deployment" in " ".join(report["blockers"])
+
+
+def test_production_rejects_failed_deployment_check(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def fail_preflight(payload: dict[str, Any]) -> None:
+        for check in payload["checks"]:
+            if check["name"] == "preflight":
+                check["state"] = FAIL
+
+    _mutate(evidence["deployment_report_path"], fail_preflight)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "deployment report check preflight is 'FAIL', not PASS" in " ".join(report["blockers"])
+
+
+def test_production_rejects_missing_deployment_preflight_check(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def remove_preflight(payload: dict[str, Any]) -> None:
+        payload["checks"] = [check for check in payload["checks"] if check["name"] != "preflight"]
+
+    _mutate(evidence["deployment_report_path"], remove_preflight)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "deployment report has no preflight check" in " ".join(report["blockers"])
+
+
+def test_production_rejects_gpu_runtime_without_container_cuda(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def disable_cuda(payload: dict[str, Any]) -> None:
+        payload["gpu"]["container_cuda"] = False
+
+    _mutate(evidence["gpu_report_path"], disable_cuda)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert report["production_qualified"] is False
+    assert "does not prove container CUDA access" in " ".join(report["blockers"])
+
+
+def test_production_rejects_unexecuted_gpu_runtime(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def mark_unexecuted(payload: dict[str, Any]) -> None:
+        payload["executed"] = False
+
+    _mutate(evidence["gpu_report_path"], mark_unexecuted)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "GPU runtime qualification was not executed" in " ".join(report["blockers"])
+
+
+def test_production_rejects_gpu_runtime_digest_mismatch(tmp_path: Path) -> None:
+    manifest_path, artifacts, _, evidence = _full_evidence(tmp_path)
+
+    def change_gpu_digest(payload: dict[str, Any]) -> None:
+        payload["gpu"]["image_digest"] = "sha256:" + "9" * 64
+
+    _mutate(evidence["gpu_report_path"], change_gpu_digest)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    assert report["qualified"] is False
+    assert "GPU runtime report image digest does not match the manifest" in " ".join(report["blockers"])
+
+
+def test_check_qualification_rejects_missing_production_bindings(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest, evidence = _full_evidence(tmp_path)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    tampered = json.loads(json.dumps(report))
+    tampered["deployment"] = None
+    tampered["rehearsal"] = None
+    tampered["gpu_runtime"] = None
+    errors = qualification_report_errors(
+        tampered,
+        manifest,
+        manifest_path=manifest_path,
+        require_production=True,
+    )
+    assert any("deployment-report binding is missing" in error for error in errors)
+    assert any("rollback-rehearsal binding is missing" in error for error in errors)
+    assert any("gpu-runtime binding is missing" in error for error in errors)
+
+
+def test_check_qualification_rejects_changed_production_reports(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest, evidence = _full_evidence(tmp_path)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    for key in ("deployment_report_path", "rehearsal_report_path", "gpu_report_path"):
+        path = evidence[key]
+        path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    errors = qualification_report_errors(
+        report,
+        manifest,
+        manifest_path=manifest_path,
+        require_production=True,
+        deployment_report_path=evidence["deployment_report_path"],
+        rehearsal_report_path=evidence["rehearsal_report_path"],
+        gpu_report_path=evidence["gpu_report_path"],
+    )
+    assert any("deployment-report binding does not match the supplied report" in error for error in errors)
+    assert any("rollback-rehearsal binding does not match the supplied report" in error for error in errors)
+    assert any("gpu-runtime binding does not match the supplied report" in error for error in errors)
+
+
+def test_check_qualification_rejects_mismatched_production_evidence(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest, evidence = _full_evidence(tmp_path)
+    report = _qualify(manifest_path, artifacts, **evidence)
+    tampered = json.loads(json.dumps(report))
+    for item in tampered["evidence"]:
+        if item["kind"] == "deployment-report":
+            item["sha256"] = "sha256:" + "9" * 64
+    errors = qualification_report_errors(
+        tampered,
+        manifest,
+        manifest_path=manifest_path,
+        require_production=True,
+    )
+    assert any("deployment-report evidence does not match its binding" in error for error in errors)

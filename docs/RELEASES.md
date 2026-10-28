@@ -218,7 +218,7 @@ manifest, and binds every input by SHA-256.
 | --- | --- | --- |
 | `local_validation` | Offline or CI artifact gate | V23 report with `verified: true`, genuine DSSE bundles, SBOM/scan/digest checks, GPU artifact present |
 | `staging_qualification` | Staging deployment | Production V23 report, complete publication, attestation trust, bound deployment report; GPU runtime only with `--require-gpu-runtime` |
-| `production_qualification` | Production readiness | Staging requirements plus `full` scope, passing rollback rehearsal, verified GPU runtime, explicit authorization |
+| `production_qualification` | Production readiness | Staging requirements plus `full` scope, a GPU deployment, an executed rollback rehearsal with hash-verifiable evidence, and container-level GPU runtime proof |
 
 Scopes add evidence in order:
 
@@ -226,9 +226,14 @@ Scopes add evidence in order:
   publication is required with `--require-live-evidence` or any non-local
   profile.
 - `deployment`: adds a deployment report bound to the same manifest bytes and
-  subject, plus a bound preflight report when supplied.
+  subject. The report must prove digest-pinned Compose configuration, a bound
+  preflight, the running `api` and `web` services, and running image IDs that
+  match the manifest. A `production_qualification` deployment must also use the
+  GPU overlay (`gpu: true`).
 - `full`: adds an executed rollback rehearsal with `executed: true`,
-  `state: PASS`, and `verified: true`. `production_qualified` requires `full`.
+  `state: PASS`, `verified: true`, all nine steps `PASS`, target and previous
+  digest bindings, and evidence files whose SHA-256 values match the report.
+  `production_qualified` requires `full`.
 
 ```powershell
 # Probe the host before claiming evidence you cannot produce.
@@ -239,7 +244,7 @@ python -m tools.release.cli qualify-prerequisites `
   --verification-report release-artifacts/release-verification.json `
   --publication-report release-artifacts/publication-report.json `
   --deployment-report release-artifacts/deployment-report.json `
-  --rehearsal-report release-artifacts/rollback-rehearsal.json `
+  --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json `
   --gpu-report release-artifacts/gpu-runtime.json `
   --production-authorized `
   --output release-artifacts/qualification-prerequisites.json
@@ -251,7 +256,7 @@ python -m tools.release.cli qualify `
   --verification-report release-artifacts/release-verification.json `
   --publication-report release-artifacts/publication-report.json `
   --deployment-report release-artifacts/deployment-report.json `
-  --rehearsal-report release-artifacts/rollback-rehearsal.json `
+  --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json `
   --gpu-report release-artifacts/gpu-runtime.json `
   --tag v1.2.3 --commit <40-hex> --repository <owner>/<repo> `
   --repo-root . --main-ref origin/main `
@@ -262,6 +267,9 @@ python -m tools.release.cli check-qualification `
   --manifest release-artifacts/release-manifest.json `
   --verification-report release-artifacts/release-verification.json `
   --publication-report release-artifacts/publication-report.json `
+  --deployment-report release-artifacts/deployment-report.json `
+  --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json `
+  --gpu-report release-artifacts/gpu-runtime.json `
   --require-production
 ```
 
@@ -277,9 +285,17 @@ The qualification report binds:
 
 `production_qualified` is true only when all of these hold: profile is
 `production_qualification`, scope is `full`, every required check is `PASS`,
-the V23 report has `production_verified: true`, the rollback rehearsal
-verified the previous and target digests, and GPU runtime is verified on the
-target host.
+the V23 report has `production_verified: true`, the deployment used the GPU
+overlay, the rollback rehearsal executed all nine steps and verified distinct
+target and previous digests, the GPU runtime report proves the `nvidia`
+runtime and `container_cuda: true`, and every referenced evidence file still
+matches its recorded SHA-256.
+
+`check-qualification --require-production` revalidates the qualification
+report's production bindings and, when report paths are supplied, rejects any
+report whose bytes changed after qualification. A `PASS` in a summary field is
+not enough: missing, unexecuted, `NOT_RUN`, `UNAVAILABLE`, or `SIMULATED`
+evidence can never satisfy a required production check.
 
 The CI `qualify` job runs `local_validation`/`artifact` with
 `--require-live-evidence` after publication. It gates the GitHub Release but
@@ -390,14 +406,19 @@ python -m tools.release.cli rehearse-rollback `
   --smoke-api-url https://staging.example.com/api `
   --smoke-web-url https://staging.example.com `
   --smoke-username smoke@example.com `
-  --execute --evidence-dir rehearsal-evidence `
-  --output rollback-rehearsal.json
+  --execute --evidence-dir release-artifacts/rehearsal `
+  --output release-artifacts/rehearsal/rollback-rehearsal.json
 ```
 
-Without `--execute` every step is `NOT_RUN`. Evidence written by the rehearsal
-is listed with its SHA-256 in the report, and the report binds both the target
-and previous manifest hashes, subjects, and digests. `full` scope qualification
-requires `executed: true`, `state: PASS`, and `verified: true`.
+`--execute` requires both `--evidence-dir` and `--output`, and the evidence
+directory must be the directory that contains the report. Qualification
+resolves each evidence path relative to the rehearsal report, so a report
+copied away from its evidence cannot qualify. Without `--execute` every step
+is `NOT_RUN`. Evidence written by the rehearsal is listed with its SHA-256 in
+the report, and the report binds both the target and previous manifest hashes,
+subjects, and digests. `full` scope qualification requires `executed: true`,
+`state: PASS`, `verified: true`, all nine steps `PASS`, and matching evidence
+hashes.
 
 ## GPU runtime validation
 

@@ -501,6 +501,10 @@ def run_rollback_rehearsal(
     smoke_runner: Callable[..., dict[str, Any]] = run_smoke,
     now: Callable[[], str] = utc_now_iso,
 ) -> dict[str, Any]:
+    if execute and evidence_dir is None:
+        raise RehearsalError(
+            "an executed rollback rehearsal requires an evidence directory so every step is hash-verifiable"
+        )
     try:
         target = load_manifest(manifest_path)
         previous = load_manifest(previous_manifest_path)

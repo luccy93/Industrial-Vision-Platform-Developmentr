@@ -5,6 +5,11 @@ operators a safe way to deploy, smoke, and roll back a digest-pinned release.
 It does not create a release tag, publish a hosted image, or claim a live
 production deployment.
 
+V24 builds on this evidence with live release qualification: see
+`docs/V24_LIVE_RELEASE_QUALIFICATION.md`. V23 remains the artifact-verification
+contract. V24 does not reinterpret `production_verified` or upgrade missing
+deployment, rollback-rehearsal, or GPU-runtime evidence.
+
 ## Delivered
 
 - **Independent verification** (`tools/release/verification.py`): git tag and

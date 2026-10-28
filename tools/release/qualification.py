@@ -10,7 +10,8 @@ manifest bytes, a different tag, commit, or repository.
 Nothing here upgrades unavailable evidence to success. ``qualified`` is true
 only when every required check is ``PASS``; ``production_qualified`` additionally
 requires the ``production_qualification`` profile, ``full`` scope, a V23
-production verification, a passing rollback rehearsal, and verified GPU runtime.
+production verification, a GPU deployment, an executed rollback rehearsal with
+hash-verifiable evidence, and verified container-level GPU runtime.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from tools.release.deployment import DEPLOYMENT_SCHEMA_VERSION
+from tools.release.gpu import GPU_SCHEMA_VERSION
 from tools.release.identity import (
     DIGEST_PATTERN,
     REQUIRED_IMAGES,
@@ -37,6 +40,7 @@ from tools.release.manifest import (
     sha256_file,
     utc_now_iso,
 )
+from tools.release.rehearsal import REHEARSAL_SCHEMA_VERSION, STEP_NAMES
 from tools.release.verification import (
     FAIL,
     NOT_RUN,
@@ -49,9 +53,31 @@ from tools.release.verification import (
 QUALIFICATION_SCHEMA_VERSION = 1
 QUALIFICATION_PROFILES = ("local_validation", "staging_qualification", "production_qualification")
 SCOPES = ("artifact", "deployment", "full")
-DEPLOYMENT_SCHEMA_VERSION = 1
-REHEARSAL_SCHEMA_VERSION = 1
-GPU_SCHEMA_VERSION = 1
+DEPLOYMENT_REQUIRED_CHECKS = (
+    "manifest-digests",
+    "compose-config",
+    "verification-report",
+    "preflight",
+    "running-service:api",
+    "running-service:web",
+    "running-image:api",
+    "running-image:web",
+)
+REHEARSAL_REQUIRED_CHECKS = (
+    "target-manifest",
+    "previous-manifest",
+    "distinct-release",
+    "execution",
+    *STEP_NAMES,
+)
+GPU_REQUIRED_CHECKS = (
+    "gpu-image",
+    "execution",
+    "nvidia-smi",
+    "docker-cli",
+    "docker-runtime",
+    "gpu-container",
+)
 
 QUALIFICATION_CHECK_FIELDS = ("name", "state", "required", "detail", "command")
 EVIDENCE_STATES = (PASS, FAIL, NOT_RUN, UNAVAILABLE, SIMULATED)
@@ -129,6 +155,87 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(payload, dict):
         return None, f"{path} must contain a JSON object"
     return payload, None
+
+
+def _required_checks_errors(
+    payload: Mapping[str, Any],
+    label: str,
+    required_names: Sequence[str],
+) -> list[str]:
+    checks = payload.get("checks")
+    if not isinstance(checks, list):
+        return [f"{label} checks are missing"]
+    expected = set(required_names)
+    errors: list[str] = []
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for item in checks:
+        if not isinstance(item, Mapping) or not isinstance(item.get("name"), str):
+            errors.append(f"{label} contains a malformed check")
+            continue
+        by_name[item["name"]] = item
+        if item.get("required") is True and item.get("state") != PASS and item["name"] not in expected:
+            errors.append(f"{label} required check {item['name']} is {item.get('state')!r}, not PASS")
+    for name in required_names:
+        item = by_name.get(name)
+        if item is None:
+            errors.append(f"{label} has no {name} check")
+        elif item.get("state") != PASS:
+            errors.append(f"{label} check {name} is {item.get('state')!r}, not PASS")
+    return errors
+
+
+def _evidence_errors(
+    payload: Mapping[str, Any],
+    report_path: Path,
+    label: str,
+) -> list[str]:
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return [f"{label} evidence is missing"]
+    errors: list[str] = []
+    for item in evidence:
+        if not isinstance(item, Mapping):
+            errors.append(f"{label} evidence contains a malformed entry")
+            continue
+        name = item.get("path")
+        digest = item.get("sha256")
+        if not _plain_file_name(name):
+            errors.append(f"{label} evidence path is invalid")
+            continue
+        if not isinstance(digest, str) or DIGEST_PATTERN.fullmatch(digest) is None:
+            errors.append(f"{label} evidence hash is invalid")
+            continue
+        evidence_path = report_path.parent / str(name)
+        if not evidence_path.is_file():
+            errors.append(f"{label} evidence file is missing: {name}")
+            continue
+        try:
+            actual = sha256_file(evidence_path)
+        except OSError as exc:
+            errors.append(f"{label} evidence file could not be hashed: {exc}")
+            continue
+        if actual != digest:
+            errors.append(f"{label} evidence hash does not match {name}")
+    return errors
+
+
+def _binding_evidence_errors(
+    report: Mapping[str, Any],
+    kind: str,
+    binding: Mapping[str, Any],
+) -> list[str]:
+    evidence = report.get("evidence")
+    if not isinstance(evidence, list):
+        return [f"qualification report has no {kind} evidence"]
+    matching = [item for item in evidence if isinstance(item, Mapping) and item.get("kind") == kind]
+    if not matching:
+        return [f"qualification report has no {kind} evidence"]
+    if not any(
+        item.get("sha256") == binding.get("sha256") and item.get("path") == binding.get("path")
+        for item in matching
+    ):
+        return [f"qualification {kind} evidence does not match its binding"]
+    return []
 
 
 def _aggregate(checks: Sequence[Mapping[str, Any]]) -> str:
@@ -328,6 +435,8 @@ def _deployment_binding(
     path: Path | None,
     manifest: Mapping[str, Any],
     manifest_sha: str,
+    *,
+    require_gpu: bool = False,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     if path is None:
         return None, ["a deployment verification report is required for this scope"]
@@ -342,8 +451,12 @@ def _deployment_binding(
     errors.extend(_subject_errors(payload.get("subject"), manifest))
     if payload.get("state") != PASS:
         errors.append(f"deployment report state is {payload.get('state')!r}, not PASS")
-    if not isinstance(payload.get("checks"), list):
-        errors.append("deployment report checks are missing")
+    gpu = payload.get("gpu")
+    if not isinstance(gpu, bool):
+        errors.append("deployment report gpu flag is missing")
+    elif require_gpu and gpu is not True:
+        errors.append("deployment report does not prove a GPU deployment")
+    errors.extend(_required_checks_errors(payload, "deployment report", DEPLOYMENT_REQUIRED_CHECKS))
     try:
         report_sha = sha256_file(path)
     except OSError as exc:
@@ -352,8 +465,9 @@ def _deployment_binding(
     binding = {
         "path": path.name,
         "sha256": report_sha,
+        "manifest_sha256": payload.get("manifest_sha256"),
         "state": payload.get("state"),
-        "gpu": payload.get("gpu"),
+        "gpu": gpu,
     }
     return binding, errors
 
@@ -371,6 +485,8 @@ def _rehearsal_binding(
     errors: list[str] = []
     if payload.get("schema_version") != REHEARSAL_SCHEMA_VERSION:
         errors.append(f"rollback rehearsal schema_version must be {REHEARSAL_SCHEMA_VERSION}")
+    if payload.get("executed") is not True:
+        errors.append("rollback rehearsal was not executed")
     if payload.get("state") != PASS or payload.get("verified") is not True:
         errors.append("rollback rehearsal did not pass")
     if payload.get("manifest_sha256") != manifest_sha:
@@ -388,6 +504,69 @@ def _rehearsal_binding(
         for field in ("tag", "commit", "source_repository"):
             if not isinstance(previous_subject.get(field), str):
                 errors.append(f"rollback rehearsal previous_subject.{field} is missing")
+    errors.extend(_required_checks_errors(payload, "rollback rehearsal", REHEARSAL_REQUIRED_CHECKS))
+
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        errors.append("rollback rehearsal steps are missing")
+    else:
+        by_name = {
+            item.get("name"): item
+            for item in steps
+            if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+        }
+        for name in STEP_NAMES:
+            item = by_name.get(name)
+            if item is None:
+                errors.append(f"rollback rehearsal has no {name} step")
+            elif item.get("state") != PASS:
+                errors.append(f"rollback rehearsal step {name} is {item.get('state')!r}, not PASS")
+
+    target_digests: dict[str, Any] = {}
+    target = payload.get("target")
+    if not isinstance(target, Mapping):
+        errors.append("rollback rehearsal target binding is missing")
+    else:
+        if target.get("manifest_sha256") != manifest_sha:
+            errors.append("rollback rehearsal target binding is not bound to the supplied manifest")
+        errors.extend(_subject_errors(target.get("subject"), manifest))
+        digests = target.get("digests")
+        if not isinstance(digests, Mapping):
+            errors.append("rollback rehearsal target digests are missing")
+        else:
+            target_digests = dict(digests)
+            for name, image in _image_map(manifest).items():
+                if target_digests.get(name) != image.get("digest"):
+                    errors.append(f"rollback rehearsal target digest for {name} does not match the manifest")
+
+    previous_digests: dict[str, Any] = {}
+    previous = payload.get("previous")
+    if not isinstance(previous, Mapping):
+        errors.append("rollback rehearsal previous binding is missing")
+    else:
+        if previous.get("manifest_sha256") != previous_sha:
+            errors.append("rollback rehearsal previous binding is not bound to previous_manifest_sha256")
+        digests = previous.get("digests")
+        if not isinstance(digests, Mapping):
+            errors.append("rollback rehearsal previous digests are missing")
+        else:
+            previous_digests = dict(digests)
+            for name, digest in previous_digests.items():
+                if (
+                    not isinstance(name, str)
+                    or not isinstance(digest, str)
+                    or DIGEST_PATTERN.fullmatch(digest) is None
+                ):
+                    errors.append("rollback rehearsal previous digests are invalid")
+                    break
+    if target_digests and previous_digests:
+        if set(previous_digests) != set(target_digests):
+            errors.append("rollback rehearsal previous digests do not cover the target images")
+        shared = set(target_digests) & set(previous_digests)
+        if not shared or all(target_digests[name] == previous_digests[name] for name in shared):
+            errors.append("rollback rehearsal target and previous digests are not different")
+
+    errors.extend(_evidence_errors(payload, path, "rollback rehearsal"))
     try:
         report_sha = sha256_file(path)
     except OSError as exc:
@@ -396,6 +575,7 @@ def _rehearsal_binding(
     binding = {
         "path": path.name,
         "sha256": report_sha,
+        "executed": payload.get("executed"),
         "state": payload.get("state"),
         "verified": payload.get("verified"),
         "previous_manifest_sha256": previous_sha,
@@ -416,18 +596,36 @@ def _gpu_binding(
     errors: list[str] = []
     if payload.get("schema_version") != GPU_SCHEMA_VERSION:
         errors.append(f"GPU runtime report schema_version must be {GPU_SCHEMA_VERSION}")
+    if payload.get("executed") is not True:
+        errors.append("GPU runtime qualification was not executed")
     if payload.get("state") != PASS or payload.get("verified") is not True:
         errors.append("GPU runtime report did not pass")
     if payload.get("manifest_sha256") != manifest_sha:
         errors.append("GPU runtime report is not bound to the supplied manifest")
     errors.extend(_subject_errors(payload.get("subject"), manifest))
+    errors.extend(_required_checks_errors(payload, "GPU runtime report", GPU_REQUIRED_CHECKS))
     gpu = payload.get("gpu")
+    api_gpu = _image_map(manifest).get("api-gpu")
+    expected_digest = api_gpu.get("digest") if isinstance(api_gpu, Mapping) else None
     if not isinstance(gpu, Mapping):
         errors.append("GPU runtime report gpu details are missing")
     else:
         for field in ("name", "runtime"):
             if not isinstance(gpu.get(field), str) or not gpu.get(field).strip():
                 errors.append(f"GPU runtime report gpu.{field} is missing")
+        runtime = gpu.get("runtime")
+        if isinstance(runtime, str) and runtime.lower() != "nvidia":
+            errors.append(f"GPU runtime report gpu.runtime is {runtime!r}, not 'nvidia'")
+        if gpu.get("container_cuda") is not True:
+            errors.append("GPU runtime report does not prove container CUDA access")
+        if expected_digest is None:
+            errors.append("manifest has no digest-pinned api-gpu image")
+        else:
+            if gpu.get("image_digest") != expected_digest:
+                errors.append("GPU runtime report image digest does not match the manifest")
+            image = gpu.get("image")
+            if not isinstance(image, str) or not image.endswith(f"@{expected_digest}"):
+                errors.append("GPU runtime report image is not digest-pinned to the manifest")
     try:
         report_sha = sha256_file(path)
     except OSError as exc:
@@ -436,6 +634,7 @@ def _gpu_binding(
     binding = {
         "path": path.name,
         "sha256": report_sha,
+        "executed": payload.get("executed"),
         "state": payload.get("state"),
         "verified": payload.get("verified"),
         "gpu": dict(gpu) if isinstance(gpu, Mapping) else None,
@@ -869,7 +1068,12 @@ def qualify_release(
     checks.append(_check("gpu-artifact", gpu_artifact_state, True, gpu_artifact_detail))
 
     if scope in DEPLOYMENT_SCOPES:
-        deployment, deployment_errors = _deployment_binding(deployment_report_path, manifest, manifest_sha)
+        deployment, deployment_errors = _deployment_binding(
+            deployment_report_path,
+            manifest,
+            manifest_sha,
+            require_gpu=profile == "production_qualification",
+        )
         checks.append(
             _check(
                 "deployment-report",
@@ -970,10 +1174,15 @@ def qualify_release(
         and scope == "full"
         and isinstance(verification, Mapping)
         and verification.get("production_verified") is True
+        and isinstance(deployment, Mapping)
+        and deployment.get("gpu") is True
         and isinstance(rehearsal, Mapping)
+        and rehearsal.get("executed") is True
         and rehearsal.get("verified") is True
         and isinstance(gpu_runtime, Mapping)
         and gpu_runtime.get("verified") is True
+        and isinstance(gpu_runtime.get("gpu"), Mapping)
+        and gpu_runtime["gpu"].get("container_cuda") is True
     )
     blockers = [
         f"{check['name']}: {check['state']} - {check['detail']}"
@@ -1021,6 +1230,9 @@ def qualification_report_errors(
     require_production: bool = False,
     verification_report_path: Path | None = None,
     publication_report_path: Path | None = None,
+    deployment_report_path: Path | None = None,
+    rehearsal_report_path: Path | None = None,
+    gpu_report_path: Path | None = None,
 ) -> list[str]:
     """Return every reason a qualification report cannot authorize this release."""
     if not isinstance(report, Mapping):
@@ -1077,6 +1289,69 @@ def qualification_report_errors(
             errors.append("qualification publication binding does not prove complete publication")
         elif not isinstance(publication.get("sha256"), str):
             errors.append("qualification publication binding has no evidence hash")
+
+    deployment = report.get("deployment")
+    rehearsal = report.get("rehearsal")
+    gpu_runtime = report.get("gpu_runtime")
+    if require_production:
+        for kind, binding in (
+            ("deployment-report", deployment),
+            ("rollback-rehearsal", rehearsal),
+            ("gpu-runtime", gpu_runtime),
+        ):
+            if not isinstance(binding, Mapping):
+                errors.append(f"qualification {kind} binding is missing")
+                continue
+            if not isinstance(binding.get("sha256"), str):
+                errors.append(f"qualification {kind} binding has no evidence hash")
+            if binding.get("state") != PASS:
+                errors.append(f"qualification {kind} binding state is {binding.get('state')!r}, not PASS")
+            errors.extend(_binding_evidence_errors(report, kind, binding))
+        if isinstance(deployment, Mapping):
+            if deployment.get("manifest_sha256") != expected_sha:
+                errors.append("qualification deployment binding is not bound to the manifest")
+            if deployment.get("gpu") is not True:
+                errors.append("qualification deployment binding does not prove a GPU deployment")
+        if isinstance(rehearsal, Mapping):
+            if rehearsal.get("executed") is not True:
+                errors.append("qualification rehearsal binding was not executed")
+            if rehearsal.get("verified") is not True:
+                errors.append("qualification rehearsal binding is not verified")
+            previous_sha = rehearsal.get("previous_manifest_sha256")
+            if not isinstance(previous_sha, str) or previous_sha == expected_sha:
+                errors.append(
+                    "qualification rehearsal binding does not identify a different previous manifest"
+                )
+        if isinstance(gpu_runtime, Mapping):
+            if gpu_runtime.get("verified") is not True:
+                errors.append("qualification GPU binding is not verified")
+            gpu = gpu_runtime.get("gpu")
+            if not isinstance(gpu, Mapping) or gpu.get("container_cuda") is not True:
+                errors.append("qualification GPU binding does not prove container CUDA access")
+
+    bindings_by_kind = {
+        "deployment-report": deployment,
+        "rollback-rehearsal": rehearsal,
+        "gpu-runtime": gpu_runtime,
+    }
+    for kind, supplied in (
+        ("deployment-report", deployment_report_path),
+        ("rollback-rehearsal", rehearsal_report_path),
+        ("gpu-runtime", gpu_report_path),
+    ):
+        if supplied is None:
+            continue
+        binding = bindings_by_kind[kind]
+        if not isinstance(binding, Mapping):
+            errors.append(f"qualification {kind} binding is missing; cannot compare the report")
+            continue
+        try:
+            actual = sha256_file(supplied)
+        except OSError as exc:
+            errors.append(f"could not hash {kind} report {supplied}: {exc}")
+            continue
+        if binding.get("sha256") != actual:
+            errors.append(f"qualification {kind} binding does not match the supplied report")
 
     if verification_report_path is not None:
         if not isinstance(verification, Mapping):

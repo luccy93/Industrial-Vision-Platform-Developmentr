@@ -14,6 +14,7 @@ from backend.tests.unit.release_evidence import (
     write_production_verification_report,
 )
 from backend.tests.unit.test_release_verification import make_release
+from tools.release.cli import main
 from tools.release.manifest import sha256_file
 from tools.release.rehearsal import (
     REHEARSAL_EVIDENCE_FIELDS,
@@ -291,3 +292,73 @@ def test_rehearsal_schema_matches_contract() -> None:
     assert set(schema["$defs"]["subject"]["required"]) == set(REHEARSAL_SUBJECT_FIELDS)
     assert set(schema["$defs"]["step"]["required"]) == set(REHEARSAL_STEP_FIELDS)
     assert set(schema["$defs"]["evidence"]["required"]) == set(REHEARSAL_EVIDENCE_FIELDS)
+
+
+def test_executed_rehearsal_requires_evidence_dir(tmp_path: Path) -> None:
+    manifest_path, _, previous_path, _, target_report, previous_report, runner = _setup(tmp_path)
+    with pytest.raises(RehearsalError, match="evidence directory"):
+        _rehearse(
+            manifest_path,
+            previous_path,
+            target_report=target_report,
+            previous_report=previous_report,
+            runner=runner,
+            tmp_path=tmp_path,
+            evidence_dir=None,
+        )
+
+
+def test_cli_execute_requires_evidence_dir(tmp_path: Path, capsys: Any) -> None:
+    manifest_path, _, previous_path, *_ = _setup(tmp_path)
+    code = main(
+        [
+            "rehearse-rollback",
+            "--manifest",
+            str(manifest_path),
+            "--previous-manifest",
+            str(previous_path),
+            "--execute",
+            "--output",
+            str(tmp_path / "rollback-rehearsal.json"),
+        ]
+    )
+    assert code == 1
+    assert "--execute requires --evidence-dir" in capsys.readouterr().err
+
+
+def test_cli_execute_requires_output(tmp_path: Path, capsys: Any) -> None:
+    manifest_path, _, previous_path, *_ = _setup(tmp_path)
+    code = main(
+        [
+            "rehearse-rollback",
+            "--manifest",
+            str(manifest_path),
+            "--previous-manifest",
+            str(previous_path),
+            "--execute",
+            "--evidence-dir",
+            str(tmp_path),
+        ]
+    )
+    assert code == 1
+    assert "--execute requires --output" in capsys.readouterr().err
+
+
+def test_cli_execute_requires_evidence_next_to_report(tmp_path: Path, capsys: Any) -> None:
+    manifest_path, _, previous_path, *_ = _setup(tmp_path)
+    code = main(
+        [
+            "rehearse-rollback",
+            "--manifest",
+            str(manifest_path),
+            "--previous-manifest",
+            str(previous_path),
+            "--execute",
+            "--evidence-dir",
+            str(tmp_path / "rehearsal-evidence"),
+            "--output",
+            str(tmp_path / "rollback-rehearsal.json"),
+        ]
+    )
+    assert code == 1
+    assert "--evidence-dir must be the directory that contains --output" in capsys.readouterr().err

@@ -37,13 +37,19 @@ Usage examples::
         --profile local_validation --scope artifact --tag v1.2.3 --commit <40-hex>
     python -m tools.release.cli qualify --manifest release-artifacts/release-manifest.json \\
         --artifacts-dir release-artifacts --profile production_qualification --scope full \\
-        --verification-report release-verification.json \\
-        --publication-report publication-report.json \\
-        --deployment-report deployment-report.json \\
-        --rehearsal-report rollback-rehearsal.json --gpu-report gpu-runtime.json \\
+        --verification-report release-artifacts/release-verification.json \\
+        --publication-report release-artifacts/publication-report.json \\
+        --deployment-report release-artifacts/deployment-report.json \\
+        --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json \\
+        --gpu-report release-artifacts/gpu-runtime.json \\
         --tag v1.2.3 --commit <40-hex>
-    python -m tools.release.cli check-qualification --report release-qualification.json \\
-        --manifest release-manifest.json --require-production
+    python -m tools.release.cli check-qualification --report release-artifacts/release-qualification.json \\
+        --manifest release-artifacts/release-manifest.json --require-production \\
+        --verification-report release-artifacts/release-verification.json \\
+        --publication-report release-artifacts/publication-report.json \\
+        --deployment-report release-artifacts/deployment-report.json \\
+        --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json \\
+        --gpu-report release-artifacts/gpu-runtime.json
     python -m tools.release.cli audit-workflows --root .
 
 Every command exits non-zero on a policy violation. Smoke passwords are read
@@ -405,6 +411,9 @@ def _build_parser() -> argparse.ArgumentParser:
     qualification_gate.add_argument("--manifest", type=Path, required=True)
     qualification_gate.add_argument("--verification-report", type=Path)
     qualification_gate.add_argument("--publication-report", type=Path)
+    qualification_gate.add_argument("--deployment-report", type=Path)
+    qualification_gate.add_argument("--rehearsal-report", type=Path)
+    qualification_gate.add_argument("--gpu-report", type=Path)
     qualification_gate.add_argument("--require-production", action="store_true")
 
     audit_parser = subparsers.add_parser(
@@ -640,6 +649,9 @@ def main(argv: list[str] | None = None) -> int:
                 require_production=args.require_production,
                 verification_report_path=args.verification_report,
                 publication_report_path=args.publication_report,
+                deployment_report_path=args.deployment_report,
+                rehearsal_report_path=args.rehearsal_report,
+                gpu_report_path=args.gpu_report,
             )
             if errors:
                 for error in errors:
@@ -670,6 +682,20 @@ def main(argv: list[str] | None = None) -> int:
             if not report["verified"]:
                 return 1
         elif args.command == "rehearse-rollback":
+            if args.execute:
+                if args.evidence_dir is None:
+                    raise RehearsalError(
+                        "--execute requires --evidence-dir so every rehearsal step is hash-verifiable"
+                    )
+                if args.output is None:
+                    raise RehearsalError(
+                        "--execute requires --output so the rehearsal report and its evidence are retained"
+                    )
+                if args.evidence_dir.resolve() != args.output.parent.resolve():
+                    raise RehearsalError(
+                        "--evidence-dir must be the directory that contains --output; "
+                        "qualification resolves rehearsal evidence relative to the report"
+                    )
             password = None
             if args.smoke_username:
                 password = os.environ.get(args.smoke_password_env)

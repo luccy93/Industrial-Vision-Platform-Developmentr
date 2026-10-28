@@ -185,6 +185,15 @@ with a reason. Never convert a missing GPU into a pass. The GitHub-hosted
 release runner has no NVIDIA GPU, so its manifest records
 `gpu_runtime_smoke: not_run`.
 
+V24 `production_qualification` consumes `gpu-runtime.json` and the GPU
+deployment report. The GPU report must have `executed: true`, prove the
+`nvidia` runtime and `container_cuda: true`, and reference the exact
+digest-pinned `api-gpu` image. The deployment report must be generated with
+`--gpu --running --preflight-report ... --report ...`, so it proves the GPU
+overlay, the bound preflight, the running services, and running image IDs.
+`--skip-container`, a CPU-only deployment, or a copied report cannot satisfy
+the production gate.
+
 ## Models
 
 Weights are deployment artifacts, never baked into images: mount

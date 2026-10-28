@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/release-qualification.schema.json",
   "title": "Industrial Vision Platform live release qualification report",
-  "description": "Qualification evidence produced by tools/release/qualification.py. The report is bound to the exact manifest bytes, release subject, verification report, publication digests, and every per-image evidence hash. PASS is the only successful state; NOT_RUN, UNAVAILABLE, and SIMULATED never authorize deployment. production_qualified is true only for the production_qualification profile at full scope with production verification, a passing rollback rehearsal, and verified GPU runtime.",
+  "description": "Qualification evidence produced by tools/release/qualification.py. The report is bound to the exact manifest bytes, release subject, verification report, publication digests, and every per-image evidence hash. PASS is the only successful state; NOT_RUN, UNAVAILABLE, and SIMULATED never authorize deployment. production_qualified is true only for the production_qualification profile at full scope with production verification, a GPU deployment, an executed rollback rehearsal with hash-verifiable evidence, and verified container-level GPU runtime.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -272,13 +272,16 @@
     "deploymentBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "sha256", "state", "gpu"],
+      "required": ["path", "sha256", "manifest_sha256", "state", "gpu"],
       "properties": {
         "path": {
           "type": "string"
         },
         "sha256": {
           "type": ["string", "null"]
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
         },
         "state": {
           "$ref": "#/$defs/state"
@@ -291,13 +294,23 @@
     "rehearsalBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "sha256", "state", "verified", "previous_manifest_sha256"],
+      "required": [
+        "path",
+        "sha256",
+        "executed",
+        "state",
+        "verified",
+        "previous_manifest_sha256"
+      ],
       "properties": {
         "path": {
           "type": "string"
         },
         "sha256": {
           "type": ["string", "null"]
+        },
+        "executed": {
+          "type": "boolean"
         },
         "state": {
           "$ref": "#/$defs/state"
@@ -313,13 +326,16 @@
     "gpuBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "sha256", "state", "verified", "gpu"],
+      "required": ["path", "sha256", "executed", "state", "verified", "gpu"],
       "properties": {
         "path": {
           "type": "string"
         },
         "sha256": {
           "type": ["string", "null"]
+        },
+        "executed": {
+          "type": "boolean"
         },
         "state": {
           "$ref": "#/$defs/state"
