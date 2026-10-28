@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/deployment-report.schema.json",
+  "title": "Industrial Vision Platform deployment verification report",
+  "description": "Deployment evidence produced by tools/release/deployment.py. The report is bound to the exact manifest bytes and release subject. PASS is the only successful state; NOT_RUN and UNAVAILABLE never authorize deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "manifest_sha256",
+    "subject",
+    "gpu",
+    "state",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "gpu": {
+      "type": "boolean"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

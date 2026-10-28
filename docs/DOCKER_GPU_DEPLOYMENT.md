@@ -124,7 +124,7 @@ stack never touches NVIDIA drivers or runtime. Live GPU inference was
 **not** validated in V17 (no hardware in the validation environment) —
 only configuration, dependency resolution, and CPU independence.
 
-### Release GPU verification and runtime honesty (V23)
+### Release GPU verification and runtime honesty (V23/V24)
 
 For a release deployment, use the digest-pinned GPU overlay
 (`compose.gpu.release.yaml`) and a production verification report. The
@@ -133,10 +133,32 @@ SBOM); it does **not** prove the GPU *runtime*. The report therefore keeps
 `artifact_status.gpu.state` separate from
 `artifact_status.gpu.runtime_state` / `runtime_verified`.
 
+V24 `gpu-qualify` produces runtime evidence on the GPU host. It proves
+`nvidia-smi` reports a device and driver, Docker registers the `nvidia`
+container runtime, and the digest-pinned `api-gpu` image starts with
+`--gpus all` and reports CUDA devices:
+
 ```powershell
+python -m tools.release.cli gpu-qualify `
+  --manifest release-manifest.json `
+  --execute `
+  --output gpu-runtime.json
+```
+
+Without `--execute` every check is `NOT_RUN`; `--skip-container` cannot
+produce a verified report.
+
+```powershell
+python -m tools.release.cli preflight `
+  --manifest release-manifest.json `
+  --repo-root . `
+  --gpu `
+  --output deployment-preflight.json
+
 python -m tools.release.cli verify-deploy `
   --manifest release-manifest.json `
   --report release-verification.json --require-verified `
+  --preflight-report deployment-preflight.json `
   --running --check-logs --gpu
 
 $env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
@@ -144,15 +166,18 @@ python -m tools.release.cli smoke `
   --api-url https://ops.example.com/api `
   --web-url https://ops.example.com `
   --username smoke@example.com `
+  --manifest release-manifest.json `
+  --tag v1.2.3 --commit <40-hex> `
   --output gpu-deployment-smoke.json
 ```
 
 Only mark GPU runtime as verified after all of these succeed on the GPU host:
 
-1. `nvidia-smi` shows the device.
-2. `docker run --rm --gpus all ... python -c "import torch; assert torch.cuda.is_available()"`
-   succeeds for the digest-pinned image.
-3. The GPU stack is running and the smoke report is `PASS`.
+1. `nvidia-smi` shows the device (recorded by `gpu-qualify`).
+2. `gpu-qualify --execute` proves Docker's NVIDIA runtime and a CUDA-capable
+   container start for the digest-pinned image.
+3. The GPU stack is running, the preflight is `PASS`, and the smoke report is
+   `PASS`.
 4. A real inference request completes with `MODEL_DEVICE=cuda`.
 
 If any step is missing, report `runtime_state: NOT_RUN` (or `UNAVAILABLE`)

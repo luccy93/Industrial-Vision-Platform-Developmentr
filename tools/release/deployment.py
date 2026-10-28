@@ -1,15 +1,19 @@
-"""Digest-pinned deployment verification and rollback planning (V23).
+"""Digest-pinned deployment verification and rollback planning (V23/V24).
 
 Verification resolves the Compose configuration with the manifest's exact
 digests, rejects local build definitions, can require an independently produced
-production verification report, can scan recent service logs for leaked
-credentials, and can compare a running stack's container image IDs with the
-manifest. Rollback planning always redeploys previous digests; it never
-reverses migrations automatically and never deletes the PostgreSQL volume.
+production verification report, can require a bound deployment preflight, can
+scan recent service logs for leaked credentials, and can compare a running
+stack's container image IDs with the manifest. Rollback planning always
+redeploys previous digests; it never reverses migrations automatically and
+never deletes the PostgreSQL volume.
 
 A rollback plan is refused unless it is backed by a production verification
 report for the target manifest, or the operator explicitly accepts an
 unverified emergency rollback.
+
+V24 deployment reports bind the exact manifest bytes and release subject so
+qualification cannot reuse them for a different release.
 """
 
 from __future__ import annotations
@@ -24,7 +28,13 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from tools.release.manifest import ManifestError, load_manifest, manifest_errors, sha256_file
+from tools.release.manifest import (
+    ManifestError,
+    load_manifest,
+    manifest_errors,
+    sha256_file,
+    utc_now_iso,
+)
 from tools.release.verification import (
     FAIL,
     NOT_RUN,
@@ -46,6 +56,18 @@ RUNNING_SERVICES = {
 }
 DEFAULT_CPU_COMPOSE = ("compose.yaml", "compose.release.yaml")
 DEFAULT_GPU_COMPOSE = ("compose.yaml", "compose.gpu.release.yaml")
+DEPLOYMENT_SCHEMA_VERSION = 1
+DEPLOYMENT_REPORT_FIELDS = (
+    "schema_version",
+    "generated_at",
+    "manifest_sha256",
+    "subject",
+    "gpu",
+    "state",
+    "checks",
+)
+DEPLOYMENT_SUBJECT_FIELDS = ("tag", "commit", "source_repository")
+DEPLOYMENT_CHECK_FIELDS = ("name", "state", "required", "detail", "command")
 
 # High-signal credential patterns. Redaction markers are deliberately excluded
 # so the log filter's own output never causes a false positive. Only pattern
@@ -116,6 +138,17 @@ def _image_refs(manifest: Mapping[str, Any]) -> dict[str, str]:
     if missing:
         raise DeploymentError(f"manifest is missing deployment images: {', '.join(missing)}")
     return refs
+
+
+def _subject(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    release = manifest.get("release")
+    if not isinstance(release, Mapping):
+        return {"tag": None, "commit": None, "source_repository": None}
+    return {
+        "tag": release.get("tag"),
+        "commit": release.get("commit"),
+        "source_repository": release.get("source_repository"),
+    }
 
 
 def deployment_environment(manifest: Mapping[str, Any], *, gpu: bool) -> dict[str, str]:
@@ -378,23 +411,25 @@ def _log_check(
     return _check("log-secrets", PASS, f"no credential patterns found in the last {tail} log lines", command)
 
 
-def verify_deployment(
+def deployment_config_checks(
     manifest_path: Path,
     *,
     compose_files: Sequence[Path],
     gpu: bool = False,
     project: str | None = None,
-    running: bool = False,
-    report_path: Path | None = None,
-    require_verified: bool = False,
-    check_logs: bool = False,
-    logs_tail: int = 500,
     expected_tag: str | None = None,
     expected_commit: str | None = None,
     runner: CommandRunner = default_runner,
     which: Callable[[str], str | None] = shutil.which,
     base_environment: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str] | None, dict[str, Any] | None]:
+    """Resolve the digest-pinned Compose configuration and return its checks.
+
+    The returned environment is ``None`` when Docker or Compose is
+    unavailable, and the returned payload is the parsed Compose JSON when
+    resolution succeeded. Preflight reuses these checks instead of running
+    Compose twice.
+    """
     try:
         manifest = load_manifest(manifest_path)
     except ManifestError as exc:
@@ -406,46 +441,44 @@ def verify_deployment(
     )
     if errors:
         raise DeploymentError("manifest is invalid:\n- " + "\n- ".join(errors))
-    checks: list[dict[str, Any]] = _report_checks(
-        manifest,
-        manifest_path=manifest_path,
-        report_path=report_path,
-        require_verified=require_verified,
-        gpu=gpu,
-    )
+    checks: list[dict[str, Any]] = []
     try:
         refs = _image_refs(manifest)
     except DeploymentError as exc:
         checks.append(_check("manifest-digests", FAIL, str(exc)))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, None, None
     checks.append(_check("manifest-digests", PASS, "all deployment images have immutable digests"))
 
     if which("docker") is None:
         checks.append(_check("compose-tool", UNAVAILABLE, "docker is not installed"))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, None, None
 
     environment = dict(base_environment or os.environ)
-    environment.update(deployment_environment(manifest, gpu=gpu))
+    try:
+        environment.update(deployment_environment(manifest, gpu=gpu))
+    except DeploymentError as exc:
+        checks.append(_check("manifest-digests", FAIL, str(exc)))
+        return manifest, checks, None, None
     config_args = _compose_args(compose_files, project, ["config", "--format", "json"])
     config_command = _command_text(config_args)
     try:
         result = runner(config_args, timeout=120, env=environment)
     except (OSError, subprocess.TimeoutExpired) as exc:
         checks.append(_check("compose-config", UNAVAILABLE, f"compose config failed: {exc}", config_command))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, environment, None
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "no output").strip()
         checks.append(_check("compose-config", FAIL, detail[:500], config_command))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, environment, None
     try:
         payload = _load_compose_json(result.stdout)
     except (DeploymentError, json.JSONDecodeError) as exc:
         checks.append(_check("compose-config", FAIL, f"invalid compose JSON: {exc}", config_command))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, environment, None
     services = payload.get("services") if isinstance(payload, Mapping) else None
     if not isinstance(services, Mapping):
         checks.append(_check("compose-config", FAIL, "compose JSON has no services object", config_command))
-        return {"state": _aggregate(checks), "checks": checks}
+        return manifest, checks, environment, None
     checks.append(_check("compose-config", PASS, "compose configuration resolves", config_command))
 
     expected = {service: refs[image_name] for service, image_name in SERVICE_IMAGES[gpu].items()}
@@ -476,23 +509,108 @@ def verify_deployment(
         checks.append(
             _check(f"compose-pin:{service}", PASS, f"service {service} is pinned to {expected_ref}")
         )
+    return manifest, checks, environment, payload if isinstance(payload, Mapping) else None
 
-    if check_logs:
+
+def _preflight_check(
+    manifest: Mapping[str, Any],
+    manifest_path: Path,
+    path: Path,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return _check("preflight", FAIL, f"could not read preflight report {path}: {exc}")
+    except json.JSONDecodeError as exc:
+        return _check("preflight", FAIL, f"preflight report {path} is not valid JSON: {exc}")
+    from tools.release.preflight import preflight_report_errors
+
+    errors = preflight_report_errors(payload, manifest, manifest_path=manifest_path)
+    if errors:
+        return _check("preflight", FAIL, "; ".join(errors[:8]))
+    return _check("preflight", PASS, f"preflight report is bound to the manifest ({path})")
+
+
+def _deployment_report(
+    manifest_path: Path,
+    manifest: Mapping[str, Any],
+    *,
+    gpu: bool,
+    checks: Sequence[Mapping[str, Any]],
+    now: Callable[[], str],
+) -> dict[str, Any]:
+    try:
+        manifest_sha = sha256_file(manifest_path)
+    except OSError as exc:
+        raise DeploymentError(f"could not hash manifest {manifest_path}: {exc}") from exc
+    return {
+        "schema_version": DEPLOYMENT_SCHEMA_VERSION,
+        "generated_at": now(),
+        "manifest_sha256": manifest_sha,
+        "subject": _subject(manifest),
+        "gpu": gpu,
+        "state": _aggregate(checks),
+        "checks": list(checks),
+    }
+
+
+def verify_deployment(
+    manifest_path: Path,
+    *,
+    compose_files: Sequence[Path],
+    gpu: bool = False,
+    project: str | None = None,
+    running: bool = False,
+    report_path: Path | None = None,
+    require_verified: bool = False,
+    preflight_report_path: Path | None = None,
+    check_logs: bool = False,
+    logs_tail: int = 500,
+    expected_tag: str | None = None,
+    expected_commit: str | None = None,
+    runner: CommandRunner = default_runner,
+    which: Callable[[str], str | None] = shutil.which,
+    base_environment: Mapping[str, str] | None = None,
+    now: Callable[[], str] = utc_now_iso,
+) -> dict[str, Any]:
+    manifest, config_checks, environment, payload = deployment_config_checks(
+        manifest_path,
+        compose_files=compose_files,
+        gpu=gpu,
+        project=project,
+        expected_tag=expected_tag,
+        expected_commit=expected_commit,
+        runner=runner,
+        which=which,
+        base_environment=base_environment,
+    )
+    checks: list[dict[str, Any]] = _report_checks(
+        manifest,
+        manifest_path=manifest_path,
+        report_path=report_path,
+        require_verified=require_verified,
+        gpu=gpu,
+    )
+    checks.extend(config_checks)
+    if preflight_report_path is not None:
+        checks.append(_preflight_check(manifest, manifest_path, preflight_report_path))
+
+    if payload is not None and check_logs:
         checks.append(
             _log_check(
                 compose_files=compose_files,
                 project=project,
-                environment=environment,
+                environment=environment or {},
                 runner=runner,
                 tail=logs_tail,
             )
         )
 
-    if running:
+    if payload is not None and running:
         ps_args = _compose_args(compose_files, project, ["ps", "--format", "json"])
         ps_command = _command_text(ps_args)
         try:
-            ps_result = runner(ps_args, timeout=120, env=environment)
+            ps_result = runner(ps_args, timeout=120, env=environment or {})
         except (OSError, subprocess.TimeoutExpired) as exc:
             checks.append(_check("running-services", UNAVAILABLE, f"compose ps failed: {exc}", ps_command))
         else:
@@ -598,7 +716,7 @@ def verify_deployment(
                             )
                         )
 
-    return {"state": _aggregate(checks), "checks": checks}
+    return _deployment_report(manifest_path, manifest, gpu=gpu, checks=checks, now=now)
 
 
 def render_rollback_plan(

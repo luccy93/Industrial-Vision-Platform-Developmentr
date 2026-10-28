@@ -226,9 +226,9 @@ Scopes add evidence in order:
   publication is required with `--require-live-evidence` or any non-local
   profile.
 - `deployment`: adds a deployment report bound to the same manifest bytes and
-  subject.
-- `full`: adds a passing rollback rehearsal. `production_qualified` requires
-  `full`.
+  subject, plus a bound preflight report when supplied.
+- `full`: adds an executed rollback rehearsal with `executed: true`,
+  `state: PASS`, and `verified: true`. `production_qualified` requires `full`.
 
 ```powershell
 # Probe the host before claiming evidence you cannot produce.
@@ -319,17 +319,33 @@ Verify the resolved configuration and the running stack before accepting the
 deployment:
 
 ```powershell
+python -m tools.release.cli preflight `
+  --manifest release-manifest.json `
+  --repo-root . `
+  --previous-manifest previous-manifest.json `
+  --output deployment-preflight.json
+
 python -m tools.release.cli verify-deploy `
   --manifest release-manifest.json `
   --report release-verification.json --require-verified `
+  --preflight-report deployment-preflight.json `
   --running --check-logs
 ```
 
+`preflight` resolves the digest-pinned Compose configuration, parses the
+Alembic revision graph without executing migrations, requires exactly one head
+with no missing parents, rejects automatic `alembic downgrade` in deployment
+files, proves PostgreSQL data is mounted on a named volume, and requires the
+generated rollback plan to take a `pg_dump` backup without deleting the volume.
+It reports `UNAVAILABLE` when Docker cannot resolve Compose; it never treats a
+missing check as a pass.
+
 `verify-deploy` rejects mutable tags and local `build:` definitions, requires
 the manifest digests to be exactly what Compose resolves, compares running
-container image IDs with the manifest, and can scan recent service logs for
-credential patterns. Findings report pattern names only; matched values are
-never printed.
+container image IDs with the manifest, can scan recent service logs for
+credential patterns, and rejects a preflight report that is not bound to the
+same manifest bytes and subject. Findings report pattern names only; matched
+values are never printed.
 
 Then run the independent HTTP/auth/WebSocket smoke:
 
@@ -339,14 +355,49 @@ python -m tools.release.cli smoke `
   --api-url https://ops.example.com/api `
   --web-url https://ops.example.com `
   --username smoke@example.com `
+  --manifest release-manifest.json `
+  --tag v1.2.3 --commit <40-hex> `
   --output deployment-smoke.json
 ```
 
-The password is read from `IVP_SMOKE_PASSWORD`, never from the command line.
-Missing credentials or a missing web URL produce required `NOT_RUN` checks,
-so the report can never claim a verified deployment. An unauthenticated
-WebSocket that stays open, or an authenticated socket that is refused, is a
-hard failure. See `docs/PRODUCTION_OPERATIONS.md` for the operational flow.
+When `--manifest` is supplied, the smoke report records the exact manifest
+SHA-256 and release subject, so qualification can reject a smoke report reused
+for different release bytes. The password is read from `IVP_SMOKE_PASSWORD`,
+never from the command line. Missing credentials or a missing web URL produce
+required `NOT_RUN` checks, so the report can never claim a verified deployment.
+An unauthenticated WebSocket that stays open, or an authenticated socket that
+is refused, is a hard failure. See `docs/PRODUCTION_OPERATIONS.md` for the
+operational flow.
+
+## Rollback rehearsal (V24)
+
+A rollback plan is not a rollback rehearsal. `rehearse-rollback` executes the
+full sequence on the target host: deploy the previous release by digest,
+verify it, smoke it, deploy the target release by digest, verify it, smoke it,
+redeploy the previous digests, then verify and smoke the restored stack. It
+requires independent production verification reports for both releases, smoke
+credentials, and Docker. If target verification fails, target smoke is skipped
+and the rollback is still attempted so recovery is proven; the rehearsal
+remains `FAIL`.
+
+```powershell
+$env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
+python -m tools.release.cli rehearse-rollback `
+  --manifest release-manifest.json `
+  --previous-manifest previous-manifest.json `
+  --target-report release-verification.json `
+  --previous-report previous-release-verification.json `
+  --smoke-api-url https://staging.example.com/api `
+  --smoke-web-url https://staging.example.com `
+  --smoke-username smoke@example.com `
+  --execute --evidence-dir rehearsal-evidence `
+  --output rollback-rehearsal.json
+```
+
+Without `--execute` every step is `NOT_RUN`. Evidence written by the rehearsal
+is listed with its SHA-256 in the report, and the report binds both the target
+and previous manifest hashes, subjects, and digests. `full` scope qualification
+requires `executed: true`, `state: PASS`, and `verified: true`.
 
 ## GPU runtime validation
 
@@ -359,13 +410,21 @@ gpu_runtime_smoke: not_run
 gpu_runtime_smoke_reason: GPU infrastructure unavailable on the GitHub-hosted release runner
 ```
 
-That is an honest gap, not a pass. Before relying on the GPU image, validate
-it on a CUDA host with the NVIDIA Container Toolkit:
+That is an honest gap, not a pass. Before relying on the GPU image, qualify the
+runtime on a CUDA host with the NVIDIA Container Toolkit:
 
 ```powershell
-docker run --rm --gpus all ghcr.io/<owner>/<repo>/api-gpu@sha256:<digest> `
-  python -c "import torch; assert torch.cuda.is_available()"
+python -m tools.release.cli gpu-qualify `
+  --manifest release-manifest.json `
+  --execute `
+  --output gpu-runtime.json
 ```
+
+`gpu-qualify` proves `nvidia-smi` reports a device and driver, Docker registers
+the `nvidia` container runtime, and the digest-pinned `api-gpu` image starts
+with `--gpus all` and reports CUDA devices. Without `--execute` every check is
+`NOT_RUN`; a missing driver or runtime is `UNAVAILABLE` or `FAIL`, never a pass.
+`--skip-container` intentionally cannot produce a verified report.
 
 Then start the GPU release stack, require a production verification report,
 and run the smoke tool on the GPU host:
@@ -381,6 +440,8 @@ python -m tools.release.cli smoke `
   --api-url https://ops.example.com/api `
   --web-url https://ops.example.com `
   --username smoke@example.com `
+  --manifest release-manifest.json `
+  --tag v1.2.3 --commit <40-hex> `
   --output gpu-deployment-smoke.json
 ```
 
@@ -469,7 +530,10 @@ pytest backend/tests/unit/test_release_verification.py `
 
 # V24 qualification and prerequisite probes
 pytest backend/tests/unit/test_release_qualification.py `
-       backend/tests/unit/test_release_prerequisites.py -q
+       backend/tests/unit/test_release_prerequisites.py `
+       backend/tests/unit/test_release_preflight.py `
+       backend/tests/unit/test_release_rehearsal.py `
+       backend/tests/unit/test_release_gpu.py -q
 
 # Digest overlays resolve without a daemon
 $env:IVP_API_IMAGE="ghcr.io/example/api@sha256:<64-hex>"

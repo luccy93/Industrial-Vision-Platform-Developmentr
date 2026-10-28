@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/rollback-rehearsal.schema.json",
+  "title": "Industrial Vision Platform rollback rehearsal report",
+  "description": "Rollback rehearsal evidence produced by tools/release/rehearsal.py. A plan is not a rehearsal: executed must be true and every required step must PASS before verified is true. The report binds both the target and previous manifest bytes, subjects, digests, and every written evidence hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "executed",
+    "state",
+    "verified",
+    "manifest_sha256",
+    "subject",
+    "previous_manifest_sha256",
+    "previous_subject",
+    "target",
+    "previous",
+    "checks",
+    "steps",
+    "evidence",
+    "blockers",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "previous_manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "previous_subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "target": {
+      "$ref": "#/$defs/release"
+    },
+    "previous": {
+      "$ref": "#/$defs/release"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "subject", "digests"],
+      "properties": {
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "digests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "summary": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["state", "verified", "checks"],
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "verified": {
+          "type": ["boolean", "null"]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state", "required"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/$defs/state"
+              },
+              "required": {
+                "type": ["boolean", "null"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "state",
+        "detail",
+        "commands",
+        "checks",
+        "deployment",
+        "smoke",
+        "evidence"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state", "required"],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/$defs/state"
+              },
+              "required": {
+                "type": ["boolean", "null"]
+              }
+            }
+          }
+        },
+        "deployment": {
+          "$ref": "#/$defs/summary"
+        },
+        "smoke": {
+          "$ref": "#/$defs/summary"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

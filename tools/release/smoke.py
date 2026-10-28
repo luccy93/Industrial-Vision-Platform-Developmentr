@@ -17,7 +17,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from tools.release.manifest import utc_now_iso
+from tools.release.manifest import (
+    ManifestError,
+    load_manifest,
+    manifest_errors,
+    sha256_file,
+    utc_now_iso,
+)
 from tools.release.verification import FAIL, NOT_RUN, PASS, UNAVAILABLE
 
 SMOKE_SCHEMA_VERSION = 1
@@ -65,6 +71,17 @@ def _aggregate(checks: list[Mapping[str, Any]]) -> str:
 
 def _api_url(base: str, path: str) -> str:
     return base.rstrip("/") + path
+
+
+def _subject(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    release = manifest.get("release")
+    if not isinstance(release, Mapping):
+        return {"tag": None, "commit": None, "source_repository": None}
+    return {
+        "tag": release.get("tag"),
+        "commit": release.get("commit"),
+        "source_repository": release.get("source_repository"),
+    }
 
 
 def _websocket_base(api_url: str, explicit: str | None) -> str:
@@ -325,6 +342,9 @@ def run_smoke(
     password: str | None = None,
     timeout: float = 10.0,
     verify_tls: bool = True,
+    manifest_path: Path | None = None,
+    expected_tag: str | None = None,
+    expected_commit: str | None = None,
     transport: httpx.BaseTransport | None = None,
     ws_connect: Callable[[str, float], Any] | None = None,
     now: Callable[[], str] = utc_now_iso,
@@ -333,6 +353,25 @@ def run_smoke(
         raise SmokeError("api_url is required")
     if username is not None and password is None:
         raise SmokeError("a password is required when a smoke username is supplied")
+    manifest_sha: str | None = None
+    subject: dict[str, Any] | None = None
+    if manifest_path is not None:
+        try:
+            manifest = load_manifest(manifest_path)
+        except ManifestError as exc:
+            raise SmokeError(str(exc)) from exc
+        errors = manifest_errors(
+            manifest,
+            expected_tag=expected_tag,
+            expected_commit=expected_commit,
+        )
+        if errors:
+            raise SmokeError("manifest is invalid:\n- " + "\n- ".join(errors))
+        try:
+            manifest_sha = sha256_file(manifest_path)
+        except OSError as exc:
+            raise SmokeError(f"could not hash manifest {manifest_path}: {exc}") from exc
+        subject = _subject(manifest)
     checks: list[dict[str, Any]] = []
     client = httpx.Client(
         timeout=timeout,
@@ -494,6 +533,8 @@ def run_smoke(
     return {
         "schema_version": SMOKE_SCHEMA_VERSION,
         "generated_at": now(),
+        "manifest_sha256": manifest_sha,
+        "subject": subject,
         "targets": {"api": api_url, "web": web_url, "websocket": ws_base},
         "overall_state": overall,
         "verified": verified,

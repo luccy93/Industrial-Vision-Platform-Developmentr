@@ -13,7 +13,20 @@ Usage examples::
     python -m tools.release.cli check-report --report release-verification.json \\
         --manifest release-manifest.json --require-production
     python -m tools.release.cli verify-deploy --manifest release-manifest.json \\
-        --report release-verification.json --require-verified --running --check-logs
+        --report release-verification.json --require-verified --running --check-logs \\
+        --preflight-report deployment-preflight.json
+    python -m tools.release.cli preflight --manifest release-manifest.json \\
+        --repo-root . --previous-manifest previous-manifest.json \\
+        --output deployment-preflight.json
+    python -m tools.release.cli rehearse-rollback --manifest release-manifest.json \\
+        --previous-manifest previous-manifest.json \\
+        --target-report release-verification.json \\
+        --previous-report previous-release-verification.json \\
+        --smoke-api-url https://staging.example.com --smoke-username smoke \\
+        --execute --evidence-dir rehearsal-evidence \\
+        --output rollback-rehearsal.json
+    python -m tools.release.cli gpu-qualify --manifest release-manifest.json \\
+        --execute --output gpu-runtime.json
     python -m tools.release.cli rollback-plan --manifest previous-manifest.json \\
         --report previous-release-verification.json
     python -m tools.release.cli smoke --api-url https://ops.example.com/api \\
@@ -54,6 +67,12 @@ from tools.release.deployment import (
     verification_report_errors,
     verify_deployment,
 )
+from tools.release.gpu import (
+    GpuError,
+    qualify_gpu_runtime,
+    render_gpu_summary,
+    write_gpu_report,
+)
 from tools.release.identity import (
     REQUIRED_IMAGES,
     IdentityError,
@@ -68,6 +87,12 @@ from tools.release.manifest import (
     render_summary,
     validate_manifest,
     write_manifest,
+)
+from tools.release.preflight import (
+    PreflightError,
+    render_preflight_summary,
+    run_preflight,
+    write_preflight_report,
 )
 from tools.release.prerequisites import (
     PrerequisiteError,
@@ -90,6 +115,12 @@ from tools.release.qualification import (
     write_qualification_report,
 )
 from tools.release.registry import RegistryError, check_release_conflicts
+from tools.release.rehearsal import (
+    RehearsalError,
+    render_rehearsal_summary,
+    run_rollback_rehearsal,
+    write_rehearsal_report,
+)
 from tools.release.smoke import (
     SmokeError,
     render_smoke_summary,
@@ -214,6 +245,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     deploy_parser.add_argument("--manifest", type=Path, required=True)
     deploy_parser.add_argument("--report", type=Path)
+    deploy_parser.add_argument("--preflight-report", type=Path)
     deploy_parser.add_argument("--require-verified", action="store_true")
     deploy_parser.add_argument("--check-logs", action="store_true")
     deploy_parser.add_argument("--logs-tail", type=int, default=500)
@@ -248,7 +280,62 @@ def _build_parser() -> argparse.ArgumentParser:
     smoke_parser.add_argument("--password-env", default="IVP_SMOKE_PASSWORD")
     smoke_parser.add_argument("--timeout", type=float, default=10.0)
     smoke_parser.add_argument("--insecure", action="store_true")
+    smoke_parser.add_argument("--manifest", type=Path)
+    smoke_parser.add_argument("--tag")
+    smoke_parser.add_argument("--commit")
     smoke_parser.add_argument("--output", type=Path)
+
+    preflight_parser = subparsers.add_parser(
+        "preflight",
+        help="prove Compose, migration, volume, and rollback safety before deployment",
+    )
+    preflight_parser.add_argument("--manifest", type=Path, required=True)
+    preflight_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    preflight_parser.add_argument("--compose", action="append", default=None)
+    preflight_parser.add_argument("--gpu", action="store_true")
+    preflight_parser.add_argument("--project")
+    preflight_parser.add_argument("--previous-manifest", type=Path)
+    preflight_parser.add_argument("--tag")
+    preflight_parser.add_argument("--commit")
+    preflight_parser.add_argument("--previous-tag")
+    preflight_parser.add_argument("--previous-commit")
+    preflight_parser.add_argument("--output", type=Path)
+
+    rehearsal_parser = subparsers.add_parser(
+        "rehearse-rollback",
+        help="execute and verify a digest-pinned rollback rehearsal",
+    )
+    rehearsal_parser.add_argument("--manifest", type=Path, required=True)
+    rehearsal_parser.add_argument("--previous-manifest", type=Path, required=True)
+    rehearsal_parser.add_argument("--target-report", type=Path)
+    rehearsal_parser.add_argument("--previous-report", type=Path)
+    rehearsal_parser.add_argument("--compose", action="append", default=None)
+    rehearsal_parser.add_argument("--gpu", action="store_true")
+    rehearsal_parser.add_argument("--project")
+    rehearsal_parser.add_argument("--execute", action="store_true")
+    rehearsal_parser.add_argument("--smoke-api-url")
+    rehearsal_parser.add_argument("--smoke-web-url")
+    rehearsal_parser.add_argument("--smoke-username")
+    rehearsal_parser.add_argument("--smoke-password-env", default="IVP_SMOKE_PASSWORD")
+    rehearsal_parser.add_argument("--smoke-timeout", type=float, default=10.0)
+    rehearsal_parser.add_argument("--insecure", action="store_true")
+    rehearsal_parser.add_argument("--evidence-dir", type=Path)
+    rehearsal_parser.add_argument("--tag")
+    rehearsal_parser.add_argument("--commit")
+    rehearsal_parser.add_argument("--previous-tag")
+    rehearsal_parser.add_argument("--previous-commit")
+    rehearsal_parser.add_argument("--output", type=Path)
+
+    gpu_parser = subparsers.add_parser(
+        "gpu-qualify",
+        help="prove the NVIDIA driver, Docker runtime, and GPU container access",
+    )
+    gpu_parser.add_argument("--manifest", type=Path, required=True)
+    gpu_parser.add_argument("--execute", action="store_true")
+    gpu_parser.add_argument("--skip-container", action="store_true")
+    gpu_parser.add_argument("--tag")
+    gpu_parser.add_argument("--commit")
+    gpu_parser.add_argument("--output", type=Path)
 
     publication_parser = subparsers.add_parser(
         "publication-report", help="report complete, partial, or failed image publication"
@@ -419,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
                 running=args.running,
                 report_path=args.report,
                 require_verified=args.require_verified,
+                preflight_report_path=args.preflight_report,
                 check_logs=args.check_logs,
                 logs_tail=args.logs_tail,
                 expected_tag=args.tag,
@@ -465,6 +553,9 @@ def main(argv: list[str] | None = None) -> int:
                 password=password,
                 timeout=args.timeout,
                 verify_tls=not args.insecure,
+                manifest_path=args.manifest,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
             )
             if args.output is not None:
                 write_smoke_report(report, args.output)
@@ -555,6 +646,82 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"error: {error}", file=sys.stderr)
                 return 1
             print(f"qualification report authorizes deployment: {args.report}")
+        elif args.command == "preflight":
+            compose_files = (
+                [Path(item) for item in args.compose]
+                if args.compose
+                else [Path(item) for item in (DEFAULT_GPU_COMPOSE if args.gpu else DEFAULT_CPU_COMPOSE)]
+            )
+            report = run_preflight(
+                args.manifest,
+                repo_root=args.repo_root,
+                compose_files=compose_files,
+                gpu=args.gpu,
+                project=args.project,
+                previous_manifest_path=args.previous_manifest,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_previous_tag=args.previous_tag,
+                expected_previous_commit=args.previous_commit,
+            )
+            if args.output is not None:
+                write_preflight_report(report, args.output)
+            sys.stdout.write(render_preflight_summary(report))
+            if not report["verified"]:
+                return 1
+        elif args.command == "rehearse-rollback":
+            password = None
+            if args.smoke_username:
+                password = os.environ.get(args.smoke_password_env)
+                if not password:
+                    raise RehearsalError(
+                        f"set {args.smoke_password_env} to the smoke user's password; "
+                        "passwords are never accepted on the command line"
+                    )
+            compose_files = (
+                [Path(item) for item in args.compose]
+                if args.compose
+                else [Path(item) for item in (DEFAULT_GPU_COMPOSE if args.gpu else DEFAULT_CPU_COMPOSE)]
+            )
+            report = run_rollback_rehearsal(
+                args.manifest,
+                args.previous_manifest,
+                compose_files=compose_files,
+                gpu=args.gpu,
+                project=args.project,
+                execute=args.execute,
+                target_verification_report=args.target_report,
+                previous_verification_report=args.previous_report,
+                smoke_api_url=args.smoke_api_url,
+                smoke_web_url=args.smoke_web_url,
+                smoke_username=args.smoke_username,
+                smoke_password=password,
+                smoke_timeout=args.smoke_timeout,
+                smoke_verify_tls=not args.insecure,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_previous_tag=args.previous_tag,
+                expected_previous_commit=args.previous_commit,
+                evidence_dir=args.evidence_dir,
+            )
+            if args.output is not None:
+                write_rehearsal_report(report, args.output)
+            sys.stdout.write(render_rehearsal_summary(report))
+            if not report["verified"]:
+                return 1
+        elif args.command == "gpu-qualify":
+            report = qualify_gpu_runtime(
+                args.manifest,
+                execute=args.execute,
+                run_container=not args.skip_container,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+            )
+            if args.output is not None:
+                write_gpu_report(report, args.output)
+            sys.stdout.write(render_gpu_summary(report))
+            if not report["verified"]:
+                return 1
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -564,11 +731,14 @@ def main(argv: list[str] | None = None) -> int:
             print("workflows are pinned")
     except (
         DeploymentError,
+        GpuError,
         IdentityError,
         ManifestError,
+        PreflightError,
         PrerequisiteError,
         PublicationError,
         QualificationError,
+        RehearsalError,
         RegistryError,
         SmokeError,
         VerificationError,

@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/gpu-runtime.schema.json",
+  "title": "Industrial Vision Platform GPU runtime qualification report",
+  "description": "GPU runtime evidence produced by tools/release/gpu.py. It proves the NVIDIA driver, Docker NVIDIA runtime, and the digest-pinned api-gpu image with CUDA access. Without execution every check is NOT_RUN; missing hardware or runtime is UNAVAILABLE or FAIL.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "executed",
+    "state",
+    "verified",
+    "manifest_sha256",
+    "subject",
+    "gpu",
+    "checks",
+    "blockers",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "gpu": {
+      "$ref": "#/$defs/gpu"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "gpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "driver_version",
+        "memory",
+        "runtime",
+        "image",
+        "image_digest",
+        "container_cuda"
+      ],
+      "properties": {
+        "name": {
+          "type": ["string", "null"]
+        },
+        "driver_version": {
+          "type": ["string", "null"]
+        },
+        "memory": {
+          "type": ["string", "null"]
+        },
+        "runtime": {
+          "type": ["string", "null"]
+        },
+        "image": {
+          "type": ["string", "null"]
+        },
+        "image_digest": {
+          "type": ["string", "null"]
+        },
+        "container_cuda": {
+          "type": "boolean"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

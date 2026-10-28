@@ -9,8 +9,12 @@ from typing import Any
 
 import pytest
 
-from backend.tests.unit.test_release_verification import make_release
+from backend.tests.unit.test_release_verification import REPO_ROOT, make_release
 from tools.release.deployment import (
+    DEPLOYMENT_CHECK_FIELDS,
+    DEPLOYMENT_REPORT_FIELDS,
+    DEPLOYMENT_SCHEMA_VERSION,
+    DEPLOYMENT_SUBJECT_FIELDS,
     DeploymentError,
     deployment_environment,
     render_rollback_plan,
@@ -19,6 +23,7 @@ from tools.release.deployment import (
     verify_deployment,
 )
 from tools.release.manifest import sha256_file
+from tools.release.preflight import REQUIRED_PREFLIGHT_CHECKS
 from tools.release.verification import FAIL, NOT_RUN, PASS, UNAVAILABLE
 
 
@@ -412,3 +417,116 @@ def test_rollback_plan_rejects_invalid_report(tmp_path: Path) -> None:
     )
     with pytest.raises(DeploymentError, match="not valid"):
         render_rollback_plan(manifest_path, verification_report_path=report_path)
+
+
+def _preflight_report(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    **overrides: Any,
+) -> dict[str, Any]:
+    release = manifest["release"]
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "generated_at": "2026-10-24T00:00:00Z",
+        "manifest_sha256": sha256_file(manifest_path),
+        "subject": {
+            "tag": release["tag"],
+            "commit": release["commit"],
+            "source_repository": release["source_repository"],
+        },
+        "gpu": False,
+        "state": PASS,
+        "verified": True,
+        "checks": [
+            {
+                "name": name,
+                "state": PASS,
+                "required": True,
+                "detail": "ok",
+                "command": None,
+            }
+            for name in REQUIRED_PREFLIGHT_CHECKS
+        ],
+        "blockers": [],
+        "limitations": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_deployment_report_binds_manifest_and_subject(tmp_path: Path) -> None:
+    manifest_path, _, manifest = make_release(tmp_path)
+    report = verify_deployment(
+        manifest_path,
+        compose_files=[tmp_path / "compose.yaml"],
+        runner=_runner(_compose_payload(manifest)),
+        which=lambda name: f"/usr/bin/{name}",
+        base_environment={},
+        now=lambda: "2026-10-24T00:00:00Z",
+    )
+    assert set(report) == set(DEPLOYMENT_REPORT_FIELDS)
+    assert report["schema_version"] == DEPLOYMENT_SCHEMA_VERSION
+    assert report["generated_at"] == "2026-10-24T00:00:00Z"
+    assert report["manifest_sha256"] == sha256_file(manifest_path)
+    assert report["subject"] == {
+        "tag": manifest["release"]["tag"],
+        "commit": manifest["release"]["commit"],
+        "source_repository": manifest["release"]["source_repository"],
+    }
+    assert report["gpu"] is False
+
+
+def test_deployment_requires_bound_preflight(tmp_path: Path) -> None:
+    manifest_path, _, manifest = make_release(tmp_path)
+    report_path = _write_report(tmp_path, _report(manifest_path, manifest))
+    preflight_path = tmp_path / "deployment-preflight.json"
+    preflight_path.write_text(
+        json.dumps(_preflight_report(manifest_path, manifest)),
+        encoding="utf-8",
+    )
+    report = verify_deployment(
+        manifest_path,
+        compose_files=[tmp_path / "compose.yaml"],
+        report_path=report_path,
+        require_verified=True,
+        preflight_report_path=preflight_path,
+        runner=_runner(_compose_payload(manifest)),
+        which=lambda name: f"/usr/bin/{name}",
+        base_environment={},
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["preflight"]["state"] == PASS
+    assert report["state"] == PASS
+
+
+def test_deployment_rejects_preflight_bound_to_other_manifest(tmp_path: Path) -> None:
+    manifest_path, _, manifest = make_release(tmp_path)
+    report_path = _write_report(tmp_path, _report(manifest_path, manifest))
+    preflight_path = tmp_path / "deployment-preflight.json"
+    preflight_path.write_text(
+        json.dumps(_preflight_report(manifest_path, manifest, manifest_sha256="sha256:" + "f" * 64)),
+        encoding="utf-8",
+    )
+    report = verify_deployment(
+        manifest_path,
+        compose_files=[tmp_path / "compose.yaml"],
+        report_path=report_path,
+        require_verified=True,
+        preflight_report_path=preflight_path,
+        runner=_runner(_compose_payload(manifest)),
+        which=lambda name: f"/usr/bin/{name}",
+        base_environment={},
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["preflight"]["state"] == FAIL
+    assert "manifest_sha256" in checks["preflight"]["detail"]
+    assert report["state"] == FAIL
+
+
+def test_deployment_schema_matches_contract() -> None:
+    schema = json.loads((REPO_ROOT / "release" / "deployment-report.schema.json").read_text(encoding="utf-8"))
+    assert set(schema["required"]) == set(DEPLOYMENT_REPORT_FIELDS)
+    assert schema["properties"]["schema_version"]["const"] == DEPLOYMENT_SCHEMA_VERSION
+    assert set(schema["$defs"]["subject"]["required"]) == set(DEPLOYMENT_SUBJECT_FIELDS)
+    assert set(schema["$defs"]["check"]["required"]) == set(DEPLOYMENT_CHECK_FIELDS)
+    assert schema["properties"]["gpu"]["type"] == "boolean"

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
+from backend.tests.unit.test_release_verification import COMMIT, TAG, make_release
+from tools.release.manifest import sha256_file
 from tools.release.smoke import (
     FAIL,
     NOT_RUN,
     PASS,
+    SmokeError,
     run_smoke,
 )
 
@@ -212,3 +217,21 @@ def test_not_ready_deployment_fails() -> None:
 def test_password_is_not_written_to_report() -> None:
     report = _run()
     assert PASSWORD not in json.dumps(report)
+
+
+def test_smoke_report_binds_manifest_when_supplied(tmp_path: Path) -> None:
+    manifest_path, _, manifest = make_release(tmp_path)
+    report = _run(manifest_path=manifest_path, expected_tag=TAG, expected_commit=COMMIT)
+    assert report["overall_state"] == PASS
+    assert report["manifest_sha256"] == sha256_file(manifest_path)
+    assert report["subject"] == {
+        "tag": manifest["release"]["tag"],
+        "commit": manifest["release"]["commit"],
+        "source_repository": manifest["release"]["source_repository"],
+    }
+
+
+def test_smoke_rejects_manifest_tag_mismatch(tmp_path: Path) -> None:
+    manifest_path, _, _ = make_release(tmp_path)
+    with pytest.raises(SmokeError, match="does not match expected tag"):
+        _run(manifest_path=manifest_path, expected_tag="v9.9.9")
