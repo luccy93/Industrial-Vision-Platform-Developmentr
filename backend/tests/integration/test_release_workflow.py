@@ -68,10 +68,12 @@ def test_release_permissions_are_least_privilege() -> None:
     }
     assert jobs["release"]["permissions"] == {"contents": "write"}
     assert jobs["recovery"]["permissions"] == {"contents": "read"}
+    assert jobs["qualify"]["permissions"] == {"contents": "read"}
     assert jobs["gates"]["needs"] == "validate"
     assert jobs["publish"]["needs"] == "gates"
-    assert jobs["release"]["needs"] == "publish"
-    assert jobs["recovery"]["needs"] == ["publish", "release"]
+    assert jobs["qualify"]["needs"] == "publish"
+    assert jobs["release"]["needs"] == ["publish", "qualify"]
+    assert jobs["recovery"]["needs"] == ["publish", "qualify", "release"]
     assert jobs["recovery"]["if"] == "failure()"
 
 
@@ -300,3 +302,33 @@ def test_release_recovery_job_explains_safe_recovery() -> None:
     assert "Never move, delete, or reuse the release tag" in body
     assert "Inspect GHCR" in body
     assert any(step.get("uses", "").startswith("actions/download-artifact@") for step in _steps(recovery))
+
+
+def test_release_qualifies_artifacts_before_publishing_a_release() -> None:
+    config = _workflow("release.yml")
+    qualify = config["jobs"]["qualify"]
+    body = "\n".join(step.get("run", "") for step in _steps(qualify))
+    assert "tools.release.cli qualify" in body
+    assert "--profile local_validation" in body
+    assert "--scope artifact" in body
+    assert "--require-live-evidence" in body
+    assert "release-qualification.json" in body
+    assert "--profile production_qualification" not in body
+    assert "--require-production" not in body
+    upload = next(
+        step for step in _steps(qualify) if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert upload["with"]["name"] == "release-qualification"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+    release = config["jobs"]["release"]
+    release_body = "\n".join(step.get("run", "") for step in _steps(release))
+    assert "check-qualification" in release_body
+    assert "--verification-report release-artifacts/release-verification.json" in release_body
+    assert "--publication-report release-artifacts/publication-report.json" in release_body
+    assert "--output release-artifacts/publication-report.json" not in release_body
+    create = next(step for step in _steps(release) if "gh release create" in step.get("run", ""))
+    assert "release-qualification.json" in create["run"]
+    # CI proves artifact qualification only; it must not claim production qualification.
+    qualification_line = next(line for line in release_body.splitlines() if "check-qualification" in line)
+    assert "--require-production" not in qualification_line

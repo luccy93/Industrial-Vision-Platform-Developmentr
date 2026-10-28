@@ -20,6 +20,17 @@ Usage examples::
         --web-url https://ops.example.com --username smoke@example.com
     python -m tools.release.cli publication-report --events published-images.jsonl \\
         --tag v1.2.3 --repository <owner>/<repo>
+    python -m tools.release.cli qualify-prerequisites --repo-root . \\
+        --profile local_validation --scope artifact --tag v1.2.3 --commit <40-hex>
+    python -m tools.release.cli qualify --manifest release-artifacts/release-manifest.json \\
+        --artifacts-dir release-artifacts --profile production_qualification --scope full \\
+        --verification-report release-verification.json \\
+        --publication-report publication-report.json \\
+        --deployment-report deployment-report.json \\
+        --rehearsal-report rollback-rehearsal.json --gpu-report gpu-runtime.json \\
+        --tag v1.2.3 --commit <40-hex>
+    python -m tools.release.cli check-qualification --report release-qualification.json \\
+        --manifest release-manifest.json --require-production
     python -m tools.release.cli audit-workflows --root .
 
 Every command exits non-zero on a policy violation. Smoke passwords are read
@@ -58,11 +69,25 @@ from tools.release.manifest import (
     validate_manifest,
     write_manifest,
 )
+from tools.release.prerequisites import (
+    PrerequisiteError,
+    probe_prerequisites,
+    render_prerequisites_summary,
+)
 from tools.release.publication import (
     PublicationError,
     build_publication_report,
     render_publication_summary,
     write_publication_report,
+)
+from tools.release.qualification import (
+    QUALIFICATION_PROFILES,
+    SCOPES,
+    QualificationError,
+    qualification_report_errors,
+    qualify_release,
+    render_qualification_summary,
+    write_qualification_report,
 )
 from tools.release.registry import RegistryError, check_release_conflicts
 from tools.release.smoke import (
@@ -240,6 +265,61 @@ def _build_parser() -> argparse.ArgumentParser:
     publication_summary.add_argument("--report", type=Path, required=True)
     publication_summary.add_argument("--require-complete", action="store_true")
 
+    prerequisites_parser = subparsers.add_parser(
+        "qualify-prerequisites",
+        help="probe live qualification prerequisites without printing secrets",
+    )
+    prerequisites_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    prerequisites_parser.add_argument("--profile", choices=QUALIFICATION_PROFILES, default="local_validation")
+    prerequisites_parser.add_argument("--scope", choices=SCOPES, default="artifact")
+    prerequisites_parser.add_argument("--tag")
+    prerequisites_parser.add_argument("--commit")
+    prerequisites_parser.add_argument("--repository")
+    prerequisites_parser.add_argument("--artifacts-dir", type=Path)
+    prerequisites_parser.add_argument("--verification-report", type=Path)
+    prerequisites_parser.add_argument("--publication-report", type=Path)
+    prerequisites_parser.add_argument("--deployment-report", type=Path)
+    prerequisites_parser.add_argument("--rehearsal-report", type=Path)
+    prerequisites_parser.add_argument("--gpu-report", type=Path)
+    prerequisites_parser.add_argument("--main-ref", default="origin/main")
+    prerequisites_parser.add_argument("--require-github", type=_parse_bool)
+    prerequisites_parser.add_argument("--require-docker", type=_parse_bool)
+    prerequisites_parser.add_argument("--require-gpu", action="store_true")
+    prerequisites_parser.add_argument("--require-live-evidence", action="store_true")
+    prerequisites_parser.add_argument("--production-authorized", action="store_true")
+    prerequisites_parser.add_argument("--output", type=Path)
+
+    qualify_parser = subparsers.add_parser(
+        "qualify", help="qualify an exact release manifest and its live evidence"
+    )
+    qualify_parser.add_argument("--manifest", type=Path, required=True)
+    qualify_parser.add_argument("--artifacts-dir", type=Path, required=True)
+    qualify_parser.add_argument("--profile", choices=QUALIFICATION_PROFILES, required=True)
+    qualify_parser.add_argument("--scope", choices=SCOPES, required=True)
+    qualify_parser.add_argument("--verification-report", type=Path, required=True)
+    qualify_parser.add_argument("--publication-report", type=Path)
+    qualify_parser.add_argument("--deployment-report", type=Path)
+    qualify_parser.add_argument("--rehearsal-report", type=Path)
+    qualify_parser.add_argument("--gpu-report", type=Path)
+    qualify_parser.add_argument("--tag")
+    qualify_parser.add_argument("--commit")
+    qualify_parser.add_argument("--repository")
+    qualify_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    qualify_parser.add_argument("--main-ref", default="origin/main")
+    qualify_parser.add_argument("--require-live-evidence", action="store_true")
+    qualify_parser.add_argument("--require-gpu-runtime", action="store_true")
+    qualify_parser.add_argument("--output", type=Path)
+
+    qualification_gate = subparsers.add_parser(
+        "check-qualification",
+        help="require a qualification report to authorize the exact manifest",
+    )
+    qualification_gate.add_argument("--report", type=Path, required=True)
+    qualification_gate.add_argument("--manifest", type=Path, required=True)
+    qualification_gate.add_argument("--verification-report", type=Path)
+    qualification_gate.add_argument("--publication-report", type=Path)
+    qualification_gate.add_argument("--require-production", action="store_true")
+
     audit_parser = subparsers.add_parser(
         "audit-workflows", help="reject unpinned actions and container images"
     )
@@ -409,6 +489,72 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(render_publication_summary(report))
             if args.require_complete and report.get("complete") is not True:
                 return 1
+        elif args.command == "qualify-prerequisites":
+            report = probe_prerequisites(
+                repo_root=args.repo_root,
+                profile=args.profile,
+                scope=args.scope,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_repository=args.repository,
+                artifacts_dir=args.artifacts_dir,
+                verification_report=args.verification_report,
+                publication_report=args.publication_report,
+                deployment_report=args.deployment_report,
+                rehearsal_report=args.rehearsal_report,
+                gpu_report=args.gpu_report,
+                main_ref=args.main_ref,
+                require_github=args.require_github,
+                require_docker=args.require_docker,
+                require_gpu=args.require_gpu,
+                require_live_evidence=args.require_live_evidence,
+                production_authorized=args.production_authorized,
+            )
+            if args.output is not None:
+                _write_json(report, args.output)
+            sys.stdout.write(render_prerequisites_summary(report))
+            if not report["ready"]:
+                return 1
+        elif args.command == "qualify":
+            report = qualify_release(
+                args.manifest,
+                artifacts_dir=args.artifacts_dir,
+                profile=args.profile,
+                scope=args.scope,
+                verification_report_path=args.verification_report,
+                publication_report_path=args.publication_report,
+                deployment_report_path=args.deployment_report,
+                rehearsal_report_path=args.rehearsal_report,
+                gpu_report_path=args.gpu_report,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_repository=args.repository,
+                repo_root=args.repo_root,
+                main_ref=args.main_ref,
+                require_live_evidence=args.require_live_evidence,
+                require_gpu_runtime=args.require_gpu_runtime,
+            )
+            if args.output is not None:
+                write_qualification_report(report, args.output)
+            sys.stdout.write(render_qualification_summary(report))
+            if not report["qualified"]:
+                return 1
+        elif args.command == "check-qualification":
+            manifest = load_manifest(args.manifest)
+            report = _load_json(args.report)
+            errors = qualification_report_errors(
+                report,
+                manifest,
+                manifest_path=args.manifest,
+                require_production=args.require_production,
+                verification_report_path=args.verification_report,
+                publication_report_path=args.publication_report,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"qualification report authorizes deployment: {args.report}")
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -420,7 +566,9 @@ def main(argv: list[str] | None = None) -> int:
         DeploymentError,
         IdentityError,
         ManifestError,
+        PrerequisiteError,
         PublicationError,
+        QualificationError,
         RegistryError,
         SmokeError,
         VerificationError,

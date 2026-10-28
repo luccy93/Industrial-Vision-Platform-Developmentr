@@ -72,6 +72,13 @@ REPORT_FIELDS = (
 CPU_IMAGES = ("api", "web")
 GPU_IMAGE = "api-gpu"
 RELEASE_WORKFLOW = ".github/workflows/release.yml"
+ATTESTATION_REQUIRED_FLAGS = (
+    "--signer-workflow",
+    "--source-digest",
+    "--source-ref",
+    "--deny-self-hosted-runners",
+    "--predicate-type",
+)
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 SEVERITY_COUNT = re.compile(r"\b(?:CRITICAL|HIGH)\s*:\s*[1-9][0-9]*", re.IGNORECASE)
@@ -108,6 +115,38 @@ def default_runner(
 
 def _command_text(args: Sequence[str]) -> str:
     return " ".join(shlex.quote(str(part)) for part in args)
+
+
+def attestation_cli_support(
+    runner: CommandRunner = default_runner,
+    which: Callable[[str], str | None] = shutil.which,
+) -> tuple[bool, str]:
+    """Prove that the installed GitHub CLI can verify the attestations we create.
+
+    Older ``gh`` releases do not support every flag used by the verification
+    command. Attempting the command anyway would report a policy failure for
+    what is really an unavailable tool, so the capability is probed once and
+    reported as ``UNAVAILABLE`` when it cannot be satisfied.
+    """
+    if which("gh") is None:
+        return False, "GitHub CLI is not installed; attestation not checked"
+    try:
+        version = runner(["gh", "--version"], timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"GitHub CLI version could not be determined: {exc}"
+    if version.returncode != 0:
+        return False, "GitHub CLI is installed but is not usable"
+    try:
+        help_result = runner(["gh", "attestation", "verify", "--help"], timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"gh attestation verify help could not be read: {exc}"
+    if help_result.returncode != 0:
+        return False, "gh attestation verify is not available in the installed GitHub CLI"
+    output = f"{help_result.stdout or ''}\n{help_result.stderr or ''}"
+    missing = [flag for flag in ATTESTATION_REQUIRED_FLAGS if flag not in output]
+    if missing:
+        return False, "gh attestation verify lacks required flags: " + ", ".join(missing)
+    return True, "gh attestation verify supports the required verification flags"
 
 
 def _check(
@@ -1009,6 +1048,11 @@ def verify_release(
     except (ManifestError, OSError) as exc:
         raise VerificationError(str(exc)) from exc
 
+    attestation_supported = False
+    attestation_detail = ""
+    if profile == "production":
+        attestation_supported, attestation_detail = attestation_cli_support(runner, which)
+
     checks: list[dict[str, Any]] = []
     checks.append(
         _identity_check(
@@ -1126,6 +1170,15 @@ def verify_release(
                     sbom_payload = _load_json(sbom_path)
                 except (OSError, json.JSONDecodeError):
                     sbom_payload = None
+            if not attestation_supported:
+                for label in (
+                    f"provenance-attestation:{name}",
+                    f"sbom-attestation:{name}",
+                    f"provenance-bundle-signature:{name}",
+                    f"sbom-bundle-signature:{name}",
+                ):
+                    checks.append(_check(label, UNAVAILABLE, True, attestation_detail))
+                continue
             checks.append(
                 _attestation_check(
                     f"provenance-attestation:{name}",

@@ -1,4 +1,4 @@
-# Releases and Supply Chain (V22/V23)
+# Releases and Supply Chain (V22/V23/V24)
 
 V22 makes a release something that can be verified, not assumed. A strict
 stable SemVer tag triggers a fail-closed pipeline that validates the tag and
@@ -16,9 +16,19 @@ credentials, and print a data-preserving rollback plan. Evidence is reported
 as `PASS`, `FAIL`, `NOT_RUN`, `UNAVAILABLE`, or `SIMULATED`; only `PASS` is
 success.
 
+V24 adds live release qualification. `qualify` binds the exact manifest bytes,
+verification report, publication digests, deployment evidence, rollback
+rehearsal, and GPU runtime into one report. The CI release gate consumes an
+artifact-scoped qualification; production qualification additionally requires
+a real deployment, a passing rollback rehearsal, verified GPU runtime, and
+explicit operator authorization. Qualification never upgrades missing
+evidence to success.
+
 No release tag has been created by these volumes. The workflow is validated
 statically and locally; the first tag push is the first live end-to-end run.
-The full V23 evidence record is in `docs/V23_RELEASE_VERIFICATION.md`.
+The full V23 evidence record is in `docs/V23_RELEASE_VERIFICATION.md`; V24
+qualification evidence is recorded in
+`docs/V24_LIVE_RELEASE_QUALIFICATION.md`.
 
 ## Version policy
 
@@ -196,6 +206,88 @@ python -m tools.release.cli check-report `
 ```
 
 The report schema is `release/release-verification.schema.json`.
+
+## Live release qualification (V24)
+
+Verification answers "are these artifacts genuine?" Qualification answers a
+narrower deployment question: "may this exact manifest be deployed under this
+profile and scope?" It consumes the V23 report rather than re-trusting the
+manifest, and binds every input by SHA-256.
+
+| Profile | Intended use | Required evidence |
+| --- | --- | --- |
+| `local_validation` | Offline or CI artifact gate | V23 report with `verified: true`, genuine DSSE bundles, SBOM/scan/digest checks, GPU artifact present |
+| `staging_qualification` | Staging deployment | Production V23 report, complete publication, attestation trust, bound deployment report; GPU runtime only with `--require-gpu-runtime` |
+| `production_qualification` | Production readiness | Staging requirements plus `full` scope, passing rollback rehearsal, verified GPU runtime, explicit authorization |
+
+Scopes add evidence in order:
+
+- `artifact`: manifest, verification, per-image digest/SBOM/scan/bundle hashes;
+  publication is required with `--require-live-evidence` or any non-local
+  profile.
+- `deployment`: adds a deployment report bound to the same manifest bytes and
+  subject.
+- `full`: adds a passing rollback rehearsal. `production_qualified` requires
+  `full`.
+
+```powershell
+# Probe the host before claiming evidence you cannot produce.
+python -m tools.release.cli qualify-prerequisites `
+  --repo-root . --profile production_qualification --scope full `
+  --tag v1.2.3 --commit <40-hex> `
+  --artifacts-dir release-artifacts `
+  --verification-report release-artifacts/release-verification.json `
+  --publication-report release-artifacts/publication-report.json `
+  --deployment-report release-artifacts/deployment-report.json `
+  --rehearsal-report release-artifacts/rollback-rehearsal.json `
+  --gpu-report release-artifacts/gpu-runtime.json `
+  --production-authorized `
+  --output release-artifacts/qualification-prerequisites.json
+
+python -m tools.release.cli qualify `
+  --manifest release-artifacts/release-manifest.json `
+  --artifacts-dir release-artifacts `
+  --profile production_qualification --scope full `
+  --verification-report release-artifacts/release-verification.json `
+  --publication-report release-artifacts/publication-report.json `
+  --deployment-report release-artifacts/deployment-report.json `
+  --rehearsal-report release-artifacts/rollback-rehearsal.json `
+  --gpu-report release-artifacts/gpu-runtime.json `
+  --tag v1.2.3 --commit <40-hex> --repository <owner>/<repo> `
+  --repo-root . --main-ref origin/main `
+  --output release-artifacts/release-qualification.json
+
+python -m tools.release.cli check-qualification `
+  --report release-artifacts/release-qualification.json `
+  --manifest release-artifacts/release-manifest.json `
+  --verification-report release-artifacts/release-verification.json `
+  --publication-report release-artifacts/publication-report.json `
+  --require-production
+```
+
+The qualification report binds:
+
+- the exact manifest SHA-256 and subject tag, commit, and repository;
+- the verification report hash, its manifest hash, profile, state, and
+  `production_verified`;
+- the publication report hash, completeness, and per-image digests;
+- deployment, rollback-rehearsal, and GPU-runtime report hashes;
+- every image digest, SBOM, scan log, provenance bundle, and SBOM
+  attestation bundle hash.
+
+`production_qualified` is true only when all of these hold: profile is
+`production_qualification`, scope is `full`, every required check is `PASS`,
+the V23 report has `production_verified: true`, the rollback rehearsal
+verified the previous and target digests, and GPU runtime is verified on the
+target host.
+
+The CI `qualify` job runs `local_validation`/`artifact` with
+`--require-live-evidence` after publication. It gates the GitHub Release but
+never claims production qualification; the release job still requires the V23
+production report. Deployment, rollback, and GPU qualification must be
+produced on the real target hosts.
+
+Report schema: `release/release-qualification.schema.json`.
 
 ## Deploy by digest
 
@@ -375,6 +467,10 @@ pytest backend/tests/unit/test_release_verification.py `
        backend/tests/unit/test_release_publication.py `
        backend/tests/integration/test_release_workflow.py -q
 
+# V24 qualification and prerequisite probes
+pytest backend/tests/unit/test_release_qualification.py `
+       backend/tests/unit/test_release_prerequisites.py -q
+
 # Digest overlays resolve without a daemon
 $env:IVP_API_IMAGE="ghcr.io/example/api@sha256:<64-hex>"
 $env:IVP_WEB_IMAGE="ghcr.io/example/web@sha256:<64-hex>"
@@ -452,6 +548,11 @@ No real GHCR push, GitHub attestation, or GitHub Release was performed.
 - GPU artifact verification and GPU runtime verification are separate. A
   production report can prove the GPU image exists while `runtime_state`
   remains `NOT_RUN`; never present that as GPU acceleration success.
+- V24 production qualification requires a real digest-pinned deployment, a
+  passing rollback rehearsal, and verified GPU runtime. Those evidence files
+  cannot be produced on a host without a Docker daemon and NVIDIA runtime, so
+  `production_qualified` remains `false` until they are recorded on the target
+  hosts.
 - The hosted runner's disk must fit three images (including CUDA torch); the
   workflow frees space and fails before building if less than 20 GiB is free.
   Peak usage remains a residual risk until observed on a real run.

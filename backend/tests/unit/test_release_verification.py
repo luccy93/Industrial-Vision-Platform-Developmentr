@@ -20,6 +20,7 @@ from tools.release.verification import (
     PASS,
     SIMULATED,
     UNAVAILABLE,
+    attestation_cli_support,
     verify_release,
 )
 
@@ -168,6 +169,15 @@ def make_runner(
 ) -> Any:
     def runner(args: Any, *, timeout: int = 180, env: Any = None) -> subprocess.CompletedProcess[str]:
         del timeout, env
+        if args[:2] == ["gh", "--version"]:
+            return subprocess.CompletedProcess(args, 0, "gh version 2.60.0 (test build)\n", "")
+        if args[:4] == ["gh", "attestation", "verify", "--help"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                " ".join(verification_module.ATTESTATION_REQUIRED_FLAGS) + "\n",
+                "",
+            )
         if args[:3] == ["docker", "buildx", "imagetools"]:
             reference = args[-1]
             digest = reference.split("@", 1)[1] if "@" in reference else None
@@ -658,3 +668,49 @@ def test_attestation_predicates_are_bound(tmp_path: Path) -> None:
     assert PROVENANCE_PREDICATE in commands
     assert SBOM_PREDICATE in commands
     assert manifest["release"]["tag"] == TAG
+
+
+def test_attestation_cli_support_requires_expected_flags() -> None:
+    ok, detail = attestation_cli_support(make_runner(), lambda name: f"/usr/bin/{name}")
+    assert ok is True
+    assert "required verification flags" in detail
+
+
+def test_attestation_cli_support_rejects_missing_gh() -> None:
+    ok, detail = attestation_cli_support(make_runner(), lambda name: None)
+    assert ok is False
+    assert "not installed" in detail
+
+
+def test_attestation_cli_support_rejects_old_gh() -> None:
+    def old_runner(args: Any, *, timeout: int = 180, env: Any = None) -> subprocess.CompletedProcess[str]:
+        del timeout, env
+        if args[:2] == ["gh", "--version"]:
+            return subprocess.CompletedProcess(args, 0, "gh version 2.0.0\n", "")
+        return subprocess.CompletedProcess(args, 0, "--signer-workflow\n", "")
+
+    ok, detail = attestation_cli_support(old_runner, lambda name: f"/usr/bin/{name}")
+    assert ok is False
+    assert "lacks required flags" in detail
+
+
+def test_unsupported_attestation_cli_is_unavailable_not_fail(tmp_path: Path) -> None:
+    manifest_path, artifacts, _ = make_release(tmp_path)
+    base = make_runner()
+
+    def runner(args: Any, *, timeout: int = 180, env: Any = None) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["gh", "--version"]:
+            return subprocess.CompletedProcess(args, 0, "gh version 2.0.0\n", "")
+        if args[:4] == ["gh", "attestation", "verify", "--help"]:
+            return subprocess.CompletedProcess(args, 0, "--signer-workflow\n", "")
+        return base(args, timeout=timeout, env=env)
+
+    report = _verify(manifest_path, artifacts, runner=runner)
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["registry:api"]["state"] == PASS
+    assert checks["provenance-attestation:api"]["state"] == UNAVAILABLE
+    assert checks["sbom-attestation:api"]["state"] == UNAVAILABLE
+    assert checks["provenance-bundle-signature:api"]["state"] == UNAVAILABLE
+    assert checks["sbom-bundle-signature:api"]["state"] == UNAVAILABLE
+    assert "lacks required flags" in checks["provenance-attestation:api"]["detail"]
+    assert report["verified"] is False

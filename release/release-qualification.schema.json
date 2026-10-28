@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/release-qualification.schema.json",
+  "title": "Industrial Vision Platform live release qualification report",
+  "description": "Qualification evidence produced by tools/release/qualification.py. The report is bound to the exact manifest bytes, release subject, verification report, publication digests, and every per-image evidence hash. PASS is the only successful state; NOT_RUN, UNAVAILABLE, and SIMULATED never authorize deployment. production_qualified is true only for the production_qualification profile at full scope with production verification, a passing rollback rehearsal, and verified GPU runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "scope",
+    "generated_at",
+    "manifest_sha256",
+    "subject",
+    "overall_state",
+    "qualified",
+    "production_qualified",
+    "verification",
+    "publication",
+    "deployment",
+    "rehearsal",
+    "gpu_runtime",
+    "artifacts",
+    "checks",
+    "evidence",
+    "blockers",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "enum": ["local_validation", "staging_qualification", "production_qualification"]
+    },
+    "scope": {
+      "enum": ["artifact", "deployment", "full"]
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "overall_state": {
+      "$ref": "#/$defs/state"
+    },
+    "qualified": {
+      "type": "boolean"
+    },
+    "production_qualified": {
+      "type": "boolean"
+    },
+    "verification": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/verificationBinding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "publication": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/publicationBinding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "deployment": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rehearsal": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rehearsalBinding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gpu_runtime": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/gpuBinding"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "verificationBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "manifest_sha256",
+        "schema_version",
+        "profile",
+        "overall_state",
+        "verified",
+        "production_verified"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "overall_state": {
+          "$ref": "#/$defs/state"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "production_verified": {
+          "type": "boolean"
+        }
+      }
+    },
+    "publicationBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "status", "complete", "tag", "source_repository", "digests"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        },
+        "digests": {
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "$ref": "#/$defs/digest"
+          }
+        }
+      }
+    },
+    "deploymentBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "state", "gpu"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "gpu": {
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "rehearsalBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "state", "verified", "previous_manifest_sha256"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "previous_manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "gpuBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "state", "verified", "gpu"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "gpu": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest",
+        "sbom",
+        "scan",
+        "provenance",
+        "sbom_attestation",
+        "state"
+      ],
+      "properties": {
+        "name": {
+          "enum": ["api", "web", "api-gpu"]
+        },
+        "digest": {
+          "type": ["string", "null"]
+        },
+        "sbom": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/evidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scan": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/evidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/evidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sbom_attestation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/evidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        }
+      }
+    }
+  }
+}
