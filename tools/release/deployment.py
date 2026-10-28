@@ -264,6 +264,7 @@ def _report_checks(
                     NOT_RUN,
                     "GPU runtime was not verified; run the smoke tool on the GPU host "
                     "before relying on acceleration",
+                    required=False,
                 )
             )
     return checks
@@ -287,8 +288,21 @@ def _command_text(args: Sequence[str]) -> str:
     return " ".join(shlex.quote(str(part)) for part in args)
 
 
-def _check(name: str, state: str, detail: str, command: str | None = None) -> dict[str, Any]:
-    return {"name": name, "state": state, "detail": detail, "command": command}
+def _check(
+    name: str,
+    state: str,
+    detail: str,
+    command: str | None = None,
+    *,
+    required: bool = True,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "state": state,
+        "detail": detail,
+        "command": command,
+        "required": required,
+    }
 
 
 def _load_compose_json(text: str) -> Any:
@@ -316,10 +330,13 @@ def _running_containers(text: str) -> dict[str, Mapping[str, Any]]:
 
 def _aggregate(checks: Sequence[Mapping[str, Any]]) -> str:
     states = {check.get("state") for check in checks}
+    required_states = {check.get("state") for check in checks if check.get("required", True) is True}
     if FAIL in states:
         return FAIL
-    if UNAVAILABLE in states:
+    if UNAVAILABLE in required_states:
         return UNAVAILABLE
+    if NOT_RUN in required_states:
+        return NOT_RUN
     return PASS
 
 

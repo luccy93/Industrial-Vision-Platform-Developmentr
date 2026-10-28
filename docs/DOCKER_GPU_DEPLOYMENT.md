@@ -124,6 +124,42 @@ stack never touches NVIDIA drivers or runtime. Live GPU inference was
 **not** validated in V17 (no hardware in the validation environment) —
 only configuration, dependency resolution, and CPU independence.
 
+### Release GPU verification and runtime honesty (V23)
+
+For a release deployment, use the digest-pinned GPU overlay
+(`compose.gpu.release.yaml`) and a production verification report. The
+report proves the GPU *artifact* (registry digest, pull proof, attestation,
+SBOM); it does **not** prove the GPU *runtime*. The report therefore keeps
+`artifact_status.gpu.state` separate from
+`artifact_status.gpu.runtime_state` / `runtime_verified`.
+
+```powershell
+python -m tools.release.cli verify-deploy `
+  --manifest release-manifest.json `
+  --report release-verification.json --require-verified `
+  --running --check-logs --gpu
+
+$env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
+python -m tools.release.cli smoke `
+  --api-url https://ops.example.com/api `
+  --web-url https://ops.example.com `
+  --username smoke@example.com `
+  --output gpu-deployment-smoke.json
+```
+
+Only mark GPU runtime as verified after all of these succeed on the GPU host:
+
+1. `nvidia-smi` shows the device.
+2. `docker run --rm --gpus all ... python -c "import torch; assert torch.cuda.is_available()"`
+   succeeds for the digest-pinned image.
+3. The GPU stack is running and the smoke report is `PASS`.
+4. A real inference request completes with `MODEL_DEVICE=cuda`.
+
+If any step is missing, report `runtime_state: NOT_RUN` (or `UNAVAILABLE`)
+with a reason. Never convert a missing GPU into a pass. The GitHub-hosted
+release runner has no NVIDIA GPU, so its manifest records
+`gpu_runtime_smoke: not_run`.
+
 ## Models
 
 Weights are deployment artifacts, never baked into images: mount
@@ -183,6 +219,7 @@ never silent, never fake detections.
   (informational under plain `docker compose up`).
 - Single API worker/replica: horizontal API scaling is unsafe today
   (background threads would duplicate); documented, not changed.
-- GPU inference smoke-tested only where hardware exists (skipped in V17).
+- GPU inference smoke-tested only where hardware exists (skipped in V17 and
+  V23 validation); V23 verifies the GPU artifact separately from runtime.
 - `torch>=2.0`/`ultralytics>=8.0` remain range pins upstream; the GPU
   image pins its CUDA pair explicitly.

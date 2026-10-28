@@ -1,4 +1,4 @@
-# Releases and Supply Chain (V22)
+# Releases and Supply Chain (V22/V23)
 
 V22 makes a release something that can be verified, not assumed. A strict
 stable SemVer tag triggers a fail-closed pipeline that validates the tag and
@@ -6,8 +6,19 @@ commit, re-runs every V21 gate, scans the images, publishes **api**, **web**
 and **api-gpu** to GHCR, records digests, produces SPDX SBOMs, attaches
 GitHub attestations, and writes a manifest into the GitHub Release.
 
-No release tag has been created by this volume. The workflow is validated
+V23 adds an independent verification layer and a safe recovery path. The
+pipeline now re-verifies the published digests and attestations after
+publication, records whether publication was complete, partial, or failed,
+and refuses to create the GitHub Release unless a production verification
+report authorizes the exact manifest. Deployment and rollback tooling can
+require that report, inspect a running stack, scan logs for leaked
+credentials, and print a data-preserving rollback plan. Evidence is reported
+as `PASS`, `FAIL`, `NOT_RUN`, `UNAVAILABLE`, or `SIMULATED`; only `PASS` is
+success.
+
+No release tag has been created by these volumes. The workflow is validated
 statically and locally; the first tag push is the first live end-to-end run.
+The full V23 evidence record is in `docs/V23_RELEASE_VERIFICATION.md`.
 
 ## Version policy
 
@@ -133,6 +144,59 @@ python -m tools.release.cli validate `
   --tag v1.2.3 --commit <40-hex>
 ```
 
+## Independent release verification (V23)
+
+`verify` re-derives release facts instead of trusting the manifest. It checks
+the git tag/branch identity, rejects placeholder digests, resolves each image
+in the registry, pulls every image by digest and compares the resulting image
+ID, runs `gh attestation verify` with signer and source-repository
+constraints, checks the local DSSE bundles, and binds each SBOM predicate to
+the recorded digest. CPU and GPU artifacts are reported separately.
+
+```powershell
+python -m tools.release.cli verify `
+  --manifest release-manifest.json `
+  --artifacts-dir release-artifacts `
+  --tag v1.2.3 --commit <40-hex> `
+  --profile production --repo-root . --main-ref origin/main `
+  --output release-verification.json
+```
+
+Evidence states are deliberate:
+
+| State | Meaning |
+| --- | --- |
+| `PASS` | The check ran and matched independently observed facts. |
+| `FAIL` | The check ran and contradicted the manifest or policy. |
+| `NOT_RUN` | A required check did not execute (for example, missing credentials). |
+| `UNAVAILABLE` | The tool, network, registry, or hardware needed for the check was absent. |
+| `SIMULATED` | Fixture-only evidence; never valid for production verification. |
+
+`NOT_RUN`, `UNAVAILABLE`, and `SIMULATED` are **not** success. A production
+report authorizes deployment only when all of these hold:
+
+- `schema_version` is current, `manifest_sha256` matches the exact manifest
+  bytes, and the subject tag/commit/repository match the manifest release;
+- `profile` is `production`, `overall_state` is `PASS`, and `verified` and
+  `production_verified` are both `true`;
+- `artifact_status.cpu.state` and `artifact_status.gpu.state` are `PASS`.
+
+GPU runtime is tracked separately. `artifact_status.gpu.runtime_state` may be
+`NOT_RUN` on a host without NVIDIA hardware; that is honest and does not
+pretend the GPU was exercised. Verify runtime on the GPU host before relying
+on acceleration.
+
+Use the report as a deployment gate:
+
+```powershell
+python -m tools.release.cli check-report `
+  --report release-verification.json `
+  --manifest release-manifest.json `
+  --require-production
+```
+
+The report schema is `release/release-verification.schema.json`.
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
@@ -159,6 +223,39 @@ Do not add `compose.gpu.yaml` to a release deployment: that overlay restores a
 local `build:` definition and defeats digest pinning. Do not run `down -v`:
 it deletes the PostgreSQL volume.
 
+Verify the resolved configuration and the running stack before accepting the
+deployment:
+
+```powershell
+python -m tools.release.cli verify-deploy `
+  --manifest release-manifest.json `
+  --report release-verification.json --require-verified `
+  --running --check-logs
+```
+
+`verify-deploy` rejects mutable tags and local `build:` definitions, requires
+the manifest digests to be exactly what Compose resolves, compares running
+container image IDs with the manifest, and can scan recent service logs for
+credential patterns. Findings report pattern names only; matched values are
+never printed.
+
+Then run the independent HTTP/auth/WebSocket smoke:
+
+```powershell
+$env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
+python -m tools.release.cli smoke `
+  --api-url https://ops.example.com/api `
+  --web-url https://ops.example.com `
+  --username smoke@example.com `
+  --output deployment-smoke.json
+```
+
+The password is read from `IVP_SMOKE_PASSWORD`, never from the command line.
+Missing credentials or a missing web URL produce required `NOT_RUN` checks,
+so the report can never claim a verified deployment. An unauthenticated
+WebSocket that stays open, or an authenticated socket that is refused, is a
+hard failure. See `docs/PRODUCTION_OPERATIONS.md` for the operational flow.
+
 ## GPU runtime validation
 
 The GPU image is built, scanned, SBOM'd, attested and published like the CPU
@@ -178,21 +275,57 @@ docker run --rm --gpus all ghcr.io/<owner>/<repo>/api-gpu@sha256:<digest> `
   python -c "import torch; assert torch.cuda.is_available()"
 ```
 
-Then start the GPU release stack and confirm `/ready` plus a real inference
-request.
+Then start the GPU release stack, require a production verification report,
+and run the smoke tool on the GPU host:
+
+```powershell
+python -m tools.release.cli verify-deploy `
+  --manifest release-manifest.json `
+  --report release-verification.json --require-verified `
+  --running --check-logs --gpu
+
+$env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
+python -m tools.release.cli smoke `
+  --api-url https://ops.example.com/api `
+  --web-url https://ops.example.com `
+  --username smoke@example.com `
+  --output gpu-deployment-smoke.json
+```
+
+The production report proves the GPU *artifact*; it does not prove GPU
+*runtime*. Only the host smoke and a real inference request do. Report
+`runtime_verified: false` until both succeed.
 
 ## Rollback
 
-Rollback is a deployment action, not a tag action:
+Rollback is a deployment action, not a tag action. The tooling requires a
+production verification report for the target release, unless an operator
+explicitly accepts an unverified emergency rollback:
 
-1. Identify the previous manifest's digests (GitHub Release or your recorded
+```powershell
+python -m tools.release.cli rollback-plan `
+  --manifest previous-release-manifest.json `
+  --report previous-release-verification.json `
+  --current-manifest release-manifest.json `
+  --backup-file before-rollback.sql `
+  --output rollback-plan.txt
+```
+
+For a documented emergency only, add `--allow-unverified`; the plan then
+starts with a warning and requires independent digest verification.
+
+The plan always:
+
+1. Identifies the previous manifest's digests (GitHub Release or your recorded
    deployment manifest).
-2. Re-run the deploy commands with the previous digest values.
-3. Do **not** reverse Alembic migrations automatically. If the previous
+2. Re-runs the deploy commands with the previous digest values.
+3. Takes a database backup before changing the stack.
+4. Does **not** reverse Alembic migrations automatically. If the previous
    application is incompatible with the current schema, restore the database
    from the backup taken before the upgrade (see
    `docs/PRODUCTION_OPERATIONS.md`).
-4. Never move or delete the bad release tag. If the release itself is wrong,
+5. Never runs `docker compose down -v`.
+6. Never moves or deletes the bad release tag. If the release itself is wrong,
    publish the fix as the next PATCH version.
 
 ## Failure and recovery
@@ -200,11 +333,28 @@ Rollback is a deployment action, not a tag action:
 | Failure point | State | Recovery |
 | --- | --- | --- |
 | validate/gates/scan before push | No new images | Fix, then push a new tag; the failed tag may be deleted only by an administrator, and the version is still considered consumed |
+| Push starts but digest proof fails | Image may exist; publication report marks it unknown | Inspect GHCR before retrying; never overwrite the tag; fix forward with the next PATCH tag |
+| One image pushes, another fails | Publication report is `partial` | Keep the previous verified deployment; publish the fix as the next PATCH version |
 | Push succeeds, SBOM/attestation/manifest fails | Some or all new tags exist, no GitHub Release | Fix forward with the next PATCH tag; never overwrite the pushed tags |
+| Production verification fails | Images and manifest exist, no GitHub Release | Treat as a failed release; inspect the report and fix forward |
 | Release job fails after images are attested | Images and manifest artifact exist, no Release | Re-run the failed job (same workflow run); if the release itself was partially created, fix forward |
 | Bad image discovered later | Release exists | Deploy the previous digest; publish a fixed PATCH release |
 
-The `concurrency` group serializes runs for the same tag and never cancels a
+The publish job always records a publication report, even on failure:
+
+```powershell
+python -m tools.release.cli publication-report `
+  --events published-images.jsonl `
+  --tag v1.2.3 --repository <owner>/<repo> `
+  --output publication-report.json
+```
+
+Statuses are `complete`, `partial`, and `failed`. `complete` requires every
+expected image to have a proven `pushed` event with a valid digest, no
+evidence errors, and no unknown, failed-only, or missing images. A
+`push_started` event without a proven digest is *unknown*, not absent. The
+`recovery` job prints the same guidance in the workflow summary. The
+`concurrency` group serializes runs for the same tag and never cancels a
 release in progress.
 
 ## Local validation
@@ -218,11 +368,45 @@ pytest backend/tests/integration/test_release_workflow.py `
        backend/tests/unit/test_release_manifest.py `
        backend/tests/unit/test_release_identity.py -q
 
+# V23 verification, deployment, smoke, and publication tests
+pytest backend/tests/unit/test_release_verification.py `
+       backend/tests/unit/test_release_deployment.py `
+       backend/tests/unit/test_release_smoke.py `
+       backend/tests/unit/test_release_publication.py `
+       backend/tests/integration/test_release_workflow.py -q
+
 # Digest overlays resolve without a daemon
 $env:IVP_API_IMAGE="ghcr.io/example/api@sha256:<64-hex>"
 $env:IVP_WEB_IMAGE="ghcr.io/example/web@sha256:<64-hex>"
 docker compose -f compose.yaml -f compose.release.yaml config
 ```
+
+## Local validation evidence (V23)
+
+V23 was validated without creating a tag, publishing an image, or claiming a
+live release:
+
+- **Release tests**: 86 release-related tests passed (verification,
+  deployment/report gating, smoke, publication, and workflow assertions).
+- **Full backend suite**: 1312 passed, 1 skipped, 5 deselected.
+- **Lint/format**: `ruff format --check backend tools` and
+  `ruff check backend tools` passed (361 files).
+- **Frontend**: lint, typecheck, 93 tests, and the production build passed.
+- **Workflow audit**: `python -m tools.release.cli audit-workflows --root .`
+  passed; every release action remains SHA-pinned, and `release.yml` parses.
+- **Workflow semantics**: static tests assert the production verification gate
+  runs after manifest generation, publication reporting runs with
+  `if: always()`, the release job requires a production report and complete
+  publication, the recovery job explains safe recovery, and `api-gpu` outputs
+  are sanitized to `api_gpu_*` keys.
+- **Not executed locally**: live GHCR resolution, `gh attestation verify`,
+  `docker pull` by digest, digest-pinned Compose deployment, container smoke,
+  and rollback rehearsal. The Docker daemon and GitHub CLI are unavailable on
+  this host, so those checks remain `UNAVAILABLE`/`NOT_RUN`. No NVIDIA GPU is
+  present, so GPU runtime remains `NOT_RUN`.
+
+These are validation results for the tooling and static workflow, not proof of
+a hosted release.
 
 ## Local validation evidence (V22)
 
@@ -259,6 +443,15 @@ No real GHCR push, GitHub attestation, or GitHub Release was performed.
 
 - The first live release has not run; workflow semantics, GHCR permissions and
   attestation publication are validated statically and locally only.
+- Live registry digest resolution, pull-by-digest proof, and
+  `gh attestation verify` require network access, GHCR credentials, and a
+  working GitHub CLI; they remain `UNAVAILABLE` on hosts without them.
+- Digest-pinned deployment, running-container image-ID comparison, log
+  scanning, smoke, and rollback rehearsal require a Docker daemon; they remain
+  `NOT_RUN` on hosts without one.
+- GPU artifact verification and GPU runtime verification are separate. A
+  production report can prove the GPU image exists while `runtime_state`
+  remains `NOT_RUN`; never present that as GPU acceleration success.
 - The hosted runner's disk must fit three images (including CUDA torch); the
   workflow frees space and fails before building if less than 20 GiB is free.
   Peak usage remains a residual risk until observed on a real run.

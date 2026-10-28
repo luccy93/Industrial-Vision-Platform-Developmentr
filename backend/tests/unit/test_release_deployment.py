@@ -115,7 +115,9 @@ def test_compose_configuration_is_digest_pinned(tmp_path: Path) -> None:
         which=lambda name: f"/usr/bin/{name}",
         base_environment={},
     )
-    assert report["state"] == PASS
+    # Without a verification report the overall result is NOT_RUN, never PASS;
+    # the configuration checks themselves still pass.
+    assert report["state"] == NOT_RUN
     checks = {check["name"]: check for check in report["checks"]}
     assert checks["compose-config"]["state"] == PASS
     assert checks["compose-pin:api"]["state"] == PASS
@@ -177,7 +179,8 @@ def test_running_stack_is_checked_against_manifest_image_ids(tmp_path: Path) -> 
         which=lambda name: f"/usr/bin/{name}",
         base_environment={},
     )
-    assert report["state"] == PASS
+    # Running checks pass, but without a report the overall result is NOT_RUN.
+    assert report["state"] == NOT_RUN
     checks = {check["name"]: check for check in report["checks"]}
     assert checks["running-service:api"]["state"] == PASS
     assert checks["running-image:web"]["state"] == PASS

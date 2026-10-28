@@ -107,7 +107,7 @@ docker compose exec postgres pg_dump -U ivp industrial_vision > backup.sql
 
 Full container details: `docs/DOCKER_GPU_DEPLOYMENT.md`.
 
-## Release images and digest deployment (V22)
+## Release images and digest deployment (V22/V23)
 
 A strict stable SemVer tag (`vMAJOR.MINOR.PATCH`) publishes **api**, **web**
 and **api-gpu** to GHCR. Tags are `v<version>` and `sha-<short-sha>`; `latest`
@@ -147,6 +147,75 @@ Rollback is a digest change: redeploy the previous manifest's digests. Do not
 reverse migrations automatically; restore the pre-upgrade backup if the older
 application is incompatible with the current schema. Never move or delete a
 release tag. Full procedure: `docs/RELEASES.md`.
+
+### Verification and recovery gates (V23)
+
+A verification report authorizes deployment only when it is bound to the exact
+manifest bytes and release subject, uses the `production` profile, has
+`overall_state: PASS`, has `verified` and `production_verified` both `true`,
+and has `PASS` CPU and GPU artifact states. Check it before deploying:
+
+```powershell
+python -m tools.release.cli check-report `
+  --report release-verification.json `
+  --manifest release-manifest.json `
+  --require-production
+```
+
+After `docker compose ... up -d`, verify the resolved configuration and the
+running stack:
+
+```powershell
+python -m tools.release.cli verify-deploy `
+  --manifest release-manifest.json `
+  --report release-verification.json --require-verified `
+  --running --check-logs
+```
+
+This rejects mutable tags and local `build:` definitions, requires Compose to
+resolve exactly the manifest digests, compares each running container's image
+ID with the manifest, and optionally scans recent service logs for credential
+patterns. Findings name the pattern type only; secret values are never
+printed. Treat any `FAIL` as a deployment failure and roll back.
+
+Run the post-deployment smoke with a dedicated account:
+
+```powershell
+$env:IVP_SMOKE_PASSWORD="<smoke-user-password>"
+python -m tools.release.cli smoke `
+  --api-url https://ops.example.com/api `
+  --web-url https://ops.example.com `
+  --username smoke@example.com `
+  --output deployment-smoke.json
+```
+
+The smoke covers `/live`, `/ready`, security headers, invalid-credential
+rejection, positive login and `/me`, a CSRF-protected WebSocket ticket, an
+unauthenticated socket (must close with `4401`), an authenticated socket, and
+frontend headers. Missing credentials or a missing web URL produce required
+`NOT_RUN` checks, so the report cannot be `verified`. Passwords are read from
+the environment and never appear in the report.
+
+For rollback, generate a plan from the previous manifest and its production
+report:
+
+```powershell
+python -m tools.release.cli rollback-plan `
+  --manifest previous-release-manifest.json `
+  --report previous-release-verification.json `
+  --current-manifest release-manifest.json `
+  --backup-file before-rollback.sql `
+  --output rollback-plan.txt
+```
+
+`--allow-unverified` is an emergency-only bypass; it prints a warning and
+requires independent digest verification. The plan never reverses migrations
+automatically, never deletes the PostgreSQL volume, and never moves or reuses
+a release tag.
+
+Evidence states are `PASS`, `FAIL`, `NOT_RUN`, `UNAVAILABLE`, and `SIMULATED`.
+Only `PASS` is success. A missing tool, network, credential, or GPU is
+reported honestly rather than converted into a pass.
 
 Base images (`node:20-alpine`, `python:3.11-slim-bookworm`) are not
 digest-pinned, so a rebuild may pull new base packages; the image scan is the

@@ -134,12 +134,20 @@ def build_publication_report(
         elif status == "push_started":
             started.add(image)
         elif status == "failed":
+            if image in published:
+                errors.append(
+                    f"event {index}: image {image} failed after a proven push; "
+                    "publication state is contradictory"
+                )
+                continue
             failed.add(image)
 
     # A started or failed event followed by a proven push is a retry; the push
-    # wins. A proven push followed by a later failure is contradictory.
-    unknown = sorted(started - published)
-    failed_only = sorted(failed - published - started)
+    # wins. A proven push followed by a later failure is contradictory. An
+    # image with a failure event is failed, not unknown; unknown means only a
+    # push_started event was recorded.
+    unknown = sorted(started - published - failed)
+    failed_only = sorted(failed - published)
     missing = sorted(set(expected) - published - started - failed)
     complete = not errors and not missing and not unknown and not failed_only
     if complete:

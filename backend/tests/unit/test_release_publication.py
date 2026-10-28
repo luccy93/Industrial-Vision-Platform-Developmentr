@@ -130,6 +130,33 @@ def test_conflicting_digests_are_rejected(tmp_path: Path) -> None:
     assert any("two different digests" in error for error in report["errors"])
 
 
+def test_failed_event_after_a_proven_push_is_contradictory(tmp_path: Path) -> None:
+    path = _write_events(
+        tmp_path,
+        [_event(name, "pushed") for name in REQUIRED_IMAGES] + [_event("api", "failed")],
+    )
+    report = build_publication_report(path, tag=TAG, source_repository=REPOSITORY)
+    assert report["complete"] is False
+    assert any("failed after a proven push" in error for error in report["errors"])
+
+
+def test_started_then_failed_is_failed_not_unknown(tmp_path: Path) -> None:
+    path = _write_events(
+        tmp_path,
+        [
+            _event("api", "push_started"),
+            _event("api", "failed"),
+            _event("web", "push_started"),
+        ],
+    )
+    report = build_publication_report(path, tag=TAG, source_repository=REPOSITORY)
+    assert report["status"] == "failed"
+    assert report["unknown_images"] == ["web"]
+    assert report["failed_images"] == ["api"]
+    assert report["missing_images"] == ["api-gpu"]
+    assert report["complete"] is False
+
+
 def test_wrong_repository_and_tag_are_rejected(tmp_path: Path) -> None:
     path = _write_events(
         tmp_path,
