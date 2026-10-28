@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/release-verification.schema.json",
+  "title": "Industrial Vision Platform release verification report",
+  "description": "Independent verification evidence produced by tools/release/verification.py. PASS means every required check passed; NOT_RUN, UNAVAILABLE, and SIMULATED are never treated as production success. artifact_status reports CPU and GPU evidence separately; GPU runtime_verified is false when no GPU hardware was available.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "generated_at",
+    "manifest_sha256",
+    "subject",
+    "overall_state",
+    "verified",
+    "production_verified",
+    "artifact_status",
+    "checks",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "profile": {
+      "enum": ["local", "production"]
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "overall_state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "production_verified": {
+      "type": "boolean"
+    },
+    "artifact_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "gpu"],
+      "properties": {
+        "cpu": {
+          "$ref": "#/$defs/artifact"
+        },
+        "gpu": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "state", "required", "detail", "command"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "command": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "images", "runtime_state", "runtime_verified"],
+      "properties": {
+        "state": {
+          "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+        },
+        "images": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+          }
+        },
+        "runtime_state": {
+          "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+        },
+        "runtime_verified": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

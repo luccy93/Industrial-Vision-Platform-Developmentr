@@ -1,4 +1,4 @@
-"""V22 release identity, manifest, and workflow-policy validation."""
+"""V22/V23 release identity, manifest, verification, and workflow-policy validation."""
 
 from tools.release.identity import (
     IdentityError,
@@ -20,11 +20,17 @@ from tools.release.manifest import (
     validate_manifest,
     write_manifest,
 )
+from tools.release.verification import (
+    VerificationError,
+    verify_release,
+    write_verification_report,
+)
 
 __all__ = [
     "IdentityError",
     "ManifestError",
     "ReleaseVersion",
+    "VerificationError",
     "build_manifest",
     "canonical_json",
     "image_repository",
@@ -37,5 +43,7 @@ __all__ = [
     "validate_manifest",
     "validate_source_repository",
     "validate_tag",
+    "verify_release",
     "write_manifest",
+    "write_verification_report",
 ]

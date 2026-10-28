@@ -1,4 +1,4 @@
-"""Command line entry point for V22 release validation.
+"""Command line entry point for V22/V23 release validation.
 
 Usage examples::
 
@@ -10,6 +10,9 @@ Usage examples::
         --artifacts-dir release-artifacts --output release-artifacts/release-manifest.json
     python -m tools.release.cli validate --manifest release-artifacts/release-manifest.json \\
         --artifacts-dir release-artifacts --tag v1.2.3 --commit <40-hex>
+    python -m tools.release.cli verify --manifest release-artifacts/release-manifest.json \\
+        --artifacts-dir release-artifacts --tag v1.2.3 --commit <40-hex> \\
+        --profile production --repo-root . --main-ref origin/main
     python -m tools.release.cli audit-workflows --root .
 
 Every command exits non-zero on a policy violation.
@@ -40,6 +43,13 @@ from tools.release.manifest import (
     write_manifest,
 )
 from tools.release.registry import RegistryError, check_release_conflicts
+from tools.release.verification import (
+    PROFILES,
+    VerificationError,
+    render_verification_summary,
+    verify_release,
+    write_verification_report,
+)
 from tools.release.workflows import audit_workflows
 
 
@@ -117,6 +127,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     summary_parser.add_argument("--manifest", type=Path, required=True)
 
+    verification_parser = subparsers.add_parser(
+        "verify",
+        help="independently verify a release manifest, evidence, registry digests, and attestations",
+    )
+    verification_parser.add_argument("--manifest", type=Path, required=True)
+    verification_parser.add_argument("--artifacts-dir", type=Path)
+    verification_parser.add_argument("--tag")
+    verification_parser.add_argument("--commit")
+    verification_parser.add_argument("--profile", choices=PROFILES, default="local")
+    verification_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    verification_parser.add_argument("--main-ref", default="origin/main")
+    verification_parser.add_argument("--output", type=Path)
+
     audit_parser = subparsers.add_parser(
         "audit-workflows", help="reject unpinned actions and container images"
     )
@@ -172,6 +195,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"release manifest is valid: {args.manifest}")
         elif args.command == "summary":
             sys.stdout.write(render_summary(load_manifest(args.manifest)))
+        elif args.command == "verify":
+            artifacts_dir = args.artifacts_dir or args.manifest.parent
+            report = verify_release(
+                args.manifest,
+                artifacts_dir=artifacts_dir,
+                profile=args.profile,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                repo_root=args.repo_root,
+                main_ref=args.main_ref,
+            )
+            if args.output is not None:
+                write_verification_report(report, args.output)
+            sys.stdout.write(render_verification_summary(report))
+            if not report["verified"]:
+                return 1
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -179,7 +218,13 @@ def main(argv: list[str] | None = None) -> int:
                     print(problem, file=sys.stderr)
                 return 1
             print("workflows are pinned")
-    except (IdentityError, ManifestError, RegistryError, OSError) as exc:
+    except (
+        IdentityError,
+        ManifestError,
+        RegistryError,
+        VerificationError,
+        OSError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
