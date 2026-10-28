@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/staging-qualification.schema.json",
+  "title": "Industrial Vision Platform controlled staging qualification report",
+  "description": "Staging qualification evidence produced by tools/release/staging.py. The report names one explicit staging target, binds it to the exact manifest bytes and release subject, records every check honestly, and hashes every retained evidence file. staging_qualified is true only after an explicitly authorized mutation run where every required check is PASS. production_qualified is always false: staging evidence never authorizes production.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "target",
+    "mode",
+    "authorized",
+    "manifest_sha256",
+    "subject",
+    "digests",
+    "state",
+    "staging_qualified",
+    "production_qualified",
+    "preflight",
+    "verification",
+    "publication",
+    "deployment",
+    "smoke",
+    "gpu_runtime",
+    "gpu_inference",
+    "rehearsal",
+    "evidence",
+    "checks",
+    "blockers",
+    "limitations",
+    "next_steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "target": {
+      "$ref": "#/$defs/target"
+    },
+    "mode": {
+      "enum": ["preflight", "live-read", "authorized-mutation"]
+    },
+    "authorized": {
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "staging_qualified": {
+      "type": "boolean"
+    },
+    "production_qualified": {
+      "const": false
+    },
+    "preflight": {
+      "$ref": "#/$defs/binding"
+    },
+    "verification": {
+      "$ref": "#/$defs/binding"
+    },
+    "publication": {
+      "$ref": "#/$defs/binding"
+    },
+    "deployment": {
+      "$ref": "#/$defs/binding"
+    },
+    "smoke": {
+      "$ref": "#/$defs/binding"
+    },
+    "gpu_runtime": {
+      "$ref": "#/$defs/binding"
+    },
+    "gpu_inference": {
+      "$ref": "#/$defs/binding"
+    },
+    "rehearsal": {
+      "$ref": "#/$defs/binding"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "source_repository": {
+          "type": "string"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "environment",
+        "api_url",
+        "web_url",
+        "ws_url",
+        "smoke_username",
+        "smoke_password_env",
+        "compose_project",
+        "compose_files",
+        "gpu",
+        "previous_manifest"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "environment": {
+          "const": "staging"
+        },
+        "api_url": {
+          "type": "string"
+        },
+        "web_url": {
+          "type": "string"
+        },
+        "ws_url": {
+          "type": "string"
+        },
+        "smoke_username": {
+          "type": "string"
+        },
+        "smoke_password_env": {
+          "type": "string"
+        },
+        "compose_project": {
+          "type": "string"
+        },
+        "compose_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gpu": {
+          "type": "boolean"
+        },
+        "previous_manifest": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "binding": {
+      "type": ["object", "null"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

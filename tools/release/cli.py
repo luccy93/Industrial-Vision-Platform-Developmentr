@@ -133,6 +133,13 @@ from tools.release.smoke import (
     run_smoke,
     write_smoke_report,
 )
+from tools.release.staging import (
+    StagingError,
+    render_staging_summary,
+    run_staging_qualification,
+    staging_report_errors,
+    write_staging_report,
+)
 from tools.release.verification import (
     PROFILES,
     VerificationError,
@@ -415,6 +422,33 @@ def _build_parser() -> argparse.ArgumentParser:
     qualification_gate.add_argument("--rehearsal-report", type=Path)
     qualification_gate.add_argument("--gpu-report", type=Path)
     qualification_gate.add_argument("--require-production", action="store_true")
+
+    staging_parser = subparsers.add_parser(
+        "staging-qualify",
+        help="qualify one explicit staging target with fail-closed mutation authorization",
+    )
+    staging_parser.add_argument("--target", type=Path, required=True)
+    staging_parser.add_argument("--manifest", type=Path, required=True)
+    staging_parser.add_argument("--artifacts-dir", type=Path, required=True)
+    staging_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    staging_parser.add_argument("--output", type=Path, required=True)
+    staging_parser.add_argument("--evidence-dir", type=Path)
+    staging_parser.add_argument("--execute", action="store_true")
+    staging_parser.add_argument("--authorize")
+    staging_parser.add_argument("--previous-manifest", type=Path)
+    staging_parser.add_argument("--require-gpu-runtime", action="store_true")
+    staging_parser.add_argument("--require-rollback", action="store_true")
+    staging_parser.add_argument("--tag")
+    staging_parser.add_argument("--commit")
+    staging_parser.add_argument("--repository")
+
+    staging_gate = subparsers.add_parser(
+        "check-staging",
+        help="require a staging qualification report to authorize the exact target",
+    )
+    staging_gate.add_argument("--report", type=Path, required=True)
+    staging_gate.add_argument("--manifest", type=Path, required=True)
+    staging_gate.add_argument("--evidence-dir", type=Path)
 
     audit_parser = subparsers.add_parser(
         "audit-workflows", help="reject unpinned actions and container images"
@@ -748,6 +782,41 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(render_gpu_summary(report))
             if not report["verified"]:
                 return 1
+        elif args.command == "staging-qualify":
+            report = run_staging_qualification(
+                args.target,
+                args.manifest,
+                repo_root=args.repo_root,
+                artifacts_dir=args.artifacts_dir,
+                output=args.output,
+                evidence_dir=args.evidence_dir,
+                execute=args.execute,
+                authorize=args.authorize,
+                previous_manifest_path=args.previous_manifest,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_repository=args.repository,
+                require_gpu_runtime=args.require_gpu_runtime,
+                require_rollback=args.require_rollback,
+            )
+            write_staging_report(report, args.output)
+            sys.stdout.write(render_staging_summary(report))
+            if not report["staging_qualified"]:
+                return 1
+        elif args.command == "check-staging":
+            manifest = load_manifest(args.manifest)
+            report = _load_json(args.report)
+            errors = staging_report_errors(
+                report,
+                manifest,
+                manifest_path=args.manifest,
+                evidence_dir=args.evidence_dir,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"staging qualification authorizes the target: {args.report}")
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -767,6 +836,7 @@ def main(argv: list[str] | None = None) -> int:
         RehearsalError,
         RegistryError,
         SmokeError,
+        StagingError,
         VerificationError,
         OSError,
     ) as exc:
