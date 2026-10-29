@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/release-evidence.schema.json",
+  "title": "Industrial Vision Platform release evidence report",
+  "description": "Release evidence produced by tools/release/evidence.py. It binds the manifest bytes, the embedded V23 verification report, the published GitHub Release, and every retained SBOM/scan hash. Live checks are NOT_RUN unless --execute is supplied; missing tools are UNAVAILABLE and never PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "executed",
+    "manifest_sha256",
+    "subject",
+    "digests",
+    "state",
+    "verified",
+    "production_verified",
+    "github_release",
+    "verification",
+    "artifacts",
+    "checks",
+    "blockers",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "production_verified": {
+      "type": "boolean"
+    },
+    "github_release": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/check"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "type": ["object", "null"]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "source_repository": {
+          "type": "string"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest",
+        "sbom_file",
+        "sbom_sha256",
+        "scan_log_file",
+        "scan_log_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "sbom_file": {
+          "type": "string"
+        },
+        "sbom_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scan_log_file": {
+          "type": "string"
+        },
+        "scan_log_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

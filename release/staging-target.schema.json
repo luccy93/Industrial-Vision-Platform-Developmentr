@@ -34,7 +34,11 @@
     "release": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "commit", "source_repository"],
+      "required": [
+        "tag",
+        "commit",
+        "source_repository"
+      ],
       "properties": {
         "tag": {
           "type": "string",
@@ -87,8 +91,18 @@
       "type": "boolean"
     },
     "previous_manifest": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Optional previous release manifest used for migration compatibility and rollback rehearsal. Relative to the repository root."
+    },
+    "previous_verification_report": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional previous production verification report used only for an executed rollback rehearsal. Relative to the repository root."
     }
   }
 }

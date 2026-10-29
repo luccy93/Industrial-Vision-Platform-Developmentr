@@ -252,6 +252,7 @@ def _ticket(
     api_url: str,
     *,
     csrf: str,
+    name: str = "ws-ticket",
 ) -> tuple[str | None, dict[str, Any]]:
     try:
         response = client.post(
@@ -260,10 +261,10 @@ def _ticket(
             headers={CSRF_HEADER: csrf},
         )
     except httpx.HTTPError as exc:
-        return None, _check("ws-ticket", FAIL, True, f"ticket request failed: {exc}")
+        return None, _check(name, FAIL, True, f"ticket request failed: {exc}")
     if response.status_code != 200:
         return None, _check(
-            "ws-ticket",
+            name,
             FAIL,
             True,
             f"ticket request returned HTTP {response.status_code}, expected 200",
@@ -271,8 +272,8 @@ def _ticket(
     payload = _json_body(response)
     ticket = payload.get("ticket") if isinstance(payload, Mapping) else None
     if not isinstance(ticket, str) or not ticket:
-        return None, _check("ws-ticket", FAIL, True, "ticket response is missing a ticket")
-    return ticket, _check("ws-ticket", PASS, True, "a single-use operations ticket was issued")
+        return None, _check(name, FAIL, True, "ticket response is missing a ticket")
+    return ticket, _check(name, PASS, True, "a single-use operations ticket was issued")
 
 
 def _ws_result(
@@ -405,6 +406,21 @@ def run_smoke(
             )
 
         try:
+            health = client.get(_api_url(api_url, "/health"))
+        except httpx.HTTPError as exc:
+            checks.append(_check("api-health", FAIL, True, f"GET /health failed: {exc}"))
+        else:
+            payload = _json_body(health)
+            if health.status_code != 200:
+                checks.append(
+                    _check("api-health", FAIL, True, f"GET /health returned HTTP {health.status_code}")
+                )
+            elif not isinstance(payload, Mapping) or payload.get("status") != "ok":
+                checks.append(_check("api-health", FAIL, True, "GET /health did not return status=ok"))
+            else:
+                checks.append(_check("api-health", PASS, True, "GET /health reports service diagnostics"))
+
+        try:
             ready = client.get(_api_url(api_url, "/ready"))
         except httpx.HTTPError as exc:
             checks.append(_check("api-ready", FAIL, True, f"GET /ready failed: {exc}"))
@@ -469,6 +485,32 @@ def run_smoke(
                         timeout=timeout,
                     )
                 )
+                reconnect_ticket, reconnect_ticket_check = _ticket(
+                    client,
+                    api_url,
+                    csrf=csrf,
+                    name="ws-reconnect-ticket",
+                )
+                checks.append(reconnect_ticket_check)
+                if reconnect_ticket is not None:
+                    checks.append(
+                        _ws_result(
+                            "ws-reconnect",
+                            expect_close_code=None,
+                            url=f"{ws_base}/ws/operations?ticket={reconnect_ticket}",
+                            ws_connect=ws_connect,
+                            timeout=timeout,
+                        )
+                    )
+                else:
+                    checks.append(
+                        _check(
+                            "ws-reconnect",
+                            NOT_RUN,
+                            True,
+                            "no reconnect ticket was issued; WebSocket reconnect was not tested",
+                        )
+                    )
             else:
                 checks.append(
                     _check(
@@ -478,6 +520,14 @@ def run_smoke(
                         "no ticket was issued; authenticated WebSocket was not tested",
                     )
                 )
+                checks.append(
+                    _check(
+                        "ws-reconnect",
+                        NOT_RUN,
+                        True,
+                        "no ticket was issued; WebSocket reconnect was not tested",
+                    )
+                )
         else:
             checks.append(
                 _check(
@@ -485,6 +535,14 @@ def run_smoke(
                     NOT_RUN,
                     True,
                     "no authenticated session; authenticated WebSocket was not tested",
+                )
+            )
+            checks.append(
+                _check(
+                    "ws-reconnect",
+                    NOT_RUN,
+                    True,
+                    "no authenticated session; WebSocket reconnect was not tested",
                 )
             )
 

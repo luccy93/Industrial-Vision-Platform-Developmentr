@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/deployment-execution.schema.json",
+  "title": "Industrial Vision Platform deployment execution report",
+  "description": "Deployment execution evidence produced by tools/release/deployment.py:deploy_release. Execution requires a production verification report and a bound preflight, pulls and starts digest-pinned images, then verifies the running stack against manifest image IDs. A non-executed run is NOT_RUN, never PASS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "executed",
+    "manifest_sha256",
+    "subject",
+    "gpu",
+    "project",
+    "compose_files",
+    "state",
+    "checks",
+    "blockers",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "gpu": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": ["string", "null"]
+    },
+    "compose_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "source_repository"],
+      "properties": {
+        "tag": {
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "source_repository": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state", "required", "detail", "command"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "command": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

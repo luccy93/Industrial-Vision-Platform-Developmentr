@@ -45,6 +45,12 @@ def _handler(*, invalid_accepts: bool = False, web_headers: dict[str, str] | Non
             return httpx.Response(200, text="<html></html>", headers=headers)
         if path == "/live":
             return httpx.Response(200, json={"status": "ok"}, headers=_headers())
+        if path == "/health":
+            return httpx.Response(
+                200,
+                json={"status": "ok", "runtime": {"state": "READY", "ready": True}},
+                headers=_headers(),
+            )
         if path == "/ready":
             return httpx.Response(200, json={"ready": True, "status": "ready"}, headers=_headers())
         if path == "/api/v1/auth/login":
@@ -134,6 +140,7 @@ def test_smoke_passes_with_authenticated_deployment() -> None:
     checks = {check["name"]: check for check in report["checks"]}
     for name in (
         "api-live",
+        "api-health",
         "api-ready",
         "api-headers",
         "auth-invalid-credentials",
@@ -141,6 +148,8 @@ def test_smoke_passes_with_authenticated_deployment() -> None:
         "ws-ticket",
         "ws-unauthorized",
         "ws-authenticated",
+        "ws-reconnect-ticket",
+        "ws-reconnect",
         "web-headers",
     ):
         assert checks[name]["state"] == PASS, (name, checks[name])
@@ -153,6 +162,7 @@ def test_missing_credentials_are_not_run_not_success() -> None:
     assert checks["auth-login"]["state"] == NOT_RUN
     assert checks["auth-login"]["required"] is True
     assert checks["ws-authenticated"]["state"] == NOT_RUN
+    assert checks["ws-reconnect"]["state"] == NOT_RUN
     assert report["overall_state"] == NOT_RUN
     assert report["verified"] is False
 
@@ -177,6 +187,19 @@ def test_authenticated_websocket_being_forbidden_fails() -> None:
     report = _run(ws_connect=_ws(authenticated_closes=True))
     checks = {check["name"]: check for check in report["checks"]}
     assert checks["ws-authenticated"]["state"] == FAIL
+    assert checks["ws-reconnect"]["state"] == FAIL
+    assert report["overall_state"] == FAIL
+
+
+def test_health_endpoint_failure_fails() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(503, json={"status": "degraded"}, headers=_headers())
+        return _handler()(request)
+
+    report = _run(transport=httpx.MockTransport(handler))
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["api-health"]["state"] == FAIL
     assert report["overall_state"] == FAIL
 
 

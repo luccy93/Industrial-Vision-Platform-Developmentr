@@ -36,6 +36,7 @@ from tools.release.manifest import (
     sha256_file,
     utc_now_iso,
 )
+from tools.release.migrations import migration_report_errors
 from tools.release.smoke import SmokeError, run_smoke
 from tools.release.verification import (
     FAIL,
@@ -380,6 +381,46 @@ def _report(
     }
 
 
+def _migration_safety_check(
+    migration_report_path: Path | None,
+    target: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    if migration_report_path is None:
+        return _check(
+            "migration-safety",
+            NOT_RUN,
+            False,
+            "no migration compatibility report was supplied; migration safety was not bound",
+        )
+    try:
+        report = json.loads(migration_report_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return _check(
+            "migration-safety",
+            FAIL,
+            True,
+            f"migration compatibility report could not be read: {exc}",
+        )
+    except json.JSONDecodeError as exc:
+        return _check(
+            "migration-safety",
+            FAIL,
+            True,
+            f"migration compatibility report is not valid JSON: {exc}",
+        )
+    errors = migration_report_errors(report, target, manifest_path=manifest_path)
+    return _check(
+        "migration-safety",
+        PASS if not errors else FAIL,
+        True,
+        "migration compatibility is PASS and bound to the target manifest"
+        if not errors
+        else "; ".join(errors[:8]),
+    )
+
+
 def _verify_step(
     label: str,
     manifest_path: Path,
@@ -484,6 +525,7 @@ def run_rollback_rehearsal(
     execute: bool = False,
     target_verification_report: Path | None = None,
     previous_verification_report: Path | None = None,
+    migration_report_path: Path | None = None,
     smoke_api_url: str | None = None,
     smoke_web_url: str | None = None,
     smoke_username: str | None = None,
@@ -551,6 +593,12 @@ def run_rollback_rehearsal(
             "target and previous manifests have different commits and image digests",
         ),
     ]
+    migration_check = _migration_safety_check(
+        migration_report_path,
+        target,
+        manifest_path=manifest_path,
+    )
+    checks.append(migration_check)
     steps: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
 
@@ -572,6 +620,29 @@ def run_rollback_rehearsal(
         )
         for name in STEP_NAMES:
             checks.append(_check(name, NOT_RUN, True, "rollback rehearsal was not executed"))
+        return _report(
+            target=target,
+            previous=previous,
+            target_sha=target_sha,
+            previous_sha=previous_sha,
+            executed=False,
+            checks=checks,
+            steps=steps,
+            evidence=evidence,
+            now=now,
+        )
+
+    if migration_check["state"] == FAIL:
+        checks.append(
+            _check(
+                "execution",
+                FAIL,
+                True,
+                "rollback rehearsal was not executed because migration safety did not pass",
+            )
+        )
+        for name in STEP_NAMES:
+            checks.append(_check(name, NOT_RUN, True, "migration safety did not pass"))
         return _report(
             target=target,
             previous=previous,

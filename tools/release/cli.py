@@ -73,6 +73,13 @@ from tools.release.deployment import (
     verification_report_errors,
     verify_deployment,
 )
+from tools.release.evidence import (
+    EvidenceError,
+    collect_release_evidence,
+    evidence_report_errors,
+    render_evidence_summary,
+    write_evidence_report,
+)
 from tools.release.gpu import (
     GpuError,
     qualify_gpu_runtime,
@@ -86,6 +93,13 @@ from tools.release.identity import (
     validate_tag,
     verify_tag_commit,
 )
+from tools.release.inference import (
+    InferenceError,
+    inference_report_errors,
+    qualify_gpu_inference,
+    render_inference_summary,
+    write_inference_report,
+)
 from tools.release.manifest import (
     ManifestError,
     build_manifest,
@@ -93,6 +107,13 @@ from tools.release.manifest import (
     render_summary,
     validate_manifest,
     write_manifest,
+)
+from tools.release.migrations import (
+    MigrationError,
+    check_migration_compatibility,
+    migration_report_errors,
+    render_migration_summary,
+    write_migration_report,
 )
 from tools.release.preflight import (
     PreflightError,
@@ -141,6 +162,7 @@ from tools.release.staging import (
     write_staging_report,
 )
 from tools.release.verification import (
+    PASS,
     PROFILES,
     VerificationError,
     render_verification_summary,
@@ -322,6 +344,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rehearsal_parser.add_argument("--previous-manifest", type=Path, required=True)
     rehearsal_parser.add_argument("--target-report", type=Path)
     rehearsal_parser.add_argument("--previous-report", type=Path)
+    rehearsal_parser.add_argument("--migration-report", type=Path)
     rehearsal_parser.add_argument("--compose", action="append", default=None)
     rehearsal_parser.add_argument("--gpu", action="store_true")
     rehearsal_parser.add_argument("--project")
@@ -436,6 +459,7 @@ def _build_parser() -> argparse.ArgumentParser:
     staging_parser.add_argument("--execute", action="store_true")
     staging_parser.add_argument("--authorize")
     staging_parser.add_argument("--previous-manifest", type=Path)
+    staging_parser.add_argument("--previous-verification-report", type=Path)
     staging_parser.add_argument("--require-gpu-runtime", action="store_true")
     staging_parser.add_argument("--require-rollback", action="store_true")
     staging_parser.add_argument("--tag")
@@ -449,6 +473,68 @@ def _build_parser() -> argparse.ArgumentParser:
     staging_gate.add_argument("--report", type=Path, required=True)
     staging_gate.add_argument("--manifest", type=Path, required=True)
     staging_gate.add_argument("--evidence-dir", type=Path)
+
+    evidence_parser = subparsers.add_parser(
+        "collect-evidence",
+        help="collect and bind GitHub Release, GHCR, attestation, SBOM, and scan evidence",
+    )
+    evidence_parser.add_argument("--manifest", type=Path, required=True)
+    evidence_parser.add_argument("--artifacts-dir", type=Path, required=True)
+    evidence_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    evidence_parser.add_argument("--main-ref", default="origin/main")
+    evidence_parser.add_argument("--output", type=Path, required=True)
+    evidence_parser.add_argument("--execute", action="store_true")
+    evidence_parser.add_argument("--tag")
+    evidence_parser.add_argument("--commit")
+    evidence_parser.add_argument("--repository")
+
+    evidence_gate = subparsers.add_parser(
+        "check-evidence",
+        help="require a live release evidence report to authorize staging",
+    )
+    evidence_gate.add_argument("--report", type=Path, required=True)
+    evidence_gate.add_argument("--manifest", type=Path, required=True)
+    evidence_gate.add_argument("--artifacts-dir", type=Path)
+    evidence_gate.add_argument(
+        "--allow-local",
+        action="store_true",
+        help="inspect a local-only report; live evidence is required by default",
+    )
+
+    migration_parser = subparsers.add_parser(
+        "migration-compatibility",
+        help="statically verify the Alembic graph and non-destructive upgrades",
+    )
+    migration_parser.add_argument("--manifest", type=Path, required=True)
+    migration_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    migration_parser.add_argument("--previous-manifest", type=Path)
+    migration_parser.add_argument("--output", type=Path, required=True)
+    migration_parser.add_argument("--tag")
+    migration_parser.add_argument("--commit")
+
+    migration_gate = subparsers.add_parser(
+        "check-migration",
+        help="require a migration compatibility report bound to the manifest",
+    )
+    migration_gate.add_argument("--report", type=Path, required=True)
+    migration_gate.add_argument("--manifest", type=Path, required=True)
+
+    inference_parser = subparsers.add_parser(
+        "gpu-inference",
+        help="run structured inference inside the digest-pinned GPU image",
+    )
+    inference_parser.add_argument("--manifest", type=Path, required=True)
+    inference_parser.add_argument("--output", type=Path, required=True)
+    inference_parser.add_argument("--execute", action="store_true")
+    inference_parser.add_argument("--tag")
+    inference_parser.add_argument("--commit")
+
+    inference_gate = subparsers.add_parser(
+        "check-gpu-inference",
+        help="require executed CUDA inference evidence bound to the manifest",
+    )
+    inference_gate.add_argument("--report", type=Path, required=True)
+    inference_gate.add_argument("--manifest", type=Path, required=True)
 
     audit_parser = subparsers.add_parser(
         "audit-workflows", help="reject unpinned actions and container images"
@@ -752,6 +838,7 @@ def main(argv: list[str] | None = None) -> int:
                 execute=args.execute,
                 target_verification_report=args.target_report,
                 previous_verification_report=args.previous_report,
+                migration_report_path=args.migration_report,
                 smoke_api_url=args.smoke_api_url,
                 smoke_web_url=args.smoke_web_url,
                 smoke_username=args.smoke_username,
@@ -793,6 +880,7 @@ def main(argv: list[str] | None = None) -> int:
                 execute=args.execute,
                 authorize=args.authorize,
                 previous_manifest_path=args.previous_manifest,
+                previous_verification_report_path=args.previous_verification_report,
                 expected_tag=args.tag,
                 expected_commit=args.commit,
                 expected_repository=args.repository,
@@ -817,6 +905,85 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"error: {error}", file=sys.stderr)
                 return 1
             print(f"staging qualification authorizes the target: {args.report}")
+        elif args.command == "collect-evidence":
+            report = collect_release_evidence(
+                args.manifest,
+                artifacts_dir=args.artifacts_dir,
+                repo_root=args.repo_root,
+                main_ref=args.main_ref,
+                execute=args.execute,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_repository=args.repository,
+            )
+            write_evidence_report(report, args.output)
+            sys.stdout.write(render_evidence_summary(report))
+            if args.execute and report["state"] != PASS:
+                return 1
+        elif args.command == "check-evidence":
+            manifest = load_manifest(args.manifest)
+            report = _load_json(args.report)
+            errors = evidence_report_errors(
+                report,
+                manifest,
+                manifest_path=args.manifest,
+                artifacts_dir=args.artifacts_dir,
+                require_live=not args.allow_local,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"release evidence authorizes staging: {args.report}")
+        elif args.command == "migration-compatibility":
+            report = check_migration_compatibility(
+                args.manifest,
+                repo_root=args.repo_root,
+                previous_manifest_path=args.previous_manifest,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+            )
+            write_migration_report(report, args.output)
+            sys.stdout.write(render_migration_summary(report))
+            if report["state"] != PASS:
+                return 1
+        elif args.command == "check-migration":
+            manifest = load_manifest(args.manifest)
+            report = _load_json(args.report)
+            errors = migration_report_errors(
+                report,
+                manifest,
+                manifest_path=args.manifest,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"migration compatibility authorizes staging: {args.report}")
+        elif args.command == "gpu-inference":
+            report = qualify_gpu_inference(
+                args.manifest,
+                execute=args.execute,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+            )
+            write_inference_report(report, args.output)
+            sys.stdout.write(render_inference_summary(report))
+            if args.execute and report["state"] != PASS:
+                return 1
+        elif args.command == "check-gpu-inference":
+            manifest = load_manifest(args.manifest)
+            report = _load_json(args.report)
+            errors = inference_report_errors(
+                report,
+                manifest,
+                manifest_path=args.manifest,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"GPU inference authorizes staging: {args.report}")
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -826,9 +993,12 @@ def main(argv: list[str] | None = None) -> int:
             print("workflows are pinned")
     except (
         DeploymentError,
+        EvidenceError,
         GpuError,
         IdentityError,
+        InferenceError,
         ManifestError,
+        MigrationError,
         PreflightError,
         PrerequisiteError,
         PublicationError,

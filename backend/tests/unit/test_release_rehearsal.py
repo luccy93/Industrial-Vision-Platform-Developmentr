@@ -13,9 +13,10 @@ from backend.tests.unit.release_evidence import (
     previous_release_manifest,
     write_production_verification_report,
 )
-from backend.tests.unit.test_release_verification import make_release
+from backend.tests.unit.test_release_verification import REPO_ROOT, make_release
 from tools.release.cli import main
 from tools.release.manifest import sha256_file
+from tools.release.migrations import check_migration_compatibility, write_migration_report
 from tools.release.rehearsal import (
     REHEARSAL_EVIDENCE_FIELDS,
     REHEARSAL_REPORT_FIELDS,
@@ -264,6 +265,58 @@ def test_rehearsal_rolls_back_after_target_verification_failure(tmp_path: Path) 
     assert steps["verify-after-rollback"]["state"] == PASS
     assert steps["smoke-after-rollback"]["state"] == PASS
     assert report["blockers"]
+
+
+def test_rehearsal_records_bound_migration_safety(tmp_path: Path) -> None:
+    manifest_path, _, previous_path, _, target_report, previous_report, runner = _setup(tmp_path)
+    migration_path = tmp_path / "migration-compatibility.json"
+    migration_report = check_migration_compatibility(
+        manifest_path,
+        repo_root=REPO_ROOT,
+        previous_manifest_path=previous_path,
+    )
+    write_migration_report(migration_report, migration_path)
+    report = _rehearse(
+        manifest_path,
+        previous_path,
+        target_report=target_report,
+        previous_report=previous_report,
+        runner=runner,
+        tmp_path=tmp_path,
+        migration_report_path=migration_path,
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    assert report["state"] == PASS
+    assert checks["migration-safety"]["state"] == PASS
+    assert checks["migration-safety"]["required"] is True
+
+
+def test_rehearsal_does_not_execute_when_migration_safety_fails(tmp_path: Path) -> None:
+    manifest_path, _, previous_path, _, target_report, previous_report, runner = _setup(tmp_path)
+    migration_path = tmp_path / "migration-compatibility.json"
+    migration_report = check_migration_compatibility(
+        manifest_path,
+        repo_root=REPO_ROOT,
+        previous_manifest_path=previous_path,
+    )
+    migration_report["state"] = FAIL
+    migration_report["verified"] = False
+    write_migration_report(migration_report, migration_path)
+    report = _rehearse(
+        manifest_path,
+        previous_path,
+        target_report=target_report,
+        previous_report=previous_report,
+        runner=runner,
+        tmp_path=tmp_path,
+        migration_report_path=migration_path,
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    assert report["executed"] is False
+    assert report["state"] == FAIL
+    assert checks["migration-safety"]["state"] == FAIL
+    assert checks["execution"]["state"] == FAIL
+    assert all(step["state"] == NOT_RUN for step in report["steps"])
 
 
 def test_rehearsal_report_round_trip(tmp_path: Path) -> None:

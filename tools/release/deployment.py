@@ -57,6 +57,7 @@ RUNNING_SERVICES = {
 DEFAULT_CPU_COMPOSE = ("compose.yaml", "compose.release.yaml")
 DEFAULT_GPU_COMPOSE = ("compose.yaml", "compose.gpu.release.yaml")
 DEPLOYMENT_SCHEMA_VERSION = 1
+DEPLOYMENT_EXECUTION_SCHEMA_VERSION = 1
 DEPLOYMENT_REPORT_FIELDS = (
     "schema_version",
     "generated_at",
@@ -717,6 +718,269 @@ def verify_deployment(
                         )
 
     return _deployment_report(manifest_path, manifest, gpu=gpu, checks=checks, now=now)
+
+
+def _run_deploy_command(
+    runner: CommandRunner,
+    args: Sequence[str],
+    environment: Mapping[str, str],
+    *,
+    timeout: int = 900,
+) -> dict[str, Any]:
+    command = _command_text(args)
+    try:
+        result = runner(args, timeout=timeout, env=dict(environment))
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _check(command, UNAVAILABLE, f"command could not run: {exc}", command)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "no output").strip()
+        return _check(command, FAIL, detail[:500], command)
+    return _check(command, PASS, "command succeeded", command)
+
+
+def _preflight_binding_errors(
+    report: Any,
+    manifest: Mapping[str, Any],
+    manifest_path: Path,
+) -> list[str]:
+    if not isinstance(report, Mapping):
+        return ["preflight report must be a JSON object"]
+    errors: list[str] = []
+    try:
+        expected_sha = sha256_file(manifest_path)
+    except OSError as exc:
+        return [f"could not hash manifest {manifest_path}: {exc}"]
+    if report.get("manifest_sha256") != expected_sha:
+        errors.append("preflight report is not bound to the supplied manifest")
+    release = manifest.get("release") if isinstance(manifest.get("release"), Mapping) else {}
+    subject = report.get("subject")
+    if not isinstance(subject, Mapping):
+        errors.append("preflight report subject is missing")
+    else:
+        for field in ("tag", "commit", "source_repository"):
+            if subject.get(field) != release.get(field):
+                errors.append(f"preflight report subject.{field} does not match the manifest release")
+    if report.get("state") != PASS:
+        errors.append(f"preflight report state is {report.get('state')!r}, not PASS")
+    if report.get("verified") is not True:
+        errors.append("preflight report verified is not true")
+    return errors
+
+
+def deploy_release(
+    manifest_path: Path,
+    *,
+    compose_files: Sequence[Path],
+    verification_report_path: Path | None = None,
+    preflight_report_path: Path | None = None,
+    gpu: bool = False,
+    project: str | None = None,
+    execute: bool = False,
+    expected_tag: str | None = None,
+    expected_commit: str | None = None,
+    runner: CommandRunner = default_runner,
+    which: Callable[[str], str | None] = shutil.which,
+    base_environment: Mapping[str, str] | None = None,
+    now: Callable[[], str] = utc_now_iso,
+) -> dict[str, Any]:
+    """Deploy a digest-pinned release, or report an honest NOT_RUN.
+
+    Execution requires a production verification report and a bound deployment
+    preflight. The manifest is re-resolved before any command, and the running
+    stack is verified against manifest image IDs after ``up``. A failed pull or
+    ``up`` stops the sequence; no rollback is attempted here.
+    """
+    try:
+        manifest = load_manifest(manifest_path)
+        manifest_sha = sha256_file(manifest_path)
+    except (ManifestError, OSError) as exc:
+        raise DeploymentError(str(exc)) from exc
+    errors = manifest_errors(
+        manifest,
+        expected_tag=expected_tag,
+        expected_commit=expected_commit,
+    )
+    if errors:
+        raise DeploymentError("manifest is invalid:\n- " + "\n- ".join(errors))
+    checks: list[dict[str, Any]] = []
+    if not execute:
+        checks.append(
+            _check(
+                "deployment-execution",
+                NOT_RUN,
+                "deployment execution was not requested; pass --execute",
+            )
+        )
+    else:
+        if verification_report_path is None:
+            raise DeploymentError("deployment execution requires a production verification report")
+        if preflight_report_path is None:
+            raise DeploymentError("deployment execution requires a bound deployment preflight report")
+        try:
+            verification_report = _load_verification_report(verification_report_path)
+        except DeploymentError as exc:
+            checks.append(_check("verification", FAIL, True, str(exc)))
+            verification_report = None
+        if verification_report is not None:
+            verification_errors = verification_report_errors(
+                verification_report,
+                manifest,
+                manifest_path=manifest_path,
+            )
+            checks.append(
+                _check(
+                    "verification",
+                    PASS if not verification_errors else FAIL,
+                    "production verification authorizes deployment"
+                    if not verification_errors
+                    else "; ".join(verification_errors[:8]),
+                )
+            )
+        try:
+            preflight_report = json.loads(preflight_report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            checks.append(_check("preflight", FAIL, True, f"could not read preflight report: {exc}"))
+            preflight_report = None
+        if preflight_report is not None:
+            preflight_errors = _preflight_binding_errors(
+                preflight_report,
+                manifest,
+                manifest_path,
+            )
+            checks.append(
+                _check(
+                    "preflight",
+                    PASS if not preflight_errors else FAIL,
+                    "deployment preflight authorizes deployment"
+                    if not preflight_errors
+                    else "; ".join(preflight_errors[:8]),
+                )
+            )
+        if any(check["state"] != PASS for check in checks):
+            checks.append(
+                _check(
+                    "deployment-execution",
+                    FAIL,
+                    "deployment was not attempted because its required evidence is not PASS",
+                )
+            )
+        else:
+            try:
+                _, config_checks, environment, payload = deployment_config_checks(
+                    manifest_path,
+                    compose_files=compose_files,
+                    gpu=gpu,
+                    project=project,
+                    expected_tag=expected_tag,
+                    expected_commit=expected_commit,
+                    runner=runner,
+                    which=which,
+                    base_environment=base_environment,
+                )
+            except DeploymentError as exc:
+                checks.append(_check("compose-config", FAIL, True, str(exc)))
+                payload = None
+                environment = None
+                config_checks = []
+            checks.extend(config_checks)
+            if payload is None or environment is None:
+                checks.append(
+                    _check(
+                        "deployment-execution",
+                        FAIL,
+                        "deployment was not attempted because the Compose configuration did not resolve",
+                    )
+                )
+            else:
+                pull = _run_deploy_command(
+                    runner,
+                    _compose_args(compose_files, project, ["pull"]),
+                    environment,
+                )
+                pull["name"] = "pull"
+                checks.append(pull)
+                if pull["state"] != PASS:
+                    checks.append(
+                        _check(
+                            "deployment-execution",
+                            FAIL,
+                            "deployment stopped because pulling the digest-pinned images failed",
+                        )
+                    )
+                else:
+                    up = _run_deploy_command(
+                        runner,
+                        _compose_args(compose_files, project, ["up", "-d"]),
+                        environment,
+                    )
+                    up["name"] = "up"
+                    checks.append(up)
+                    if up["state"] != PASS:
+                        checks.append(
+                            _check(
+                                "deployment-execution",
+                                FAIL,
+                                "deployment stopped because starting the stack failed",
+                            )
+                        )
+                    else:
+                        verified = verify_deployment(
+                            manifest_path,
+                            compose_files=compose_files,
+                            gpu=gpu,
+                            project=project,
+                            running=True,
+                            report_path=verification_report_path,
+                            require_verified=True,
+                            preflight_report_path=preflight_report_path,
+                            expected_tag=expected_tag,
+                            expected_commit=expected_commit,
+                            runner=runner,
+                            which=which,
+                            base_environment=base_environment,
+                            now=now,
+                        )
+                        checks.append(
+                            _check(
+                                "post-deploy-verification",
+                                str(verified.get("state")),
+                                f"running stack verification is {verified.get('state')}",
+                            )
+                        )
+                        checks.append(
+                            _check(
+                                "deployment-execution",
+                                str(verified.get("state")),
+                                "deployment executed and the running stack matches the manifest"
+                                if verified.get("state") == PASS
+                                else "deployment executed but post-deploy verification did not pass",
+                            )
+                        )
+    overall = _aggregate(checks)
+    blockers = [
+        f"{check['name']}: {check['state']} - {check['detail']}"
+        for check in checks
+        if check.get("required") is True and check.get("state") != PASS
+    ]
+    limitations = [
+        f"{check['name']}: {check['state']} - {check['detail']}"
+        for check in checks
+        if check.get("required") is not True and check.get("state") != PASS
+    ]
+    return {
+        "schema_version": DEPLOYMENT_EXECUTION_SCHEMA_VERSION,
+        "generated_at": now(),
+        "executed": execute,
+        "manifest_sha256": manifest_sha,
+        "subject": _subject(manifest),
+        "gpu": gpu,
+        "project": project,
+        "compose_files": [str(path) for path in compose_files],
+        "state": overall,
+        "checks": checks,
+        "blockers": blockers,
+        "limitations": limitations,
+    }
 
 
 def render_rollback_plan(

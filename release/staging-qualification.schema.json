@@ -20,6 +20,7 @@
     "preflight",
     "verification",
     "publication",
+    "migration",
     "deployment",
     "smoke",
     "gpu_runtime",
@@ -43,7 +44,11 @@
       "$ref": "#/$defs/target"
     },
     "mode": {
-      "enum": ["preflight", "live-read", "authorized-mutation"]
+      "enum": [
+        "preflight",
+        "live-read",
+        "authorized-mutation"
+      ]
     },
     "authorized": {
       "type": "boolean"
@@ -122,6 +127,9 @@
       "items": {
         "type": "string"
       }
+    },
+    "migration": {
+      "$ref": "#/$defs/binding"
     }
   },
   "$defs": {
@@ -130,12 +138,22 @@
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "state": {
-      "enum": ["PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "SIMULATED"]
+      "enum": [
+        "PASS",
+        "FAIL",
+        "NOT_RUN",
+        "UNAVAILABLE",
+        "SIMULATED"
+      ]
     },
     "subject": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "commit", "source_repository"],
+      "required": [
+        "tag",
+        "commit",
+        "source_repository"
+      ],
       "properties": {
         "tag": {
           "type": "string"
@@ -199,17 +217,33 @@
           "type": "boolean"
         },
         "previous_manifest": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_verification_report": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "binding": {
-      "type": ["object", "null"]
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "path", "sha256"],
+      "required": [
+        "kind",
+        "path",
+        "sha256"
+      ],
       "properties": {
         "kind": {
           "type": "string"
@@ -225,7 +259,13 @@
     "check": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "state", "required", "detail", "command"],
+      "required": [
+        "name",
+        "state",
+        "required",
+        "detail",
+        "command"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -240,7 +280,10 @@
           "type": "string"
         },
         "command": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

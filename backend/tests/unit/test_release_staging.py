@@ -10,12 +10,19 @@ from typing import Any
 
 import pytest
 
+from backend.tests.unit.release_evidence import (
+    previous_release_manifest,
+    write_production_verification_report,
+)
 from backend.tests.unit.test_release_verification import (
     COMMIT,
     REPO_ROOT,
     SOURCE_REPOSITORY,
     TAG,
     make_release,
+)
+from backend.tests.unit.test_release_verification import (
+    make_runner as make_verification_runner,
 )
 from tools.release.deployment import deployment_environment
 from tools.release.manifest import sha256_file
@@ -34,10 +41,11 @@ from tools.release.staging import (
     staging_report_errors,
     staging_target_errors,
 )
-from tools.release.verification import NOT_RUN, PASS, UNAVAILABLE
+from tools.release.verification import FAIL, NOT_RUN, PASS, UNAVAILABLE
 
 GENERATED_AT = "2026-10-25T00:00:00Z"
 MUTATION_VERBS = {"up", "down", "deploy", "rm", "stop", "start", "restart", "kill"}
+COMPOSE_MUTATION_VERBS = MUTATION_VERBS - {"rm", "deploy"}
 
 
 def _target_payload(**overrides: Any) -> dict[str, Any]:
@@ -98,9 +106,9 @@ def _compose_payload(manifest: dict[str, Any]) -> str:
 
 def _runner(manifest: dict[str, Any], calls: list[list[str]]) -> Any:
     payload = _compose_payload(manifest)
+    verification_runner = make_verification_runner()
 
     def run(args: Any, *, timeout: int = 120, env: Any = None) -> subprocess.CompletedProcess[str]:
-        del timeout, env
         calls.append(list(args))
         if "config" in args:
             return subprocess.CompletedProcess(args, 0, payload, "")
@@ -110,9 +118,21 @@ def _runner(manifest: dict[str, Any], calls: list[list[str]]) -> Any:
             return subprocess.CompletedProcess(args, 0, "29.5.3\n", "")
         if args[:3] == ["docker", "compose", "version"]:
             return subprocess.CompletedProcess(args, 0, "Docker Compose version v2.30.0\n", "")
-        return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:3] == ["gh", "release", "view"]:
+            release_payload = {
+                "tagName": TAG,
+                "isDraft": False,
+                "isPrerelease": False,
+                "url": f"https://github.com/{SOURCE_REPOSITORY}/releases/tag/{TAG}",
+            }
+            return subprocess.CompletedProcess(args, 0, json.dumps(release_payload), "")
+        return verification_runner(args, timeout=timeout, env=env)
 
     return run
+
+
+def _accept_identity(*args: Any, **kwargs: Any) -> None:
+    del args, kwargs
 
 
 def _run(
@@ -133,6 +153,7 @@ def _run(
         "runner": _runner(manifest, calls),
         "which": lambda name: f"/usr/bin/{name}",
         "base_environment": {},
+        "identity_verifier": _accept_identity,
         "now": lambda: GENERATED_AT,
     }
     options.update(overrides)
@@ -142,6 +163,53 @@ def _run(
         **options,
     )
     return report, calls
+
+
+def _authorized_run(
+    tmp_path: Path,
+    *,
+    manifest_path: Path,
+    artifacts: Path,
+    manifest: dict[str, Any],
+    **overrides: Any,
+) -> tuple[dict[str, Any], list[list[str]], list[dict[str, Any]], list[dict[str, Any]]]:
+    deployed: list[dict[str, Any]] = []
+    smoked: list[dict[str, Any]] = []
+
+    def deployment_executor(path: Path, **kwargs: Any) -> dict[str, Any]:
+        deployed.append(kwargs)
+        return {
+            "schema_version": 1,
+            "generated_at": GENERATED_AT,
+            "manifest_sha256": sha256_file(path),
+            "state": PASS,
+            "verified": True,
+            "blockers": [],
+        }
+
+    def smoke_runner(api_url: str, **kwargs: Any) -> dict[str, Any]:
+        smoked.append({"api_url": api_url, **kwargs})
+        return {
+            "schema_version": 1,
+            "generated_at": GENERATED_AT,
+            "manifest_sha256": sha256_file(kwargs["manifest_path"]),
+            "state": PASS,
+            "verified": True,
+            "blockers": [],
+        }
+
+    report, calls = _run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+        execute=True,
+        authorize="staging-east-1",
+        deployment_executor=deployment_executor,
+        smoke_runner=smoke_runner,
+        **overrides,
+    )
+    return report, calls, deployed, smoked
 
 
 def _checks(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -252,7 +320,7 @@ def test_authorize_requires_execute_and_exact_target_name(tmp_path: Path) -> Non
     assert calls == []
 
 
-def test_authorized_mutation_mode_still_requires_live_evidence(tmp_path: Path) -> None:
+def test_authorized_mutation_without_live_evidence_does_not_deploy(tmp_path: Path) -> None:
     manifest_path, artifacts, manifest = make_release(tmp_path)
     report, calls = _run(
         tmp_path,
@@ -261,16 +329,157 @@ def test_authorized_mutation_mode_still_requires_live_evidence(tmp_path: Path) -
         manifest=manifest,
         execute=True,
         authorize="staging-east-1",
+        which=lambda name: None,
     )
     checks = _checks(report)
     assert report["mode"] == "authorized-mutation"
     assert report["authorized"] is True
     assert report["staging_qualified"] is False
     assert checks["authorization"]["state"] == PASS
-    assert checks["deployment-execution"]["state"] == NOT_RUN
-    assert checks["smoke"]["state"] == NOT_RUN
-    assert checks["evidence-collection"]["state"] == NOT_RUN
+    assert checks["evidence-collection"]["state"] == UNAVAILABLE
+    assert checks["deployment-execution"]["state"] == FAIL
+    assert checks["smoke"]["state"] == FAIL
     assert all(not (MUTATION_VERBS & set(args)) for args in calls)
+
+
+def test_authorized_mutation_executes_controlled_deployment_and_smoke(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    report, calls, deployed, smoked = _authorized_run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+    )
+    checks = _checks(report)
+    assert report["mode"] == "authorized-mutation"
+    assert report["authorized"] is True
+    assert report["staging_qualified"] is True
+    assert checks["authorization"]["state"] == PASS
+    assert checks["evidence-collection"]["state"] == PASS
+    assert checks["migration-compatibility"]["state"] == PASS
+    assert checks["deployment-execution"]["state"] == PASS
+    assert checks["smoke"]["state"] == PASS
+    assert report["deployment"]["state"] == PASS
+    assert report["smoke"]["state"] == PASS
+    assert report["publication"]["github_release"]["state"] == PASS
+    assert len(deployed) == 1
+    assert len(smoked) == 1
+    assert all(not (COMPOSE_MUTATION_VERBS & set(args)) for args in calls)
+    assert (
+        staging_report_errors(
+            report,
+            manifest,
+            manifest_path=manifest_path,
+            evidence_dir=tmp_path,
+        )
+        == []
+    )
+
+
+def test_staging_requires_gpu_runtime_and_inference_when_requested(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    runtime_calls: list[dict[str, Any]] = []
+    inference_calls: list[dict[str, Any]] = []
+
+    def gpu_runtime_runner(path: Path, **kwargs: Any) -> dict[str, Any]:
+        runtime_calls.append(kwargs)
+        return {
+            "schema_version": 1,
+            "generated_at": GENERATED_AT,
+            "manifest_sha256": sha256_file(path),
+            "state": PASS,
+            "verified": True,
+            "blockers": [],
+        }
+
+    def gpu_inference_runner(path: Path, **kwargs: Any) -> dict[str, Any]:
+        inference_calls.append(kwargs)
+        return {
+            "schema_version": 1,
+            "generated_at": GENERATED_AT,
+            "manifest_sha256": sha256_file(path),
+            "state": PASS,
+            "verified": True,
+            "blockers": [],
+        }
+
+    report, _, _, _ = _authorized_run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+        require_gpu_runtime=True,
+        gpu_runtime_runner=gpu_runtime_runner,
+        gpu_inference_runner=gpu_inference_runner,
+    )
+    checks = _checks(report)
+    assert checks["gpu-runtime"]["state"] == PASS
+    assert checks["gpu-inference"]["state"] == PASS
+    assert report["gpu_runtime"]["state"] == PASS
+    assert report["gpu_inference"]["state"] == PASS
+    assert report["staging_qualified"] is True
+    assert len(runtime_calls) == 1
+    assert len(inference_calls) == 1
+    assert (
+        staging_report_errors(
+            report,
+            manifest,
+            manifest_path=manifest_path,
+            evidence_dir=tmp_path,
+        )
+        == []
+    )
+
+
+def test_staging_rehearsal_is_bound_to_migration_safety(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    previous_path, previous = previous_release_manifest(tmp_path, manifest)
+    previous_report = tmp_path / "previous-verification.json"
+    write_production_verification_report(previous_report, previous_path, previous)
+    rehearsal_calls: list[dict[str, Any]] = []
+
+    def rehearsal_runner(
+        target_path: Path,
+        previous_manifest_path: Path,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        rehearsal_calls.append({"previous": previous_manifest_path, **kwargs})
+        return {
+            "schema_version": 1,
+            "generated_at": GENERATED_AT,
+            "manifest_sha256": sha256_file(target_path),
+            "state": PASS,
+            "verified": True,
+            "blockers": [],
+        }
+
+    report, _, _, _ = _authorized_run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+        previous_manifest_path=previous_path,
+        previous_verification_report_path=previous_report,
+        require_rollback=True,
+        rehearsal_runner=rehearsal_runner,
+    )
+    checks = _checks(report)
+    assert checks["rollback-rehearsal"]["state"] == PASS
+    assert report["rehearsal"]["state"] == PASS
+    assert report["staging_qualified"] is True
+    assert len(rehearsal_calls) == 1
+    migration_path = rehearsal_calls[0]["migration_report_path"]
+    assert migration_path.is_file()
+    assert report["migration"]["sha256"] == sha256_file(migration_path)
+    assert (
+        staging_report_errors(
+            report,
+            manifest,
+            manifest_path=manifest_path,
+            evidence_dir=tmp_path,
+        )
+        == []
+    )
 
 
 def test_live_read_mode_reports_missing_tools_honestly(tmp_path: Path) -> None:
@@ -296,20 +505,13 @@ def test_live_read_mode_reports_missing_tools_honestly(tmp_path: Path) -> None:
 
 def test_staging_report_errors_detect_evidence_tampering(tmp_path: Path) -> None:
     manifest_path, artifacts, manifest = make_release(tmp_path)
-    report, _ = _run(
+    report, _, _, _ = _authorized_run(
         tmp_path,
         manifest_path=manifest_path,
         artifacts=artifacts,
         manifest=manifest,
     )
     candidate = copy.deepcopy(report)
-    candidate["mode"] = "authorized-mutation"
-    candidate["authorized"] = True
-    candidate["state"] = PASS
-    candidate["staging_qualified"] = True
-    for check in candidate["checks"]:
-        if check["required"] is True:
-            check["state"] = PASS
     assert (
         staging_report_errors(
             candidate,

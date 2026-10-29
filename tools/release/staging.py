@@ -19,6 +19,7 @@ implements that control plane:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -27,6 +28,24 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from tools.release.deployment import (
+    DeploymentError,
+    deploy_release,
+)
+from tools.release.evidence import (
+    EvidenceError,
+    collect_release_evidence,
+    evidence_report_errors,
+)
+from tools.release.gpu import (
+    GpuError,
+    qualify_gpu_runtime,
+)
+from tools.release.identity import verify_tag_commit
+from tools.release.inference import (
+    InferenceError,
+    qualify_gpu_inference,
+)
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -34,9 +53,21 @@ from tools.release.manifest import (
     sha256_file,
     utc_now_iso,
 )
+from tools.release.migrations import (
+    MigrationError,
+    check_migration_compatibility,
+)
 from tools.release.preflight import (
     PreflightError,
     run_preflight,
+)
+from tools.release.rehearsal import (
+    RehearsalError,
+    run_rollback_rehearsal,
+)
+from tools.release.smoke import (
+    SmokeError,
+    run_smoke,
 )
 from tools.release.verification import (
     FAIL,
@@ -44,6 +75,7 @@ from tools.release.verification import (
     PASS,
     UNAVAILABLE,
     CommandRunner,
+    VerificationError,
     attestation_cli_support,
     default_runner,
 )
@@ -65,7 +97,7 @@ STAGING_TARGET_REQUIRED_FIELDS = (
     "compose_files",
     "gpu",
 )
-STAGING_TARGET_OPTIONAL_FIELDS = ("previous_manifest",)
+STAGING_TARGET_OPTIONAL_FIELDS = ("previous_manifest", "previous_verification_report")
 STAGING_TARGET_FIELDS = STAGING_TARGET_REQUIRED_FIELDS + STAGING_TARGET_OPTIONAL_FIELDS
 STAGING_TARGET_RELEASE_FIELDS = ("tag", "commit", "source_repository")
 STAGING_SUBJECT_FIELDS = ("tag", "commit", "source_repository")
@@ -86,6 +118,7 @@ STAGING_REPORT_FIELDS = (
     "preflight",
     "verification",
     "publication",
+    "migration",
     "deployment",
     "smoke",
     "gpu_runtime",
@@ -110,6 +143,7 @@ REQUIRED_STAGING_CHECKS = (
     "manifest",
     "preflight",
     "authorization",
+    "migration-compatibility",
     "deployment-execution",
     "smoke",
     "evidence-collection",
@@ -277,6 +311,13 @@ def staging_target_errors(payload: Mapping[str, Any]) -> list[str]:
         errors.append("gpu must be a boolean")
     if "previous_manifest" in payload and payload["previous_manifest"] is not None:
         errors.extend(_relative_path_errors(payload["previous_manifest"], "previous_manifest"))
+    if "previous_verification_report" in payload and payload["previous_verification_report"] is not None:
+        errors.extend(
+            _relative_path_errors(
+                payload["previous_verification_report"],
+                "previous_verification_report",
+            )
+        )
     return errors
 
 
@@ -305,6 +346,15 @@ def load_staging_target(path: Path, *, repo_root: Path | None = None) -> dict[st
                 raise StagingError(f"previous_manifest escapes the repository root: {previous}")
             if not candidate.is_file():
                 raise StagingError(f"previous manifest does not exist: {previous}")
+        previous_verification = payload.get("previous_verification_report")
+        if previous_verification is not None:
+            candidate = (root / previous_verification).resolve()
+            if not candidate.is_relative_to(root):
+                raise StagingError(
+                    f"previous_verification_report escapes the repository root: {previous_verification}"
+                )
+            if not candidate.is_file():
+                raise StagingError(f"previous verification report does not exist: {previous_verification}")
     return payload
 
 
@@ -321,6 +371,7 @@ def _target_summary(target: Mapping[str, Any]) -> dict[str, Any]:
         "compose_files": list(target.get("compose_files") or []),
         "gpu": target.get("gpu"),
         "previous_manifest": target.get("previous_manifest"),
+        "previous_verification_report": target.get("previous_verification_report"),
     }
 
 
@@ -478,6 +529,55 @@ def _write_evidence(
     return item
 
 
+def _binding(
+    item: Mapping[str, Any],
+    report: Mapping[str, Any],
+    *,
+    kind: str | None = None,
+) -> dict[str, Any]:
+    binding: dict[str, Any] = {
+        "kind": kind or item.get("kind"),
+        "path": item.get("path"),
+        "sha256": item.get("sha256"),
+        "state": report.get("state", report.get("overall_state")),
+        "verified": report.get("verified"),
+    }
+    if report.get("manifest_sha256") is not None:
+        binding["manifest_sha256"] = report.get("manifest_sha256")
+    return binding
+
+
+def _environment_value(
+    name: str,
+    base_environment: Mapping[str, str] | None,
+) -> str | None:
+    if base_environment is not None and name in base_environment:
+        return base_environment[name]
+    return os.environ.get(name)
+
+
+def _component_detail(report: Mapping[str, Any]) -> str:
+    state = report.get("state", report.get("overall_state"))
+    blockers = report.get("blockers") or []
+    if blockers:
+        return f"{state}: " + "; ".join(str(item) for item in blockers[:4])
+    return f"{state}: component evidence was collected"
+
+
+def _component_check(
+    name: str,
+    report: Mapping[str, Any],
+    *,
+    required: bool = True,
+) -> dict[str, Any]:
+    return _check(
+        name,
+        str(report.get("state", report.get("overall_state"))),
+        required,
+        _component_detail(report),
+    )
+
+
 def run_staging_qualification(
     target_path: Path,
     manifest_path: Path,
@@ -489,6 +589,7 @@ def run_staging_qualification(
     execute: bool = False,
     authorize: str | None = None,
     previous_manifest_path: Path | None = None,
+    previous_verification_report_path: Path | None = None,
     expected_tag: str | None = None,
     expected_commit: str | None = None,
     expected_repository: str | None = None,
@@ -497,14 +598,23 @@ def run_staging_qualification(
     runner: CommandRunner = default_runner,
     which: Callable[[str], str | None] = shutil.which,
     base_environment: Mapping[str, str] | None = None,
+    identity_verifier: Callable[..., None] = verify_tag_commit,
+    evidence_collector: Callable[..., dict[str, Any]] = collect_release_evidence,
+    deployment_executor: Callable[..., dict[str, Any]] = deploy_release,
+    smoke_runner: Callable[..., dict[str, Any]] = run_smoke,
+    gpu_runtime_runner: Callable[..., dict[str, Any]] = qualify_gpu_runtime,
+    gpu_inference_runner: Callable[..., dict[str, Any]] = qualify_gpu_inference,
+    rehearsal_runner: Callable[..., dict[str, Any]] = run_rollback_rehearsal,
+    migration_runner: Callable[..., dict[str, Any]] = check_migration_compatibility,
     now: Callable[[], str] = utc_now_iso,
 ) -> dict[str, Any]:
     """Qualify one explicit staging target without weakening any gate.
 
     The default mode is preflight-only. ``execute`` performs read-only live
-    probes. A mutation mode is only selected when ``authorize`` exactly equals
-    the target name; mutation execution itself is added by the V25 evidence
-    collection phase.
+    probes and collects release evidence. Mutation mode is only selected when
+    ``authorize`` exactly equals the target name; it then deploys the pinned
+    digests, runs smoke and optional GPU/rehearsal evidence, and qualifies only
+    when every required check is PASS.
     """
     if authorize is not None and not execute:
         raise StagingError("--authorize requires --execute")
@@ -588,6 +698,12 @@ def run_staging_qualification(
         previous = repo_root / str(target["previous_manifest"])
     else:
         previous = None
+    if previous_verification_report_path is not None:
+        previous_verification = previous_verification_report_path
+    elif target.get("previous_verification_report") is not None:
+        previous_verification = repo_root / str(target["previous_verification_report"])
+    else:
+        previous_verification = None
     compose_files = [repo_root / str(name) for name in target["compose_files"]]
 
     preflight: dict[str, Any] | None = None
@@ -620,13 +736,7 @@ def run_staging_qualification(
             )
         )
         preflight_item = _write_evidence(preflight, evidence_dir, "preflight.json", evidence)
-        preflight_binding = {
-            "path": preflight_item["path"],
-            "sha256": preflight_item["sha256"],
-            "state": preflight.get("state"),
-            "verified": preflight.get("verified"),
-            "manifest_sha256": preflight.get("manifest_sha256"),
-        }
+        preflight_binding = _binding(preflight_item, preflight)
 
     checks.append(
         _authorization_check(
@@ -648,56 +758,426 @@ def run_staging_qualification(
                 )
             )
 
-    checks.append(
-        _check(
-            "deployment-execution",
-            NOT_RUN,
-            True,
-            "authorized mutation execution is not enabled in this build",
+    migration_binding: dict[str, Any] | None = None
+    try:
+        migration_report = migration_runner(
+            manifest_path,
+            repo_root=repo_root,
+            previous_manifest_path=previous,
+            expected_tag=expected["tag"],
+            expected_commit=expected["commit"],
+            now=now,
         )
-    )
-    checks.append(
-        _check(
-            "smoke",
-            NOT_RUN,
-            True,
-            "post-deployment smoke evidence is not collected in this build",
+    except MigrationError as exc:
+        checks.append(_check("migration-compatibility", FAIL, True, str(exc)))
+    else:
+        migration_item = _write_evidence(
+            migration_report,
+            evidence_dir,
+            "migration-compatibility.json",
+            evidence,
         )
-    )
-    checks.append(
-        _check(
-            "evidence-collection",
-            NOT_RUN,
-            True,
-            "release evidence collection is not enabled in this build",
+        migration_binding = _binding(migration_item, migration_report)
+        checks.append(_component_check("migration-compatibility", migration_report))
+
+    evidence_binding: dict[str, Any] | None = None
+    verification_binding: dict[str, Any] | None = None
+    publication_binding: dict[str, Any] | None = None
+    verification_path: Path | None = None
+    if not execute:
+        checks.append(
+            _check(
+                "evidence-collection",
+                NOT_RUN,
+                True,
+                "release evidence collection requires --execute",
+            )
         )
-    )
+    else:
+        try:
+            evidence_report = evidence_collector(
+                manifest_path,
+                artifacts_dir=artifacts_dir,
+                repo_root=repo_root,
+                execute=True,
+                expected_tag=expected["tag"],
+                expected_commit=expected["commit"],
+                expected_repository=expected["source_repository"],
+                runner=runner,
+                which=which,
+                identity_verifier=identity_verifier,
+                now=now,
+            )
+        except (EvidenceError, VerificationError) as exc:
+            checks.append(_check("evidence-collection", FAIL, True, str(exc)))
+        else:
+            evidence_item = _write_evidence(
+                evidence_report,
+                evidence_dir,
+                "release-evidence.json",
+                evidence,
+            )
+            evidence_binding = _binding(evidence_item, evidence_report, kind="release-evidence")
+            publication_binding = dict(evidence_binding)
+            publication_binding["github_release"] = evidence_report.get("github_release")
+            verification_report = evidence_report.get("verification")
+            if isinstance(verification_report, Mapping):
+                verification_item = _write_evidence(
+                    verification_report,
+                    evidence_dir,
+                    "release-verification.json",
+                    evidence,
+                )
+                verification_binding = _binding(
+                    verification_item,
+                    verification_report,
+                    kind="release-verification",
+                )
+                verification_path = evidence_dir / str(verification_item["path"])
+            evidence_problems = evidence_report_errors(
+                evidence_report,
+                manifest,
+                manifest_path=manifest_path,
+                artifacts_dir=artifacts_dir,
+                require_live=True,
+            )
+            state = str(evidence_report.get("state"))
+            if evidence_problems and state == PASS:
+                state = FAIL
+            checks.append(
+                _check(
+                    "evidence-collection",
+                    state,
+                    True,
+                    "release evidence is PASS, live, and bound to the manifest"
+                    if state == PASS
+                    else "; ".join(evidence_problems[:8]),
+                )
+            )
+
+    deployment_binding: dict[str, Any] | None = None
+    if mode != "authorized-mutation":
+        checks.append(
+            _check(
+                "deployment-execution",
+                NOT_RUN,
+                True,
+                "authorized mutation was not requested; pass --execute --authorize <target-name>",
+            )
+        )
+    elif evidence_binding is None or evidence_binding.get("state") != PASS or verification_path is None:
+        checks.append(
+            _check(
+                "deployment-execution",
+                FAIL,
+                True,
+                "deployment was not attempted because release evidence is not PASS",
+            )
+        )
+    elif preflight_binding is None or preflight_binding.get("state") != PASS:
+        checks.append(
+            _check(
+                "deployment-execution",
+                FAIL,
+                True,
+                "deployment was not attempted because preflight is not PASS",
+            )
+        )
+    else:
+        try:
+            deployment_report = deployment_executor(
+                manifest_path,
+                compose_files=compose_files,
+                verification_report_path=verification_path,
+                preflight_report_path=evidence_dir / str(preflight_binding["path"]),
+                gpu=bool(target["gpu"]),
+                project=str(target["compose_project"]),
+                execute=True,
+                expected_tag=expected["tag"],
+                expected_commit=expected["commit"],
+                runner=runner,
+                which=which,
+                base_environment=base_environment,
+                now=now,
+            )
+        except DeploymentError as exc:
+            checks.append(_check("deployment-execution", FAIL, True, str(exc)))
+        else:
+            deployment_item = _write_evidence(
+                deployment_report,
+                evidence_dir,
+                "deployment-execution.json",
+                evidence,
+            )
+            deployment_binding = _binding(deployment_item, deployment_report)
+            checks.append(_component_check("deployment-execution", deployment_report))
+
+    smoke_binding: dict[str, Any] | None = None
+    if mode != "authorized-mutation":
+        checks.append(
+            _check(
+                "smoke",
+                NOT_RUN,
+                True,
+                "post-deployment smoke checks require an authorized mutation run",
+            )
+        )
+    elif deployment_binding is None or deployment_binding.get("state") != PASS:
+        checks.append(
+            _check(
+                "smoke",
+                FAIL,
+                True,
+                "smoke was not attempted because deployment is not PASS",
+            )
+        )
+    else:
+        password = _environment_value(
+            str(target["smoke_password_env"]),
+            base_environment,
+        )
+        username = str(target["smoke_username"]) if password else None
+        try:
+            smoke_report = smoke_runner(
+                str(target["api_url"]),
+                web_url=str(target["web_url"]),
+                ws_url=str(target["ws_url"]),
+                username=username,
+                password=password,
+                manifest_path=manifest_path,
+                expected_tag=expected["tag"],
+                expected_commit=expected["commit"],
+                now=now,
+            )
+        except SmokeError as exc:
+            checks.append(_check("smoke", FAIL, True, str(exc)))
+        else:
+            smoke_item = _write_evidence(smoke_report, evidence_dir, "smoke.json", evidence)
+            smoke_binding = _binding(smoke_item, smoke_report)
+            checks.append(_component_check("smoke", smoke_report))
+
     gpu_required = bool(target["gpu"]) or require_gpu_runtime
-    checks.append(
-        _check(
-            "gpu-runtime",
-            NOT_RUN,
-            gpu_required,
-            "GPU runtime evidence was not collected"
-            if gpu_required
-            else "GPU runtime is not required for this staging target",
+    gpu_runtime_binding: dict[str, Any] | None = None
+    gpu_inference_binding: dict[str, Any] | None = None
+    if not gpu_required:
+        checks.append(
+            _check(
+                "gpu-runtime",
+                NOT_RUN,
+                False,
+                "GPU runtime is not required for this staging target",
+            )
         )
-    )
-    checks.append(
-        _check(
-            "rollback-rehearsal",
-            NOT_RUN,
-            require_rollback,
-            "rollback rehearsal was not requested"
-            if not require_rollback
-            else "rollback rehearsal evidence was not collected",
+        checks.append(
+            _check(
+                "gpu-inference",
+                NOT_RUN,
+                False,
+                "GPU inference is not required for this staging target",
+            )
         )
-    )
+    elif mode != "authorized-mutation":
+        checks.append(
+            _check(
+                "gpu-runtime",
+                NOT_RUN,
+                True,
+                "GPU runtime evidence requires an authorized mutation run",
+            )
+        )
+        checks.append(
+            _check(
+                "gpu-inference",
+                NOT_RUN,
+                True,
+                "GPU inference evidence requires an authorized mutation run",
+            )
+        )
+    elif deployment_binding is None or deployment_binding.get("state") != PASS:
+        checks.append(
+            _check(
+                "gpu-runtime",
+                FAIL,
+                True,
+                "GPU runtime was not tested because deployment is not PASS",
+            )
+        )
+        checks.append(
+            _check(
+                "gpu-inference",
+                FAIL,
+                True,
+                "GPU inference was not tested because deployment is not PASS",
+            )
+        )
+    else:
+        try:
+            gpu_runtime_report = gpu_runtime_runner(
+                manifest_path,
+                execute=True,
+                expected_tag=expected["tag"],
+                expected_commit=expected["commit"],
+                runner=runner,
+                which=which,
+                now=now,
+            )
+        except GpuError as exc:
+            checks.append(_check("gpu-runtime", FAIL, True, str(exc)))
+        else:
+            gpu_runtime_item = _write_evidence(
+                gpu_runtime_report,
+                evidence_dir,
+                "gpu-runtime.json",
+                evidence,
+            )
+            gpu_runtime_binding = _binding(gpu_runtime_item, gpu_runtime_report)
+            checks.append(_component_check("gpu-runtime", gpu_runtime_report))
+        if gpu_runtime_binding is None or gpu_runtime_binding.get("state") != PASS:
+            checks.append(
+                _check(
+                    "gpu-inference",
+                    FAIL,
+                    True,
+                    "GPU inference was not attempted because GPU runtime is not PASS",
+                )
+            )
+        else:
+            try:
+                gpu_inference_report = gpu_inference_runner(
+                    manifest_path,
+                    execute=True,
+                    expected_tag=expected["tag"],
+                    expected_commit=expected["commit"],
+                    runner=runner,
+                    which=which,
+                    now=now,
+                )
+            except InferenceError as exc:
+                checks.append(_check("gpu-inference", FAIL, True, str(exc)))
+            else:
+                gpu_inference_item = _write_evidence(
+                    gpu_inference_report,
+                    evidence_dir,
+                    "gpu-inference.json",
+                    evidence,
+                )
+                gpu_inference_binding = _binding(gpu_inference_item, gpu_inference_report)
+                checks.append(_component_check("gpu-inference", gpu_inference_report))
+
+    rehearsal_binding: dict[str, Any] | None = None
+    if not require_rollback:
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                NOT_RUN,
+                False,
+                "rollback rehearsal was not requested",
+            )
+        )
+    elif mode != "authorized-mutation":
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                NOT_RUN,
+                True,
+                "rollback rehearsal requires an authorized mutation run",
+            )
+        )
+    elif previous is None:
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                FAIL,
+                True,
+                "no previous release manifest was supplied",
+            )
+        )
+    elif previous_verification is None:
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                FAIL,
+                True,
+                "no previous production verification report was supplied",
+            )
+        )
+    elif migration_binding is None or migration_binding.get("state") != PASS:
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                FAIL,
+                True,
+                "rollback rehearsal was not attempted because migration compatibility is not PASS",
+            )
+        )
+    elif deployment_binding is None or deployment_binding.get("state") != PASS:
+        checks.append(
+            _check(
+                "rollback-rehearsal",
+                FAIL,
+                True,
+                "rollback rehearsal was not attempted because deployment is not PASS",
+            )
+        )
+    else:
+        password = _environment_value(
+            str(target["smoke_password_env"]),
+            base_environment,
+        )
+        username = str(target["smoke_username"]) if password else None
+        try:
+            rehearsal_report = rehearsal_runner(
+                manifest_path,
+                previous,
+                compose_files=compose_files,
+                gpu=bool(target["gpu"]),
+                project=str(target["compose_project"]),
+                execute=True,
+                target_verification_report=verification_path,
+                previous_verification_report=previous_verification,
+                migration_report_path=evidence_dir / str(migration_binding["path"]),
+                smoke_api_url=str(target["api_url"]),
+                smoke_web_url=str(target["web_url"]),
+                smoke_username=username,
+                smoke_password=password,
+                evidence_dir=evidence_dir / "rehearsal",
+                runner=runner,
+                which=which,
+                base_environment=base_environment,
+                now=now,
+            )
+        except RehearsalError as exc:
+            checks.append(_check("rollback-rehearsal", FAIL, True, str(exc)))
+        else:
+            rehearsal_item = _write_evidence(
+                rehearsal_report,
+                evidence_dir,
+                "rollback-rehearsal.json",
+                evidence,
+            )
+            rehearsal_binding = _binding(rehearsal_item, rehearsal_report)
+            checks.append(_component_check("rollback-rehearsal", rehearsal_report))
 
     overall = _aggregate(checks)
+    required_bindings = [
+        preflight_binding,
+        verification_binding,
+        publication_binding,
+        migration_binding,
+        deployment_binding,
+        smoke_binding,
+    ]
+    if gpu_required:
+        required_bindings.extend([gpu_runtime_binding, gpu_inference_binding])
+    if require_rollback:
+        required_bindings.append(rehearsal_binding)
+    bindings_ready = all(
+        isinstance(binding, Mapping) and binding.get("state") == PASS for binding in required_bindings
+    )
     staging_qualified = (
         mode == "authorized-mutation"
         and overall == PASS
+        and bindings_ready
         and all(check.get("state") == PASS for check in checks if check.get("required") is True)
     )
     blockers = [
@@ -717,6 +1197,8 @@ def run_staging_qualification(
     ]
     if mode == "preflight":
         next_steps.append("this run did not contact the staging deployment or perform any mutation")
+    elif mode == "live-read":
+        next_steps.append("this run collected read-only evidence and performed no mutation")
     return {
         "schema_version": STAGING_SCHEMA_VERSION,
         "generated_at": now(),
@@ -730,13 +1212,14 @@ def run_staging_qualification(
         "staging_qualified": staging_qualified,
         "production_qualified": False,
         "preflight": preflight_binding,
-        "verification": None,
-        "publication": None,
-        "deployment": None,
-        "smoke": None,
-        "gpu_runtime": None,
-        "gpu_inference": None,
-        "rehearsal": None,
+        "verification": verification_binding,
+        "publication": publication_binding,
+        "migration": migration_binding,
+        "deployment": deployment_binding,
+        "smoke": smoke_binding,
+        "gpu_runtime": gpu_runtime_binding,
+        "gpu_inference": gpu_inference_binding,
+        "rehearsal": rehearsal_binding,
         "evidence": evidence,
         "checks": checks,
         "blockers": blockers,
@@ -856,20 +1339,61 @@ def staging_report_errors(
         for name in REQUIRED_STAGING_CHECKS:
             if name not in names:
                 errors.append(f"staging report has no {name} check")
-    preflight = report.get("preflight")
-    if not isinstance(preflight, Mapping):
-        errors.append("staging preflight binding is missing")
-    else:
-        if preflight.get("state") != PASS:
-            errors.append(f"staging preflight binding state is {preflight.get('state')!r}, not PASS")
-        errors.extend(
+    checks_by_name = (
+        {str(check.get("name")): check for check in checks if isinstance(check, Mapping)}
+        if isinstance(checks, list)
+        else {}
+    )
+
+    def binding_errors(
+        name: str,
+        kind: str,
+        *,
+        required: bool = True,
+        require_verified: bool = True,
+    ) -> list[str]:
+        binding = report.get(name)
+        if not isinstance(binding, Mapping):
+            return [f"staging {name} binding is missing"] if required else []
+        problems: list[str] = []
+        if binding.get("state") != PASS:
+            problems.append(f"staging {name} binding state is {binding.get('state')!r}, not PASS")
+        if require_verified and binding.get("verified") is not True:
+            problems.append(f"staging {name} binding is not verified")
+        if binding.get("manifest_sha256") not in (None, expected_sha):
+            problems.append(f"staging {name} binding is not bound to the supplied manifest")
+        problems.extend(
             _binding_evidence_errors(
                 report,
-                "preflight",
-                preflight,
+                kind,
+                binding,
                 evidence_dir or manifest_path.parent,
             )
         )
+        return problems
+
+    errors.extend(binding_errors("preflight", "preflight"))
+    errors.extend(binding_errors("verification", "release-verification"))
+    publication_errors = binding_errors("publication", "release-evidence")
+    publication = report.get("publication")
+    if isinstance(publication, Mapping):
+        github_release = publication.get("github_release")
+        if not isinstance(github_release, Mapping) or github_release.get("state") != PASS:
+            publication_errors.append(
+                "staging publication evidence does not prove a published GitHub Release"
+            )
+    errors.extend(publication_errors)
+    errors.extend(binding_errors("migration", "migration-compatibility"))
+    errors.extend(binding_errors("deployment", "deployment-execution", require_verified=False))
+    errors.extend(binding_errors("smoke", "smoke"))
+    for check_name, binding_name, kind in (
+        ("gpu-runtime", "gpu_runtime", "gpu-runtime"),
+        ("gpu-inference", "gpu_inference", "gpu-inference"),
+        ("rollback-rehearsal", "rehearsal", "rollback-rehearsal"),
+    ):
+        check = checks_by_name.get(check_name)
+        if isinstance(check, Mapping) and check.get("required") is True:
+            errors.extend(binding_errors(binding_name, kind))
     evidence = report.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         errors.append("staging report evidence is missing")
