@@ -16,6 +16,8 @@ promote a release to production. Staging evidence never sets
 | Controlled deployment and smoke | Complete | Digest-pinned Compose deployment, running-stack verification, `/health`, auth, and WebSocket reconnect checks |
 | Rollback rehearsal with migration safety | Complete | Nine-step rehearsal gated on migration compatibility; the rehearsal records a bound `migration-safety` check |
 | GPU runtime and inference | Complete | Optional NVIDIA runtime qualification plus structured CUDA inference inside the digest-pinned GPU image |
+| Offline staging tests | Complete | 28 staging tests plus migration, rehearsal, evidence, inference, deployment, and smoke suites; all run without network or credentials |
+| Live staging tests | Opt-in | `pytest -m live`; every test skips with the exact missing tool or environment variable and never reports missing evidence as a pass |
 | Live GitHub/GHCR/attestation evidence | `UNAVAILABLE` | `gh` is not installed and `GH_TOKEN` / `GITHUB_TOKEN` are unset in this environment |
 | Live staging deployment and smoke | `NOT_RUN` | No authorized staging target, deployment host, or smoke credentials exist in this environment |
 | Rollback rehearsal on staging | `NOT_RUN` | Requires an authorized staging target and a previous release manifest |
@@ -182,6 +184,49 @@ qualification.
 
 A preflight-only or live-read report never passes this gate. Neither does a
 report whose evidence is `NOT_RUN`, `UNAVAILABLE`, or `SIMULATED`.
+
+### Report re-validation
+
+The gate does not trust the report's own summary. It re-opens every bound
+evidence file and re-runs the authoritative validator for the verification,
+publication, migration, and GPU inference payloads. It also checks that every
+component payload carries the manifest release subject and that target URLs are
+still `https://` / `wss://`, credential-free, and staging-only. Evidence paths
+must be plain file names inside the evidence directory; a binding that tries to
+escape the directory is rejected before any file is read. A payload that says
+`PASS` while its contents prove `UNAVAILABLE`, `NOT_RUN`, or a mismatched
+subject is rejected.
+
+## Live test opt-in
+
+The live tests are excluded from ordinary CI:
+
+```text
+pytest -m live backend/tests/live -q
+```
+
+They require real infrastructure and never invent evidence. Each test skips
+with the exact missing prerequisite names:
+
+| Test | Required prerequisites |
+| --- | --- |
+| `test_live_release_evidence_collection` | `IVP_LIVE_MANIFEST`, `IVP_LIVE_ARTIFACTS_DIR`, `gh`, and `GH_TOKEN` or `GITHUB_TOKEN` |
+| `test_live_staging_qualification` | the above, `IVP_LIVE_STAGING_TARGET`, `IVP_LIVE_MUTATION_AUTHORIZED=1`, and `IVP_LIVE_AUTHORIZE` exactly equal to the target `name` |
+| `test_live_gpu_inference` | `IVP_LIVE_GPU_MANIFEST` and `nvidia-smi` |
+
+The mutation test has two independent gates: the `live` marker selects it, and
+`IVP_LIVE_MUTATION_AUTHORIZED=1` plus the exact target-name authorization is
+required before `staging-qualify --execute --authorize` runs. A test that runs
+fails unless live evidence is `PASS`; it never converts an unavailable
+prerequisite into a pass.
+
+### Deterministic window boundaries
+
+The alerting evaluator opts into an inclusive end boundary when it reads the
+event window, so an event whose `first_seen` equals the evaluation reference
+time is evaluated in the same cycle. Analytics history queries keep the strict
+exclusive boundary by default. Regression tests cover both behaviours, replacing
+the timing-dependent alerting failures instead of skipping or weakening them.
 
 ## Current limitations
 

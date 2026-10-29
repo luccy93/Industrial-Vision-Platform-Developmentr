@@ -195,6 +195,28 @@ def test_watermark_restart_recovery(client: TestClient) -> None:
     assert client.get("/api/v1/alerting/notifications").json()["total"] == 1
 
 
+def test_watermark_window_includes_event_at_reference_time(client: TestClient) -> None:
+    _rule(client)
+    _, events = _repos(client)
+    timestamp = utcnow()
+    events.upsert_event(
+        event_id="evt-boundary",
+        camera_id="cam-01",
+        source_domain="SAFETY",
+        source_event_id="src-evt-boundary",
+        event_type="CROWD_WARNING",
+        severity="HIGH",
+        status="ACTIVE",
+        first_seen=timestamp,
+        last_seen=timestamp,
+    )
+    evaluator = _evaluator(client)
+    stats = evaluator.drain_once(now=timestamp)
+    assert stats["events_scanned"] == 1
+    assert stats["notified"] == 1
+    assert client.get("/api/v1/alerting/notifications").json()["total"] == 1
+
+
 def test_bounded_batches_and_storm_cap(client: TestClient) -> None:
     _rule(client)
     for index in range(5):

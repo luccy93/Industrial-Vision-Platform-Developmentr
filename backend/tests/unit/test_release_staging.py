@@ -48,6 +48,14 @@ MUTATION_VERBS = {"up", "down", "deploy", "rm", "stop", "start", "restart", "kil
 COMPOSE_MUTATION_VERBS = MUTATION_VERBS - {"rm", "deploy"}
 
 
+def _subject() -> dict[str, str]:
+    return {
+        "tag": TAG,
+        "commit": COMMIT,
+        "source_repository": SOURCE_REPOSITORY,
+    }
+
+
 def _target_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -182,6 +190,7 @@ def _authorized_run(
             "schema_version": 1,
             "generated_at": GENERATED_AT,
             "manifest_sha256": sha256_file(path),
+            "subject": _subject(),
             "state": PASS,
             "verified": True,
             "blockers": [],
@@ -193,6 +202,7 @@ def _authorized_run(
             "schema_version": 1,
             "generated_at": GENERATED_AT,
             "manifest_sha256": sha256_file(kwargs["manifest_path"]),
+            "subject": _subject(),
             "state": PASS,
             "verified": True,
             "blockers": [],
@@ -376,8 +386,7 @@ def test_authorized_mutation_executes_controlled_deployment_and_smoke(tmp_path: 
     )
 
 
-def test_staging_requires_gpu_runtime_and_inference_when_requested(tmp_path: Path) -> None:
-    manifest_path, artifacts, manifest = make_release(tmp_path)
+def _gpu_runners() -> tuple[Any, Any, list[dict[str, Any]], list[dict[str, Any]]]:
     runtime_calls: list[dict[str, Any]] = []
     inference_calls: list[dict[str, Any]] = []
 
@@ -387,6 +396,7 @@ def test_staging_requires_gpu_runtime_and_inference_when_requested(tmp_path: Pat
             "schema_version": 1,
             "generated_at": GENERATED_AT,
             "manifest_sha256": sha256_file(path),
+            "subject": _subject(),
             "state": PASS,
             "verified": True,
             "blockers": [],
@@ -398,10 +408,21 @@ def test_staging_requires_gpu_runtime_and_inference_when_requested(tmp_path: Pat
             "schema_version": 1,
             "generated_at": GENERATED_AT,
             "manifest_sha256": sha256_file(path),
+            "subject": _subject(),
+            "executed": True,
             "state": PASS,
             "verified": True,
+            "checks": [{"name": "cuda-inference", "state": PASS, "required": True}],
+            "runtime": {"cuda": {"available": True}, "device": "cuda:0"},
             "blockers": [],
         }
+
+    return gpu_runtime_runner, gpu_inference_runner, runtime_calls, inference_calls
+
+
+def test_staging_requires_gpu_runtime_and_inference_when_requested(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    gpu_runtime_runner, gpu_inference_runner, runtime_calls, inference_calls = _gpu_runners()
 
     report, _, _, _ = _authorized_run(
         tmp_path,
@@ -448,6 +469,7 @@ def test_staging_rehearsal_is_bound_to_migration_safety(tmp_path: Path) -> None:
             "schema_version": 1,
             "generated_at": GENERATED_AT,
             "manifest_sha256": sha256_file(target_path),
+            "subject": _subject(),
             "state": PASS,
             "verified": True,
             "blockers": [],
@@ -532,6 +554,231 @@ def test_staging_report_errors_detect_evidence_tampering(tmp_path: Path) -> None
     )
     assert any("staging preflight evidence hash does not match" in error for error in errors)
     assert any("staging report evidence hash does not match preflight.json" in error for error in errors)
+
+
+def _report_errors(
+    report: dict[str, Any],
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    evidence_dir: Path,
+) -> list[str]:
+    return staging_report_errors(
+        report,
+        manifest,
+        manifest_path=manifest_path,
+        evidence_dir=evidence_dir,
+    )
+
+
+def _valid_authorized_report(
+    tmp_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    report, _, _, _ = _authorized_run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+    )
+    assert _report_errors(report, manifest, manifest_path, tmp_path) == []
+    return report, manifest, manifest_path
+
+
+def test_staging_report_rejects_tampered_target_urls(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    cases = {
+        "api_url": "http://api.staging.example.test",
+        "web_url": "https://web.production.example.test",
+        "ws_url": "wss://ws.staging.example.test/socket?token=secret",
+    }
+    for field, value in cases.items():
+        candidate = copy.deepcopy(report)
+        candidate["target"][field] = value
+        errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+        assert any(field in error for error in errors), (field, errors)
+
+
+def test_staging_report_rejects_production_like_target_name(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    candidate["target"]["name"] = "staging-prod-mirror"
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("production target" in error for error in errors)
+
+
+def test_staging_report_rejects_subject_mismatch_in_component_evidence(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    deployment_path = tmp_path / str(candidate["deployment"]["path"])
+    payload = json.loads(deployment_path.read_text(encoding="utf-8"))
+    payload["subject"]["commit"] = "b" * 40
+    deployment_path.write_text(json.dumps(payload), encoding="utf-8")
+    candidate["deployment"]["sha256"] = sha256_file(deployment_path)
+    for item in candidate["evidence"]:
+        if item["kind"] == "deployment-execution":
+            item["sha256"] = sha256_file(deployment_path)
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("deployment evidence subject.commit" in error for error in errors), errors
+
+
+def test_staging_report_rejects_forged_publication_state(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    publication_path = tmp_path / str(candidate["publication"]["path"])
+    payload = json.loads(publication_path.read_text(encoding="utf-8"))
+    payload["state"] = UNAVAILABLE
+    payload["verified"] = False
+    publication_path.write_text(json.dumps(payload), encoding="utf-8")
+    digest = sha256_file(publication_path)
+    candidate["publication"]["sha256"] = digest
+    for item in candidate["evidence"]:
+        if item["kind"] == "release-evidence":
+            item["sha256"] = digest
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("staging publication evidence: release evidence state" in error for error in errors), errors
+
+
+def test_staging_report_rejects_unpublished_github_release(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    candidate["publication"]["github_release"]["state"] = NOT_RUN
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("does not prove a published GitHub Release" in error for error in errors)
+
+
+def test_staging_report_rejects_forged_verification_state(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    verification_path = tmp_path / str(candidate["verification"]["path"])
+    payload = json.loads(verification_path.read_text(encoding="utf-8"))
+    payload["overall_state"] = FAIL
+    verification_path.write_text(json.dumps(payload), encoding="utf-8")
+    digest = sha256_file(verification_path)
+    candidate["verification"]["sha256"] = digest
+    for item in candidate["evidence"]:
+        if item["kind"] == "release-verification":
+            item["sha256"] = digest
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any(
+        "staging verification evidence: verification report overall_state" in error for error in errors
+    ), errors
+
+
+def test_staging_report_rejects_forged_migration_state(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    migration_path = tmp_path / str(candidate["migration"]["path"])
+    payload = json.loads(migration_path.read_text(encoding="utf-8"))
+    payload["state"] = FAIL
+    payload["verified"] = False
+    migration_path.write_text(json.dumps(payload), encoding="utf-8")
+    digest = sha256_file(migration_path)
+    candidate["migration"]["sha256"] = digest
+    for item in candidate["evidence"]:
+        if item["kind"] == "migration-compatibility":
+            item["sha256"] = digest
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("staging migration evidence: migration report state" in error for error in errors), errors
+
+
+def test_staging_report_rejects_forged_gpu_inference_state(tmp_path: Path) -> None:
+    manifest_path, artifacts, manifest = make_release(tmp_path)
+    gpu_runtime_runner, gpu_inference_runner, _, _ = _gpu_runners()
+    report, _, _, _ = _authorized_run(
+        tmp_path,
+        manifest_path=manifest_path,
+        artifacts=artifacts,
+        manifest=manifest,
+        require_gpu_runtime=True,
+        gpu_runtime_runner=gpu_runtime_runner,
+        gpu_inference_runner=gpu_inference_runner,
+    )
+    assert _report_errors(report, manifest, manifest_path, tmp_path) == []
+    candidate = copy.deepcopy(report)
+    inference_path = tmp_path / str(candidate["gpu_inference"]["path"])
+    payload = json.loads(inference_path.read_text(encoding="utf-8"))
+    payload["executed"] = False
+    payload["runtime"]["device"] = "cpu"
+    inference_path.write_text(json.dumps(payload), encoding="utf-8")
+    digest = sha256_file(inference_path)
+    candidate["gpu_inference"]["sha256"] = digest
+    for item in candidate["evidence"]:
+        if item["kind"] == "gpu-inference":
+            item["sha256"] = digest
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any(
+        "staging GPU inference evidence: GPU inference was not executed" in error for error in errors
+    ), errors
+    assert any(
+        "staging GPU inference evidence: GPU inference runtime did not run on a CUDA device" in error
+        for error in errors
+    ), errors
+
+
+def test_staging_report_requires_every_binding(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    for binding in (
+        "preflight",
+        "verification",
+        "publication",
+        "migration",
+        "deployment",
+        "smoke",
+    ):
+        candidate = copy.deepcopy(report)
+        del candidate[binding]
+        errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+        assert any(f"staging {binding} binding is missing" in error for error in errors), (
+            binding,
+            errors,
+        )
+
+
+def test_staging_report_rejects_tampered_binding_hash(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    candidate["smoke"]["sha256"] = "sha256:" + "0" * 64
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("staging smoke evidence does not match its binding" in error for error in errors)
+
+
+def test_staging_report_requires_gpu_bindings_when_gpu_is_required(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    for check in candidate["checks"]:
+        if check["name"] in {"gpu-runtime", "gpu-inference"}:
+            check["state"] = PASS
+            check["required"] = True
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("staging gpu_runtime binding is missing" in error for error in errors)
+    assert any("staging gpu_inference binding is missing" in error for error in errors)
+
+
+def test_staging_report_requires_rehearsal_binding_when_rollback_is_required(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    candidate = copy.deepcopy(report)
+    for check in candidate["checks"]:
+        if check["name"] == "rollback-rehearsal":
+            check["state"] = PASS
+            check["required"] = True
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("staging rehearsal binding is missing" in error for error in errors)
+
+
+def test_staging_report_rejects_evidence_path_traversal(tmp_path: Path) -> None:
+    report, manifest, manifest_path = _valid_authorized_report(tmp_path)
+    outside = tmp_path.parent / "outside-staging-evidence.json"
+    outside.write_text(json.dumps({"state": PASS}), encoding="utf-8")
+    candidate = copy.deepcopy(report)
+    candidate["preflight"]["path"] = "../outside-staging-evidence.json"
+    candidate["preflight"]["sha256"] = sha256_file(outside)
+    for item in candidate["evidence"]:
+        if item["kind"] == "preflight":
+            item["path"] = "../outside-staging-evidence.json"
+            item["sha256"] = sha256_file(outside)
+    errors = _report_errors(candidate, manifest, manifest_path, tmp_path)
+    assert any("evidence path is invalid" in error for error in errors)
+    assert any("evidence path escapes the evidence directory" in error for error in errors)
 
 
 def test_staging_report_errors_require_authorized_pass_and_matching_manifest(tmp_path: Path) -> None:

@@ -233,7 +233,12 @@ class AlertingEvaluator(ManagedWorker):
         from datetime import timedelta
 
         window_start = now - timedelta(days=1)
-        rows, _ = self._operational.list_in_window(window_start, now, limit=5000)
+        rows, _ = self._operational.list_in_window(
+            window_start,
+            now,
+            limit=5000,
+            end_inclusive=True,
+        )
         pending = [
             row
             for row in rows

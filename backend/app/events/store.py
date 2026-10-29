@@ -187,20 +187,30 @@ class OperationalEventRepository:
         domain: str | Sequence[str] | None = None,
         severity: str | None = None,
         limit: int = 5000,
+        end_inclusive: bool = False,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Bounded canonical events by occurrence window. Returns (rows, truncated).
 
         Filters hit indexed columns (first_seen/camera/domain/severity);
         occurrence semantics use first_seen. Python-side grouping/bucketing
         keeps SQLite and PostgreSQL behavior identical at dashboard volumes.
+
+        The end boundary is exclusive by default. Alert evaluation opts into
+        ``end_inclusive=True`` because its reference time can equal an event's
+        ``first_seen`` in the same cycle.
         """
         from backend.app.analytics.contracts import as_utc as _as_utc
 
         cap = max(1, min(int(limit), 5000))
         with self._session_factory() as session:
+            end_filter = (
+                OperationalEventORM.first_seen <= end
+                if end_inclusive
+                else OperationalEventORM.first_seen < end
+            )
             query = session.query(OperationalEventORM).filter(
                 OperationalEventORM.first_seen >= start,
-                OperationalEventORM.first_seen < end,
+                end_filter,
             )
             if camera_id:
                 query = query.filter(OperationalEventORM.camera_id == camera_id)

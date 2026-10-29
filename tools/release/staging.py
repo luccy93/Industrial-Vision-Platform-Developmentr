@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 from tools.release.deployment import (
     DeploymentError,
     deploy_release,
+    verification_report_errors,
 )
 from tools.release.evidence import (
     EvidenceError,
@@ -44,6 +45,7 @@ from tools.release.gpu import (
 from tools.release.identity import verify_tag_commit
 from tools.release.inference import (
     InferenceError,
+    inference_report_errors,
     qualify_gpu_inference,
 )
 from tools.release.manifest import (
@@ -56,6 +58,7 @@ from tools.release.manifest import (
 from tools.release.migrations import (
     MigrationError,
     check_migration_compatibility,
+    migration_report_errors,
 )
 from tools.release.preflight import (
     PreflightError,
@@ -1243,6 +1246,33 @@ def _plain_file_name(value: Any) -> bool:
     )
 
 
+def _binding_subject_errors(
+    name: str,
+    payload: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+) -> list[str]:
+    release = manifest.get("release") if isinstance(manifest.get("release"), Mapping) else {}
+    subject = payload.get("subject")
+    if not isinstance(subject, Mapping):
+        return [f"staging {name} evidence subject is missing"]
+    return [
+        f"staging {name} evidence subject.{field} does not match the manifest release"
+        for field in STAGING_SUBJECT_FIELDS
+        if subject.get(field) != release.get(field)
+    ]
+
+
+def _evidence_path(evidence_dir: Path, relative: Any) -> Path | None:
+    """Resolve a report-supplied evidence path, refusing directory escapes."""
+    if not isinstance(relative, str) or not relative.strip():
+        return None
+    root = evidence_dir.resolve()
+    candidate = (evidence_dir / relative).resolve()
+    if candidate == root or root not in candidate.parents:
+        return None
+    return candidate
+
+
 def _binding_evidence_errors(
     report: Mapping[str, Any],
     kind: str,
@@ -1260,7 +1290,9 @@ def _binding_evidence_errors(
         for item in matching
     ):
         return [f"staging {kind} evidence does not match its binding"]
-    path = evidence_dir / str(binding.get("path"))
+    path = _evidence_path(evidence_dir, binding.get("path"))
+    if path is None:
+        return [f"staging {kind} evidence path escapes the evidence directory"]
     if not path.is_file():
         return [f"staging {kind} evidence file is missing: {binding.get('path')}"]
     try:
@@ -1310,6 +1342,13 @@ def staging_report_errors(
             errors.append("staging report target name is invalid")
         elif _production_marker(name):
             errors.append("staging report target name looks like a production target")
+        for field, scheme in (
+            ("api_url", "https"),
+            ("web_url", "https"),
+            ("ws_url", "wss"),
+        ):
+            for problem in _url_errors(target.get(field), field, scheme):
+                errors.append(f"staging report target {problem}")
     mode = report.get("mode")
     if mode not in STAGING_MODES:
         errors.append(f"staging report mode {mode!r} is not recognized")
@@ -1372,6 +1411,29 @@ def staging_report_errors(
         )
         return problems
 
+    def binding_payload(name: str) -> Mapping[str, Any] | None:
+        binding = report.get(name)
+        if not isinstance(binding, Mapping):
+            return None
+        path = _evidence_path(evidence_dir or manifest_path.parent, binding.get("path"))
+        if path is None:
+            errors.append(f"staging {name} evidence path escapes the evidence directory")
+            return None
+        if not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            errors.append(f"staging {name} evidence could not be read: {exc}")
+            return None
+        except json.JSONDecodeError as exc:
+            errors.append(f"staging {name} evidence is not valid JSON: {exc}")
+            return None
+        if not isinstance(payload, Mapping):
+            errors.append(f"staging {name} evidence must be a JSON object")
+            return None
+        return payload
+
     errors.extend(binding_errors("preflight", "preflight"))
     errors.extend(binding_errors("verification", "release-verification"))
     publication_errors = binding_errors("publication", "release-evidence")
@@ -1394,6 +1456,59 @@ def staging_report_errors(
         check = checks_by_name.get(check_name)
         if isinstance(check, Mapping) and check.get("required") is True:
             errors.extend(binding_errors(binding_name, kind))
+
+    verification_payload = binding_payload("verification")
+    if verification_payload is not None:
+        errors.extend(
+            f"staging verification evidence: {problem}"
+            for problem in verification_report_errors(
+                verification_payload,
+                manifest,
+                manifest_path=manifest_path,
+            )
+        )
+    publication_payload = binding_payload("publication")
+    if publication_payload is not None:
+        errors.extend(
+            f"staging publication evidence: {problem}"
+            for problem in evidence_report_errors(
+                publication_payload,
+                manifest,
+                manifest_path=manifest_path,
+                require_live=True,
+            )
+        )
+    migration_payload = binding_payload("migration")
+    if migration_payload is not None:
+        errors.extend(
+            f"staging migration evidence: {problem}"
+            for problem in migration_report_errors(
+                migration_payload,
+                manifest,
+                manifest_path=manifest_path,
+            )
+        )
+    gpu_inference_payload = binding_payload("gpu_inference")
+    if gpu_inference_payload is not None:
+        errors.extend(
+            f"staging GPU inference evidence: {problem}"
+            for problem in inference_report_errors(
+                gpu_inference_payload,
+                manifest,
+                manifest_path=manifest_path,
+            )
+        )
+    for binding_name in (
+        "preflight",
+        "deployment",
+        "smoke",
+        "gpu_runtime",
+        "gpu_inference",
+        "rehearsal",
+    ):
+        payload = binding_payload(binding_name)
+        if payload is not None:
+            errors.extend(_binding_subject_errors(binding_name, payload, manifest))
     evidence = report.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         errors.append("staging report evidence is missing")

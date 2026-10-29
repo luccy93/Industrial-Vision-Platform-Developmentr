@@ -128,6 +128,18 @@ def test_export_incidents_bounded_columns(tmp_path) -> None:
     assert {r["camera_id"] for r in cam_rows} == {"cam-02"}
 
 
+def test_history_window_end_boundary_is_opt_in(tmp_path) -> None:
+    url = f"sqlite:///{tmp_path}/analytics.db"
+    init_db(url)
+    events = _seed_events(url)
+    end = EPOCH + timedelta(days=1, hours=1)
+    strict, _ = events.list_in_window(EPOCH, end)
+    inclusive, _ = events.list_in_window(EPOCH, end, end_inclusive=True)
+    assert len(strict) == 2  # day 0 only
+    assert len(inclusive) == 3  # day 0 plus the event exactly at the end boundary
+    assert {row["first_seen"] for row in inclusive} - {row["first_seen"] for row in strict} == {end}
+
+
 def test_history_window_filters_and_truncation(tmp_path) -> None:
     url = f"sqlite:///{tmp_path}/analytics.db"
     init_db(url)
