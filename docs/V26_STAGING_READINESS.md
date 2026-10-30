@@ -152,9 +152,13 @@ fails closed on:
 - changed report bytes when `--report-sha256` is supplied;
 - any claim of production qualification or deployment authorization.
 
-Evidence is retained under content-addressed names and every binding is
-rehashed. A report cannot be reused for different manifest bytes, a different
-target, a different release subject, or a different previous release.
+Evidence is retained under content-addressed names in `readiness-evidence/`
+next to the report by default (override with `--evidence-dir`). `staging-readiness`
+prints the report SHA-256 and the evidence directory; `check-readiness` prints
+the same SHA-256 after a successful gate so the exact report bytes can be
+recorded and rechecked. A report cannot be reused for different manifest bytes,
+a different target, a different release subject, or a different previous
+release.
 
 ## Commands
 

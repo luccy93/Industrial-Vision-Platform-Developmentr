@@ -31,6 +31,7 @@ from tools.release.readiness import (
     READINESS_BINDING_FIELDS,
     READINESS_CHECK_FIELDS,
     READINESS_CHECK_NAMES,
+    READINESS_EVIDENCE_DIR_NAME,
     READINESS_EVIDENCE_FIELDS,
     READINESS_PROFILE,
     READINESS_REPORT_FIELDS,
@@ -42,6 +43,7 @@ from tools.release.readiness import (
     TARGET_FIELDS,
     assess_staging_readiness,
     readiness_report_errors,
+    readiness_report_sha256,
     write_readiness_report,
 )
 from tools.release.rehearsal import STEP_NAMES
@@ -763,3 +765,181 @@ def test_cli_check_readiness_accepts_valid_report_and_rejects_tampered_report(
     )
     assert exit_code == 1
     assert "bytes changed" in capsys.readouterr().err
+
+
+def test_readiness_report_sha256_binds_exact_report_bytes(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, digest = _write_report(tmp_path, report)
+
+    assert readiness_report_sha256(path) == digest == sha256_file(path)
+
+    path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    assert readiness_report_sha256(path) != digest
+
+
+def test_live_probe_failures_are_unavailable_not_pass(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=_FakeRunner(inputs["manifest"], gh_auth=False, registry_ok=False),
+        network_probe=lambda host, port: False,
+    )
+    checks = _checks(report)
+
+    for name in ("github-auth-config", "registry-auth-config", "network-github", "network-ghcr"):
+        assert checks[name]["state"] == UNAVAILABLE
+        assert checks[name]["state"] != PASS
+    assert report["state"] == UNAVAILABLE
+    assert report["ready"] is False
+    assert report["deployment"]["authorized"] is False
+    assert report["production_qualified"] is False
+
+
+def test_live_probes_issue_only_read_only_commands(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    _assess(tmp_path, inputs)
+    forbidden = {
+        "push",
+        "publish",
+        "deploy",
+        "create",
+        "delete",
+        "rm",
+        "down",
+        "up",
+        "tag",
+        "login",
+        "logout",
+        "run",
+    }
+
+    for call in inputs["runner"].calls:
+        assert not forbidden.intersection(call), call
+        if call[0] == "gh":
+            assert call[:2] in (["gh", "--version"], ["gh", "auth"], ["gh", "release"]), call
+        if call[0] == "docker":
+            assert call[1] in ("--version", "version", "compose", "manifest", "info"), call
+
+
+def test_retained_evidence_tampering_is_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    evidence_dir = tmp_path / READINESS_EVIDENCE_DIR_NAME
+
+    target_evidence = evidence_dir / report["bindings"]["target"]["path"]
+    target_payload = json.loads(target_evidence.read_text(encoding="utf-8"))
+    target_payload["name"] = "production-east-1"
+    target_evidence.write_text(json.dumps(target_payload), encoding="utf-8")
+    target_errors = _errors(
+        report,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=evidence_dir,
+    )
+    assert any("evidence hash does not match" in error for error in target_errors)
+    assert any("target evidence is invalid" in error for error in target_errors)
+
+    (tmp_path / "second").mkdir()
+    inputs = _inputs(tmp_path / "second")
+    report = _assess(tmp_path / "second", inputs)
+    path, _ = _write_report(tmp_path / "second", report)
+    evidence_dir = tmp_path / "second" / READINESS_EVIDENCE_DIR_NAME
+
+    previous_evidence = evidence_dir / report["bindings"]["previous_manifest"]["path"]
+    previous_payload = json.loads(previous_evidence.read_text(encoding="utf-8"))
+    previous_payload["release"]["tag"] = "v0.0.1"
+    previous_evidence.write_text(json.dumps(previous_payload), encoding="utf-8")
+    previous_errors = _errors(
+        report,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=evidence_dir,
+    )
+    assert any("evidence hash does not match" in error for error in previous_errors)
+    assert any("previous manifest evidence is invalid" in error for error in previous_errors)
+
+    (tmp_path / "third").mkdir()
+    inputs = _inputs(tmp_path / "third")
+    report = _assess(tmp_path / "third", inputs)
+    path, _ = _write_report(tmp_path / "third", report)
+    evidence_dir = tmp_path / "third" / READINESS_EVIDENCE_DIR_NAME
+
+    verification_evidence = evidence_dir / report["bindings"]["previous_verification"]["path"]
+    verification_payload = json.loads(verification_evidence.read_text(encoding="utf-8"))
+    verification_payload["state"] = FAIL
+    verification_evidence.write_text(json.dumps(verification_payload), encoding="utf-8")
+    verification_errors = _errors(
+        report,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=evidence_dir,
+    )
+    assert any("evidence hash does not match" in error for error in verification_errors)
+
+    (tmp_path / "fourth").mkdir()
+    inputs = _inputs(tmp_path / "fourth")
+    report = _assess(tmp_path / "fourth", inputs)
+    path, _ = _write_report(tmp_path / "fourth", report)
+    evidence_dir = tmp_path / "fourth" / READINESS_EVIDENCE_DIR_NAME
+
+    rollback_evidence = evidence_dir / report["bindings"]["rollback_evidence"]["path"]
+    rollback_payload = json.loads(rollback_evidence.read_text(encoding="utf-8"))
+    rollback_payload["verified"] = False
+    rollback_evidence.write_text(json.dumps(rollback_payload), encoding="utf-8")
+    rollback_errors = _errors(
+        report,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=evidence_dir,
+    )
+    assert any("evidence hash does not match" in error for error in rollback_errors)
+    assert any("rollback evidence is invalid" in error for error in rollback_errors)
+
+
+def test_secret_bearing_rollback_evidence_is_not_retained_and_blocks(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    payload = json.loads(inputs["rollback_path"].read_text(encoding="utf-8"))
+    payload["steps"][0]["detail"] = "password=rollback_secret_value"
+    inputs["rollback_path"].write_text(json.dumps(payload), encoding="utf-8")
+
+    report = _assess(tmp_path, inputs)
+    report_path, _ = _write_report(tmp_path, report)
+    text = report_path.read_text(encoding="utf-8")
+
+    assert report["bindings"]["rollback_evidence"] is None
+    assert report["state"] == FAIL
+    assert report["ready"] is False
+    assert any(blocker.startswith("evidence-retention: rollback_evidence") for blocker in report["blockers"])
+    assert "rollback_secret_value" not in text
+    assert not any(item.get("kind") == "rollback-evidence" for item in report["evidence"])
+
+
+def test_report_classifies_local_live_and_simulated_inspection(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    live = _assess(tmp_path, inputs)
+    live_checks = _checks(live)
+    live_names = {
+        "github-auth-config",
+        "registry-auth-config",
+        "network-github",
+        "network-ghcr",
+        "release-tag-remote",
+    }
+
+    assert live["mode"] == "live-read-only"
+    assert all(check["mode"] in {"local", "live-read-only"} for check in live["checks"])
+    for name in live_names:
+        assert live_checks[name]["mode"] == "live-read-only"
+    assert all(check["mode"] == "local" for name, check in live_checks.items() if name not in live_names)
+
+    (tmp_path / "preflight").mkdir()
+    preflight = _assess(
+        tmp_path / "preflight",
+        _inputs(tmp_path / "preflight"),
+        execute_live=False,
+    )
+    assert preflight["mode"] == "preflight"
+    assert all(check["mode"] == "local" for check in preflight["checks"])

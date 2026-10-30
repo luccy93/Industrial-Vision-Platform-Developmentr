@@ -67,6 +67,7 @@ from tools.release.verification import (
 
 READINESS_SCHEMA_VERSION = 1
 READINESS_PROFILE = "staging_readiness"
+READINESS_EVIDENCE_DIR_NAME = "readiness-evidence"
 READINESS_MODES = ("preflight", "live-read-only")
 CHECK_MODES = ("local", "live-read-only", "simulated")
 CHECK_CATEGORIES = (
@@ -2943,6 +2944,14 @@ def write_readiness_report(report: Mapping[str, Any], path: Path) -> str:
         newline="\n",
     )
     return sha256_file(path)
+
+
+def readiness_report_sha256(path: Path) -> str:
+    """Return the SHA-256 of the exact readiness report bytes."""
+    try:
+        return sha256_file(path)
+    except OSError as exc:
+        raise ReadinessError(f"could not hash readiness report {path}: {exc}") from exc
 
 
 def _check_errors(check: Any, report_mode: str, gpu_required: bool) -> list[str]:

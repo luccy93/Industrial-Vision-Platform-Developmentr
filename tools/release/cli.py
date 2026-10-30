@@ -149,9 +149,11 @@ from tools.release.qualification import (
     write_qualification_report,
 )
 from tools.release.readiness import (
+    READINESS_EVIDENCE_DIR_NAME,
     ReadinessError,
     assess_staging_readiness,
     readiness_report_errors,
+    readiness_report_sha256,
     render_readiness_summary,
     write_readiness_report,
 )
@@ -953,7 +955,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"staging qualification authorizes the target: {args.report}")
         elif args.command == "staging-readiness":
-            evidence_dir = args.evidence_dir or (args.output.parent / "readiness-evidence")
+            evidence_dir = args.evidence_dir or (args.output.parent / READINESS_EVIDENCE_DIR_NAME)
             report = assess_staging_readiness(
                 repo_root=args.repo_root,
                 evidence_dir=evidence_dir,
@@ -970,13 +972,15 @@ def main(argv: list[str] | None = None) -> int:
                 require_gpu=args.require_gpu,
                 execute_live=args.execute_live,
             )
-            write_readiness_report(report, args.output)
+            report_sha256 = write_readiness_report(report, args.output)
             sys.stdout.write(render_readiness_summary(report))
+            print(f"Report SHA-256: {report_sha256}")
+            print(f"Evidence directory: {evidence_dir}")
             if report["state"] != PASS:
                 return 1
         elif args.command == "check-readiness":
             report = _load_json(args.report)
-            evidence_dir = args.evidence_dir or (args.report.parent / "readiness-evidence")
+            evidence_dir = args.evidence_dir or (args.report.parent / READINESS_EVIDENCE_DIR_NAME)
             errors = readiness_report_errors(
                 report,
                 manifest_path=args.manifest,
@@ -989,6 +993,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"error: {error}", file=sys.stderr)
                 return 1
             print(f"staging readiness prerequisites are verified: {args.report}")
+            print(f"Report SHA-256: {readiness_report_sha256(args.report)}")
             print("This does not authorize a deployment or prove production qualification.")
         elif args.command == "collect-evidence":
             report = collect_release_evidence(
