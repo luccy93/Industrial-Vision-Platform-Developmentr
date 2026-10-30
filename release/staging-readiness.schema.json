@@ -1,0 +1,511 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/staging-readiness.schema.json",
+  "title": "Industrial Vision Platform staging readiness report",
+  "description": "Readiness evidence produced by tools/release/readiness.py. The report names one explicit staging target, binds it to the exact manifest bytes, records every prerequisite honestly, and hashes every retained evidence file. PASS means the prerequisites were verified for the stated scope only. production_qualified is always false and deployment is always unauthorized and unperformed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "generated_at",
+    "mode",
+    "repository",
+    "staging_target",
+    "release",
+    "gpu_required",
+    "gpu_ready",
+    "state",
+    "ready",
+    "production_qualified",
+    "deployment",
+    "checks",
+    "evidence",
+    "bindings",
+    "blockers",
+    "limitations",
+    "next_steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "staging_readiness"
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "mode": {
+      "enum": [
+        "preflight",
+        "live-read-only"
+      ]
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_repository",
+        "commit",
+        "branch",
+        "tag",
+        "tag_source",
+        "tag_resolved_locally",
+        "tag_matches_commit",
+        "commit_resolved_locally",
+        "reachable_from_main",
+        "worktree_clean",
+        "remote_matches_source"
+      ],
+      "properties": {
+        "source_repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "tag_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "explicit",
+            null
+          ]
+        },
+        "tag_resolved_locally": {
+          "type": "boolean"
+        },
+        "tag_matches_commit": {
+          "type": "boolean"
+        },
+        "commit_resolved_locally": {
+          "type": "boolean"
+        },
+        "reachable_from_main": {
+          "type": "boolean"
+        },
+        "worktree_clean": {
+          "type": "boolean"
+        },
+        "remote_matches_source": {
+          "type": "boolean"
+        }
+      }
+    },
+    "staging_target": {
+      "$ref": "#/$defs/staging_target"
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256",
+        "subject",
+        "digests"
+      ],
+      "properties": {
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "digests": {
+          "$ref": "#/$defs/digests"
+        }
+      }
+    },
+    "gpu_required": {
+      "type": "boolean"
+    },
+    "gpu_ready": {
+      "type": "boolean"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "production_qualified": {
+      "const": false
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorized",
+        "performed",
+        "statement"
+      ],
+      "properties": {
+        "authorized": {
+          "const": false
+        },
+        "performed": {
+          "const": false
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "manifest",
+        "previous_manifest",
+        "previous_verification",
+        "rollback_evidence"
+      ],
+      "properties": {
+        "target": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "staging-target"
+                }
+              }
+            }
+          ]
+        },
+        "manifest": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "release-manifest"
+                }
+              }
+            }
+          ]
+        },
+        "previous_manifest": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "previous-manifest"
+                }
+              }
+            }
+          ]
+        },
+        "previous_verification": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "previous-verification"
+                }
+              }
+            }
+          ]
+        },
+        "rollback_evidence": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "rollback-evidence"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "state": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "NOT_RUN",
+        "UNAVAILABLE",
+        "SIMULATED"
+      ]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "commit",
+        "source_repository"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "source_repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        }
+      }
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api",
+        "web",
+        "api-gpu"
+      ],
+      "properties": {
+        "api": {
+          "$ref": "#/$defs/digest"
+        },
+        "web": {
+          "$ref": "#/$defs/digest"
+        },
+        "api-gpu": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "staging_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "environment",
+        "api_url",
+        "web_url",
+        "ws_url",
+        "smoke_username",
+        "smoke_password_env",
+        "compose_project",
+        "compose_files",
+        "gpu"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,62}$"
+        },
+        "environment": {
+          "const": "staging"
+        },
+        "api_url": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "web_url": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "ws_url": {
+          "type": "string",
+          "pattern": "^wss://"
+        },
+        "smoke_username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "smoke_password_env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "compose_project": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+        },
+        "compose_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "gpu": {
+          "type": "boolean"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "category",
+        "state",
+        "required",
+        "mode",
+        "detail",
+        "command"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "repository",
+            "release",
+            "tooling",
+            "github",
+            "target",
+            "deployment",
+            "gpu"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "mode": {
+          "enum": [
+            "local",
+            "live-read-only",
+            "simulated"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "state"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "state"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        }
+      }
+    }
+  }
+}

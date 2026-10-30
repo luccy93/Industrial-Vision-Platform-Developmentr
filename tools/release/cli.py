@@ -50,6 +50,13 @@ Usage examples::
         --deployment-report release-artifacts/deployment-report.json \\
         --rehearsal-report release-artifacts/rehearsal/rollback-rehearsal.json \\
         --gpu-report release-artifacts/gpu-runtime.json
+    python -m tools.release.cli staging-readiness --manifest release-manifest.json \\
+        --target staging-target.json --previous-manifest previous-manifest.json \\
+        --previous-verification-report previous-release-verification.json \\
+        --rollback-evidence rollback-rehearsal.json \\
+        --output release-artifacts/staging-readiness.json
+    python -m tools.release.cli check-readiness --report staging-readiness.json \\
+        --manifest release-manifest.json --report-sha256 <sha256>
     python -m tools.release.cli audit-workflows --root .
 
 Every command exits non-zero on a policy violation. Smoke passwords are read
@@ -140,6 +147,13 @@ from tools.release.qualification import (
     qualify_release,
     render_qualification_summary,
     write_qualification_report,
+)
+from tools.release.readiness import (
+    ReadinessError,
+    assess_staging_readiness,
+    readiness_report_errors,
+    render_readiness_summary,
+    write_readiness_report,
 )
 from tools.release.registry import RegistryError, check_release_conflicts
 from tools.release.rehearsal import (
@@ -473,6 +487,39 @@ def _build_parser() -> argparse.ArgumentParser:
     staging_gate.add_argument("--report", type=Path, required=True)
     staging_gate.add_argument("--manifest", type=Path, required=True)
     staging_gate.add_argument("--evidence-dir", type=Path)
+
+    readiness_parser = subparsers.add_parser(
+        "staging-readiness",
+        help="assess staging readiness without deploying, publishing, or authorizing anything",
+    )
+    readiness_parser.add_argument("--repo-root", type=Path, default=Path("."))
+    readiness_parser.add_argument("--manifest", type=Path)
+    readiness_parser.add_argument("--target", type=Path)
+    readiness_parser.add_argument("--previous-manifest", type=Path)
+    readiness_parser.add_argument("--previous-verification-report", type=Path)
+    readiness_parser.add_argument("--rollback-evidence", type=Path)
+    readiness_parser.add_argument("--output", type=Path, required=True)
+    readiness_parser.add_argument("--evidence-dir", type=Path)
+    readiness_parser.add_argument("--tag")
+    readiness_parser.add_argument("--commit")
+    readiness_parser.add_argument("--repository")
+    readiness_parser.add_argument("--branch")
+    readiness_parser.add_argument("--main-ref", default="origin/main")
+    readiness_parser.add_argument("--require-gpu", action="store_true")
+    readiness_parser.add_argument(
+        "--execute-live",
+        action="store_true",
+        help="add bounded read-only live probes; default readiness stays offline",
+    )
+
+    readiness_gate = subparsers.add_parser(
+        "check-readiness",
+        help="require a PASS readiness report bound to the exact manifest and evidence",
+    )
+    readiness_gate.add_argument("--report", type=Path, required=True)
+    readiness_gate.add_argument("--manifest", type=Path, required=True)
+    readiness_gate.add_argument("--evidence-dir", type=Path)
+    readiness_gate.add_argument("--report-sha256")
 
     evidence_parser = subparsers.add_parser(
         "collect-evidence",
@@ -905,6 +952,44 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"error: {error}", file=sys.stderr)
                 return 1
             print(f"staging qualification authorizes the target: {args.report}")
+        elif args.command == "staging-readiness":
+            evidence_dir = args.evidence_dir or (args.output.parent / "readiness-evidence")
+            report = assess_staging_readiness(
+                repo_root=args.repo_root,
+                evidence_dir=evidence_dir,
+                manifest_path=args.manifest,
+                target_path=args.target,
+                previous_manifest_path=args.previous_manifest,
+                previous_verification_report_path=args.previous_verification_report,
+                rollback_evidence_path=args.rollback_evidence,
+                expected_tag=args.tag,
+                expected_commit=args.commit,
+                expected_repository=args.repository,
+                expected_branch=args.branch,
+                main_ref=args.main_ref,
+                require_gpu=args.require_gpu,
+                execute_live=args.execute_live,
+            )
+            write_readiness_report(report, args.output)
+            sys.stdout.write(render_readiness_summary(report))
+            if report["state"] != PASS:
+                return 1
+        elif args.command == "check-readiness":
+            report = _load_json(args.report)
+            evidence_dir = args.evidence_dir or (args.report.parent / "readiness-evidence")
+            errors = readiness_report_errors(
+                report,
+                manifest_path=args.manifest,
+                report_path=args.report,
+                evidence_dir=evidence_dir,
+                expected_report_sha256=args.report_sha256,
+            )
+            if errors:
+                for error in errors:
+                    print(f"error: {error}", file=sys.stderr)
+                return 1
+            print(f"staging readiness prerequisites are verified: {args.report}")
+            print("This does not authorize a deployment or prove production qualification.")
         elif args.command == "collect-evidence":
             report = collect_release_evidence(
                 args.manifest,
@@ -1003,6 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
         PrerequisiteError,
         PublicationError,
         QualificationError,
+        ReadinessError,
         RehearsalError,
         RegistryError,
         SmokeError,

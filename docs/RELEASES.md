@@ -305,6 +305,37 @@ produced on the real target hosts.
 
 Report schema: `release/release-qualification.schema.json`.
 
+## Staging infrastructure readiness (V26)
+
+V26 adds a readiness assessment that is deliberately separate from
+qualification and deployment. It inspects the repository checkout, installed
+tools, the explicit staging target, the release manifest, Compose
+configuration, previous known-good release evidence, and rollback rehearsal
+evidence. It never tags, publishes, deploys, dispatches a workflow, or mutates
+staging or production.
+
+```bash
+python -m tools.release.cli staging-readiness \
+  --manifest release-artifacts/release-manifest.json \
+  --target staging-target.json \
+  --previous-manifest previous-manifest.json \
+  --previous-verification-report previous-release-verification.json \
+  --rollback-evidence rollback-rehearsal.json \
+  --output release-artifacts/staging-readiness.json
+
+python -m tools.release.cli check-readiness \
+  --report release-artifacts/staging-readiness.json \
+  --manifest release-artifacts/release-manifest.json \
+  --report-sha256 <sha256>
+```
+
+The default mode is an offline preflight. `--execute-live` adds bounded
+read-only GitHub, GHCR, and network probes. `PASS` means only that every
+required prerequisite was verified for the stated scope. A readiness report
+always records `production_qualified: false` and
+`deployment: {authorized: false, performed: false}`; it never authorizes a
+deployment. See [V26_STAGING_READINESS.md](V26_STAGING_READINESS.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
