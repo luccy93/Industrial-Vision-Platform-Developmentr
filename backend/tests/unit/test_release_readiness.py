@@ -24,7 +24,7 @@ from backend.tests.unit.test_release_verification import (
 from tools.release.cli import main
 from tools.release.deployment import deployment_environment
 from tools.release.manifest import sha256_file
-from tools.release.qualification import QUALIFICATION_PROFILES
+from tools.release.qualification import QUALIFICATION_PROFILES, qualification_report_errors
 from tools.release.readiness import (
     DEPLOYMENT_FIELDS,
     MANDATORY_READINESS_CHECKS,
@@ -47,7 +47,19 @@ from tools.release.readiness import (
     write_readiness_report,
 )
 from tools.release.rehearsal import STEP_NAMES
-from tools.release.verification import FAIL, NOT_RUN, PASS, SIMULATED, UNAVAILABLE
+from tools.release.staging import (
+    STAGING_MODES,
+    STAGING_SCHEMA_VERSION,
+    STAGING_TARGET_REQUIRED_FIELDS,
+)
+from tools.release.verification import (
+    EVIDENCE_STATES,
+    FAIL,
+    NOT_RUN,
+    PASS,
+    SIMULATED,
+    UNAVAILABLE,
+)
 
 GENERATED_AT = "2026-10-26T00:00:00Z"
 TOKEN_SENTINEL = "ghp_readiness_sentinel_do_not_disclose"
@@ -943,3 +955,275 @@ def test_report_classifies_local_live_and_simulated_inspection(tmp_path: Path) -
     )
     assert preflight["mode"] == "preflight"
     assert all(check["mode"] == "local" for check in preflight["checks"])
+
+
+def test_schema_version_and_profile_mismatches_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    tampered["schema_version"] = READINESS_SCHEMA_VERSION + 1
+    tampered["profile"] = "release_qualification"
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("schema_version must be 1" in error for error in errors)
+    assert any("profile must be 'staging_readiness'" in error for error in errors)
+
+
+def test_contradictory_aggregate_and_gpu_flags_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    evidence_dir = tmp_path / READINESS_EVIDENCE_DIR_NAME
+
+    tampered = copy.deepcopy(report)
+    tampered["state"] = FAIL
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("state is 'FAIL', not PASS" in error for error in errors)
+    assert any("state contradicts its checks" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["ready"] = False
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("ready is not true" in error for error in errors)
+    assert any("ready flag contradicts its checks" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["gpu_ready"] = True
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("gpu_ready must be false when GPU is optional" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["gpu_required"] = True
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("gpu_ready is not true for a GPU-required profile" in error for error in errors)
+    assert any("GPU check gpu-hardware required flag contradicts gpu_required" in error for error in errors)
+
+
+def test_preflight_report_with_live_checks_is_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    tampered["mode"] = "preflight"
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("preflight report contains live check" in error for error in errors)
+    assert any("required flag contradicts the report mode" in error for error in errors)
+
+
+def test_simulated_required_check_never_satisfies_gate(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    check = next(item for item in tampered["checks"] if item["name"] == "manifest")
+    check["state"] = SIMULATED
+    check["mode"] = "simulated"
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("required check manifest is SIMULATED, not PASS" in error for error in errors)
+    assert any("required checks are not PASS" in error for error in errors)
+    assert any("state contradicts" in error for error in errors)
+
+
+def test_deployment_authorization_and_production_claims_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    evidence_dir = tmp_path / READINESS_EVIDENCE_DIR_NAME
+
+    tampered = copy.deepcopy(report)
+    tampered["production_qualified"] = True
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("must never claim production qualification" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["deployment"]["authorized"] = True
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("must never authorize deployment" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["deployment"]["performed"] = True
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("must never claim a deployment was performed" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["deployment"]["statement"] = "deployed"
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("deployment statement is not explicit" in error for error in errors)
+
+
+def test_unknown_check_evidence_and_binding_fields_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    tampered["checks"][0]["extra"] = True
+    tampered["evidence"][0]["extra"] = True
+    tampered["bindings"]["target"]["extra"] = True
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("readiness check has unknown fields" in error for error in errors)
+    assert any("evidence entry has unexpected fields" in error for error in errors)
+    assert any("target binding has unexpected fields" in error for error in errors)
+
+
+def test_missing_required_check_and_binding_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    tampered["checks"] = [check for check in tampered["checks"] if check["name"] != "manifest"]
+    tampered["bindings"].pop("target")
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("has no manifest check" in error for error in errors)
+    assert any("target binding is missing" in error for error in errors)
+
+
+def test_report_bound_to_a_different_manifest_is_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+
+    errors = _errors(
+        report,
+        inputs["previous_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("not bound to the supplied manifest" in error for error in errors)
+    assert any("release subject.tag does not match the manifest" in error for error in errors)
+    assert any("digest for api does not match the manifest" in error for error in errors)
+
+
+def test_target_summary_must_match_retained_target_evidence(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    tampered = copy.deepcopy(report)
+    tampered["staging_target"]["name"] = "staging-west-1"
+    errors = _errors(
+        tampered,
+        inputs["manifest_path"],
+        report_path=path,
+        evidence_dir=tmp_path / READINESS_EVIDENCE_DIR_NAME,
+    )
+
+    assert any("staging target name does not match its evidence" in error for error in errors)
+
+
+def test_evidence_state_and_binding_kind_mismatches_are_rejected(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, _ = _write_report(tmp_path, report)
+    evidence_dir = tmp_path / READINESS_EVIDENCE_DIR_NAME
+
+    tampered = copy.deepcopy(report)
+    tampered["evidence"][0]["state"] = FAIL
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("state is not PASS" in error for error in errors)
+
+    tampered = copy.deepcopy(report)
+    tampered["bindings"]["target"]["kind"] = "previous-manifest"
+    errors = _errors(tampered, inputs["manifest_path"], report_path=path, evidence_dir=evidence_dir)
+    assert any("target binding has the wrong evidence kind" in error for error in errors)
+    assert any("target binding does not match its evidence" in error for error in errors)
+
+
+def test_cli_check_readiness_rejects_forged_deployment_authorization(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    tampered = copy.deepcopy(report)
+    tampered["production_qualified"] = True
+    tampered["deployment"]["authorized"] = True
+    path, digest = _write_report(tmp_path, tampered)
+
+    exit_code = main(
+        [
+            "check-readiness",
+            "--report",
+            str(path),
+            "--manifest",
+            str(inputs["manifest_path"]),
+            "--report-sha256",
+            digest,
+        ]
+    )
+
+    assert exit_code == 1
+    errors = capsys.readouterr().err
+    assert "must never authorize deployment" in errors
+    assert "must never claim production qualification" in errors
+
+
+def test_readiness_report_cannot_satisfy_qualification_gate(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+
+    errors = qualification_report_errors(
+        report,
+        inputs["manifest"],
+        manifest_path=inputs["manifest_path"],
+        require_production=True,
+    )
+
+    assert any("profile 'staging_readiness' is not recognized" in error for error in errors)
+    assert any("profile must be 'production_qualification'" in error for error in errors)
+    assert any("qualification report is not bound" in error for error in errors)
+
+
+def test_v22_v25_contracts_remain_unchanged() -> None:
+    assert EVIDENCE_STATES == (PASS, FAIL, NOT_RUN, UNAVAILABLE, SIMULATED)
+    assert QUALIFICATION_PROFILES == (
+        "local_validation",
+        "staging_qualification",
+        "production_qualification",
+    )
+    assert STAGING_SCHEMA_VERSION == 1
+    assert STAGING_MODES == ("preflight", "live-read", "authorized-mutation")
+    assert STAGING_TARGET_REQUIRED_FIELDS == (
+        "schema_version",
+        "name",
+        "environment",
+        "release",
+        "api_url",
+        "web_url",
+        "ws_url",
+        "smoke_username",
+        "smoke_password_env",
+        "compose_project",
+        "compose_files",
+        "gpu",
+    )
+    assert READINESS_PROFILE not in QUALIFICATION_PROFILES
