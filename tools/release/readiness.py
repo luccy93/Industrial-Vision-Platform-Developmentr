@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from tools.release import inspection
+from tools.release import connectivity as connectivity_probes
+from tools.release import docker_host, inspection
+from tools.release import rollback as rollback_prerequisites
 from tools.release.deployment import (
     DeploymentError,
     deployment_config_checks,
@@ -53,6 +55,7 @@ from tools.release.manifest import (
     sha256_file,
     utc_now_iso,
 )
+from tools.release.migrations import migration_report_errors
 from tools.release.rehearsal import REHEARSAL_SCHEMA_VERSION, STEP_NAMES
 from tools.release.staging import staging_target_errors, staging_target_live_errors
 from tools.release.verification import (
@@ -2475,20 +2478,188 @@ def _v28_preflight_checks() -> list[dict[str, Any]]:
     ]
 
 
+def _v28_connectivity_checks(
+    target: Mapping[str, Any] | None,
+    *,
+    timeout: float,
+    probe: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
+    now: Callable[[], str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if target is None:
+        return (
+            [
+                _check(
+                    name,
+                    "connectivity",
+                    NOT_RUN,
+                    name != "service-identity",
+                    "live-read-only",
+                    "no valid staging target was supplied; no network probe was attempted",
+                )
+                for name in V28_CONNECTIVITY_CHECKS
+            ],
+            {"source": "bounded-network-probes", "observed_at": now(), "state": "NOT_RUN"},
+        )
+    return probe(target, timeout=timeout, execute_live=True, now_iso=now)
+
+
+def _v28_rollback_checks(
+    *,
+    manifest: Mapping[str, Any] | None,
+    manifest_path: Path | None,
+    previous: Mapping[str, Any] | None,
+    previous_checks: Sequence[Mapping[str, Any]],
+    migration_report_path: Path | None,
+    backup_documentation_path: Path | None,
+    now: Callable[[], str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    observation: dict[str, Any] = {
+        "source": "local-rollback-evidence",
+        "observed_at": now(),
+        "previous_digests": {},
+        "migration_report": None,
+        "backup_documentation": None,
+    }
+    prior_states = {str(check.get("name")): str(check.get("state")) for check in previous_checks}
+    digest_problems: list[str] = []
+    if manifest is None:
+        digest_problems.append("the current release manifest is invalid")
+    if previous is None:
+        digest_problems.append("no distinct previous release manifest is available")
+    if manifest is not None and previous is not None:
+        digest_problems.extend(rollback_prerequisites.previous_digest_errors(manifest, previous))
+        observation["previous_digests"] = {
+            name: digest
+            for name, digest in (
+                (image.get("name"), image.get("digest"))
+                for image in previous.get("images") or []
+                if isinstance(image, Mapping)
+            )
+            if isinstance(name, str)
+        }
+    for name in ("previous-release", "previous-verification", "rollback-evidence"):
+        state = prior_states.get(name, FAIL)
+        if state != PASS:
+            digest_problems.append(f"{name} is {state}")
+    checks.append(
+        _check(
+            "rollback-previous-digests",
+            "rollback",
+            FAIL if digest_problems else PASS,
+            True,
+            "local",
+            "; ".join(digest_problems[:8])
+            if digest_problems
+            else (
+                "the previous release has distinct digests, production verification, "
+                "and executed rollback evidence"
+            ),
+        )
+    )
+
+    if migration_report_path is None:
+        checks.append(
+            _check(
+                "rollback-migration-evidence",
+                "rollback",
+                NOT_RUN,
+                True,
+                "local",
+                "no migration compatibility report was supplied with --migration-report",
+            )
+        )
+    elif manifest is None or manifest_path is None:
+        checks.append(
+            _check(
+                "rollback-migration-evidence",
+                "rollback",
+                NOT_RUN,
+                True,
+                "local",
+                "the release manifest is invalid; migration evidence was not evaluated",
+            )
+        )
+    else:
+        try:
+            migration = _load_json_object(migration_report_path, "migration report")
+        except ReadinessError as exc:
+            checks.append(_check("rollback-migration-evidence", "rollback", FAIL, True, "local", str(exc)))
+        else:
+            errors = migration_report_errors(migration, manifest, manifest_path=manifest_path)
+            observation["migration_report"] = {
+                "path": migration_report_path.name,
+                "state": migration.get("state"),
+                "heads": migration.get("heads"),
+            }
+            checks.append(
+                _check(
+                    "rollback-migration-evidence",
+                    "rollback",
+                    FAIL if errors else PASS,
+                    True,
+                    "local",
+                    "; ".join(errors[:8])
+                    if errors
+                    else "the migration compatibility report is bound to the manifest and verified",
+                )
+            )
+
+    if backup_documentation_path is None:
+        checks.append(
+            _check(
+                "rollback-backup-documentation",
+                "rollback",
+                NOT_RUN,
+                True,
+                "local",
+                "no backup and restore documentation was supplied with --backup-documentation",
+            )
+        )
+    else:
+        errors = rollback_prerequisites.backup_documentation_errors(backup_documentation_path)
+        observation["backup_documentation"] = {
+            "path": backup_documentation_path.name,
+            "state": FAIL if errors else PASS,
+        }
+        checks.append(
+            _check(
+                "rollback-backup-documentation",
+                "rollback",
+                FAIL if errors else PASS,
+                True,
+                "local",
+                "; ".join(errors[:8])
+                if errors
+                else "backup and restore documentation covers PostgreSQL, Redis, and volumes",
+            )
+        )
+    return checks, observation
+
+
 def _v28_checks(
     *,
     manifest: Mapping[str, Any] | None,
+    manifest_path: Path | None,
     artifacts_dir: Path | None,
+    target: Mapping[str, Any] | None,
     target_live_errors: Sequence[str],
+    previous: Mapping[str, Any] | None,
+    previous_checks: Sequence[Mapping[str, Any]],
+    migration_report_path: Path | None,
+    backup_documentation_path: Path | None,
+    docker_host_name: str | None,
+    gpu_required: bool,
     execute_live: bool,
     environment: Mapping[str, str],
     runner: CommandRunner,
     which: Callable[[str], str | None],
     http_get: inspection.HttpGet | None,
+    connectivity_probe: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
     now: Callable[[], str],
     timeout: float,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Run the V28 read-only GitHub, GHCR, attestation, and artifact gates."""
+    """Run every V28 read-only infrastructure gate."""
     if not execute_live:
         return _v28_preflight_checks(), {"mode": "preflight"}
     policy_check = _check(
@@ -2533,6 +2704,30 @@ def _v28_checks(
         artifacts_dir=artifacts_dir,
         now=now,
     )
+    connectivity_checks, connectivity_observation = _v28_connectivity_checks(
+        target,
+        timeout=timeout,
+        probe=connectivity_probe,
+        now=now,
+    )
+    docker_checks, docker_observation = docker_host.inspect_docker_host(
+        docker_host_name,
+        compose_project=str(target.get("compose_project")) if isinstance(target, Mapping) else None,
+        gpu_required=gpu_required,
+        runner=runner,
+        which=which,
+        timeout=max(timeout, docker_host.DEFAULT_DOCKER_TIMEOUT),
+        now=now,
+    )
+    rollback_checks, rollback_observation = _v28_rollback_checks(
+        manifest=manifest,
+        manifest_path=manifest_path,
+        previous=previous,
+        previous_checks=previous_checks,
+        migration_report_path=migration_report_path,
+        backup_documentation_path=backup_documentation_path,
+        now=now,
+    )
     observation = {
         "schema_version": 1,
         "mode": "live-read-only",
@@ -2545,12 +2740,15 @@ def _v28_checks(
         "registry": registry_observation,
         "attestation": attestation_observation,
         "artifacts": artifact_observation,
+        "connectivity": connectivity_observation,
+        "docker": docker_observation,
+        "rollback": rollback_observation,
         "mutation": {
             "performed": False,
             "statement": (
-                "V28 inspection performed read-only GET, digest, attestation, and "
-                "local artifact checks only; no release, registry, host, database, "
-                "network, or deployment mutation was performed."
+                "V28 inspection performed read-only GET, DNS/TCP/TLS/HTTPS/WSS, Docker context, "
+                "digest, attestation, and local artifact/rollback evidence checks only; no "
+                "release, registry, host, database, network, or deployment mutation was performed."
             ),
         },
     }
@@ -2559,7 +2757,10 @@ def _v28_checks(
         + list(github_checks)
         + list(registry_checks)
         + list(attestation_checks)
-        + list(artifact_checks),
+        + list(artifact_checks)
+        + list(connectivity_checks)
+        + list(docker_checks)
+        + list(rollback_checks),
         observation,
     )
 
@@ -3091,6 +3292,9 @@ def assess_staging_readiness(
     production_hosts: Sequence[str] = (),
     connectivity_timeout: float = 10.0,
     http_get: inspection.HttpGet | None = None,
+    connectivity_probe: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]] = (
+        connectivity_probes.connectivity_checks
+    ),
     expected_tag: str | None = None,
     expected_commit: str | None = None,
     expected_repository: str | None = None,
@@ -3110,6 +3314,11 @@ def assess_staging_readiness(
     if inspection_profile not in (None, READINESS_INSPECTION_PROFILE):
         raise ReadinessError(f"inspection_profile must be {READINESS_INSPECTION_PROFILE!r} when supplied")
     v28 = inspection_profile == READINESS_INSPECTION_PROFILE
+    if v28:
+        try:
+            connectivity_timeout = connectivity_probes.validate_timeout(connectivity_timeout)
+        except connectivity_probes.ConnectivityError as exc:
+            raise ReadinessError(f"connectivity_timeout is invalid: {exc}") from exc
     if artifacts_dir is not None and not artifacts_dir.is_absolute():
         artifacts_dir = repo_root / artifacts_dir
     if migration_report_path is not None and not migration_report_path.is_absolute():
@@ -3268,13 +3477,22 @@ def assess_staging_readiness(
     if v28:
         v28_checks, v28_observation = _v28_checks(
             manifest=manifest,
+            manifest_path=manifest_path,
             artifacts_dir=artifacts_dir,
+            target=target,
             target_live_errors=target_live_errors,
+            previous=previous,
+            previous_checks=previous_checks,
+            migration_report_path=migration_report_path,
+            backup_documentation_path=backup_documentation_path,
+            docker_host_name=docker_host,
+            gpu_required=gpu_required,
             execute_live=execute_live,
             environment=environment,
             runner=runner,
             which=which,
             http_get=http_get,
+            connectivity_probe=connectivity_probe,
             now=now,
             timeout=connectivity_timeout,
         )
@@ -3900,6 +4118,43 @@ def readiness_report_errors(
                         or "no " not in str(mutation.get("statement")).lower()
                     ):
                         errors.append("readiness report live inspection mutation statement is not explicit")
+                for section in ("connectivity", "docker", "rollback"):
+                    if not isinstance(live_payload.get(section), Mapping):
+                        errors.append(f"readiness report live inspection {section} evidence is missing")
+                live_target = live_payload.get("target")
+                if isinstance(target, Mapping):
+                    if not isinstance(live_target, Mapping):
+                        errors.append("readiness report live inspection target evidence is missing")
+                    else:
+                        for field in TARGET_FIELDS:
+                            if live_target.get(field) != target.get(field):
+                                errors.append(
+                                    f"readiness report live inspection target.{field} does not match "
+                                    "the staging target"
+                                )
+
+    if v28:
+        migration_evidence = evidence_by_kind.get("migration-report")
+        if (
+            isinstance(migration_evidence, Mapping)
+            and supplied_manifest is not None
+            and manifest_path is not None
+        ):
+            migration_payload = _retained_json(directory, migration_evidence)
+            if migration_payload is None:
+                errors.append("readiness report migration evidence is unreadable")
+            else:
+                for problem in migration_report_errors(
+                    migration_payload,
+                    supplied_manifest,
+                    manifest_path=manifest_path,
+                ):
+                    errors.append(f"readiness report migration evidence is invalid: {problem}")
+        backup_evidence = evidence_by_kind.get("backup-documentation")
+        if isinstance(backup_evidence, Mapping):
+            backup_path = directory / str(backup_evidence.get("path"))
+            for problem in rollback_prerequisites.backup_documentation_errors(backup_path):
+                errors.append(f"readiness report backup documentation is invalid: {problem}")
 
     previous_evidence = evidence_by_kind.get("previous-manifest")
     previous_payload: dict[str, Any] | None = None
