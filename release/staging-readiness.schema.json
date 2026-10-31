@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/staging-readiness.schema.json",
   "title": "Industrial Vision Platform staging readiness report",
-  "description": "Readiness evidence produced by tools/release/readiness.py. The report names one explicit staging target, binds it to the exact manifest bytes, records every prerequisite honestly, and hashes every retained evidence file. PASS means the prerequisites were verified for the stated scope only. production_qualified is always false and deployment is always unauthorized and unperformed.",
+  "description": "Readiness evidence produced by tools/release/readiness.py. The report names one explicit staging target, binds it to the exact manifest bytes, records every prerequisite honestly, and hashes every retained evidence file. Non-PASS reports may legitimately omit optional inputs and evidence bindings during preflight. PASS means every required prerequisite was verified for the stated scope only; production_qualified is always false and deployment is always unauthorized and unperformed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -61,15 +61,36 @@
       ],
       "properties": {
         "source_repository": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "commit": {
-          "$ref": "#/$defs/commit"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/commit"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "branch": {
-          "type": "string",
-          "minLength": 1
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "tag": {
           "type": [
@@ -109,7 +130,14 @@
       }
     },
     "staging_target": {
-      "$ref": "#/$defs/staging_target"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/staging_target"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "release": {
       "type": "object",
@@ -121,13 +149,20 @@
       ],
       "properties": {
         "manifest_sha256": {
-          "$ref": "#/$defs/digest"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "subject": {
-          "$ref": "#/$defs/subject"
+          "$ref": "#/$defs/incomplete_subject"
         },
         "digests": {
-          "$ref": "#/$defs/digests"
+          "$ref": "#/$defs/incomplete_digests"
         }
       }
     },
@@ -191,72 +226,107 @@
       ],
       "properties": {
         "target": {
-          "allOf": [
+          "anyOf": [
             {
-              "$ref": "#/$defs/binding"
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "staging-target"
+                    }
+                  }
+                }
+              ]
             },
             {
-              "properties": {
-                "kind": {
-                  "const": "staging-target"
-                }
-              }
+              "type": "null"
             }
           ]
         },
         "manifest": {
-          "allOf": [
+          "anyOf": [
             {
-              "$ref": "#/$defs/binding"
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "release-manifest"
+                    }
+                  }
+                }
+              ]
             },
             {
-              "properties": {
-                "kind": {
-                  "const": "release-manifest"
-                }
-              }
+              "type": "null"
             }
           ]
         },
         "previous_manifest": {
-          "allOf": [
+          "anyOf": [
             {
-              "$ref": "#/$defs/binding"
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "previous-manifest"
+                    }
+                  }
+                }
+              ]
             },
             {
-              "properties": {
-                "kind": {
-                  "const": "previous-manifest"
-                }
-              }
+              "type": "null"
             }
           ]
         },
         "previous_verification": {
-          "allOf": [
+          "anyOf": [
             {
-              "$ref": "#/$defs/binding"
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "previous-verification"
+                    }
+                  }
+                }
+              ]
             },
             {
-              "properties": {
-                "kind": {
-                  "const": "previous-verification"
-                }
-              }
+              "type": "null"
             }
           ]
         },
         "rollback_evidence": {
-          "allOf": [
+          "anyOf": [
             {
-              "$ref": "#/$defs/binding"
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "rollback-evidence"
+                    }
+                  }
+                }
+              ]
             },
             {
-              "properties": {
-                "kind": {
-                  "const": "rollback-evidence"
-                }
-              }
+              "type": "null"
             }
           ]
         }
@@ -282,6 +352,142 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ready": {
+            "const": true
+          },
+          "blockers": {
+            "maxItems": 0
+          },
+          "repository": {
+            "$ref": "#/$defs/pass_repository"
+          },
+          "staging_target": {
+            "$ref": "#/$defs/staging_target"
+          },
+          "release": {
+            "$ref": "#/$defs/pass_release"
+          },
+          "bindings": {
+            "$ref": "#/$defs/pass_bindings"
+          },
+          "evidence": {
+            "$ref": "#/$defs/pass_evidence"
+          },
+          "checks": {
+            "$ref": "#/$defs/pass_checks"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "not": {
+              "const": "PASS"
+            }
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ready": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gpu_required": {
+            "const": false
+          }
+        },
+        "required": [
+          "gpu_required"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gpu_ready": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "PASS"
+          },
+          "gpu_required": {
+            "const": true
+          }
+        },
+        "required": [
+          "state",
+          "gpu_required"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gpu_ready": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "preflight"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "const": "live-read-only"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "commit": {
       "type": "string",
@@ -322,6 +528,49 @@
         }
       }
     },
+    "incomplete_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "commit",
+        "source_repository"
+      ],
+      "properties": {
+        "tag": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/commit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_repository": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "digests": {
       "type": "object",
       "additionalProperties": false,
@@ -330,6 +579,21 @@
         "web",
         "api-gpu"
       ],
+      "properties": {
+        "api": {
+          "$ref": "#/$defs/digest"
+        },
+        "web": {
+          "$ref": "#/$defs/digest"
+        },
+        "api-gpu": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "incomplete_digests": {
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "api": {
           "$ref": "#/$defs/digest"
@@ -453,7 +717,68 @@
             "null"
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "simulated"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "SIMULATED"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SIMULATED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "const": "simulated"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": true
+              }
+            },
+            "required": [
+              "required"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "not": {
+                  "const": "SIMULATED"
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "evidence": {
       "type": "object",
@@ -506,6 +831,370 @@
           "$ref": "#/$defs/state"
         }
       }
+    },
+    "pass_binding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/binding"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "PASS"
+            }
+          }
+        }
+      ]
+    },
+    "pass_repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_repository",
+        "commit",
+        "branch",
+        "tag",
+        "tag_source",
+        "tag_resolved_locally",
+        "tag_matches_commit",
+        "commit_resolved_locally",
+        "reachable_from_main",
+        "worktree_clean",
+        "remote_matches_source"
+      ],
+      "properties": {
+        "source_repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "tag_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "explicit",
+            null
+          ]
+        },
+        "tag_resolved_locally": {
+          "type": "boolean"
+        },
+        "tag_matches_commit": {
+          "type": "boolean"
+        },
+        "commit_resolved_locally": {
+          "const": true
+        },
+        "reachable_from_main": {
+          "const": true
+        },
+        "worktree_clean": {
+          "const": true
+        },
+        "remote_matches_source": {
+          "const": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "tag": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "then": {
+            "properties": {
+              "tag_source": {
+                "const": "explicit"
+              },
+              "tag_resolved_locally": {
+                "const": true
+              },
+              "tag_matches_commit": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tag": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "tag"
+            ]
+          },
+          "then": {
+            "properties": {
+              "tag_source": {
+                "const": null
+              },
+              "tag_resolved_locally": {
+                "const": false
+              },
+              "tag_matches_commit": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pass_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256",
+        "subject",
+        "digests"
+      ],
+      "properties": {
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "digests": {
+          "$ref": "#/$defs/digests"
+        }
+      }
+    },
+    "pass_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "manifest",
+        "previous_manifest",
+        "previous_verification",
+        "rollback_evidence"
+      ],
+      "properties": {
+        "target": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "staging-target"
+                }
+              }
+            }
+          ]
+        },
+        "manifest": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "release-manifest"
+                }
+              }
+            }
+          ]
+        },
+        "previous_manifest": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "previous-manifest"
+                }
+              }
+            }
+          ]
+        },
+        "previous_verification": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "previous-verification"
+                }
+              }
+            }
+          ]
+        },
+        "rollback_evidence": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "rollback-evidence"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pass_evidence": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/evidence"
+          },
+          {
+            "properties": {
+              "state": {
+                "const": "PASS"
+              }
+            }
+          }
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "staging-target"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "release-manifest"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "previous-manifest"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "previous-verification"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "kind": {
+                "const": "rollback-evidence"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        }
+      ]
+    },
+    "pass_checks": {
+      "type": "array",
+      "minItems": 47,
+      "items": {
+        "$ref": "#/$defs/check"
+      },
+      "allOf": [
+        {
+          "not": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "required",
+                "state"
+              ],
+              "properties": {
+                "required": {
+                  "const": true
+                },
+                "state": {
+                  "not": {
+                    "const": "PASS"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "required",
+                "state"
+              ],
+              "properties": {
+                "required": {
+                  "const": true
+                },
+                "state": {
+                  "const": "SIMULATED"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

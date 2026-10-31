@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from backend.tests.unit.release_evidence import (
     previous_release_manifest,
@@ -29,6 +30,7 @@ from tools.release.readiness import (
     DEPLOYMENT_FIELDS,
     MANDATORY_READINESS_CHECKS,
     READINESS_BINDING_FIELDS,
+    READINESS_BINDING_NAMES,
     READINESS_CHECK_FIELDS,
     READINESS_CHECK_NAMES,
     READINESS_EVIDENCE_DIR_NAME,
@@ -400,6 +402,38 @@ def _errors(
     )
 
 
+def _readiness_schema() -> dict[str, Any]:
+    return json.loads((REPO_ROOT / "release" / "staging-readiness.schema.json").read_text(encoding="utf-8"))
+
+
+def _schema_errors(report: dict[str, Any]) -> list[str]:
+    validator = Draft202012Validator(_readiness_schema())
+    return [
+        f"{'/'.join(str(part) for part in error.absolute_path)}: {error.message}"
+        for error in validator.iter_errors(report)
+    ]
+
+
+def _incomplete_report(tmp_path: Path) -> dict[str, Any]:
+    inputs = _inputs(tmp_path)
+    return _assess(
+        tmp_path,
+        inputs,
+        manifest_path=None,
+        target_path=None,
+        previous_manifest_path=None,
+        previous_verification_report_path=None,
+        rollback_evidence_path=None,
+    )
+
+
+def _pass_report(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs)
+    path, digest = _write_report(tmp_path, report)
+    return inputs, report, path, digest
+
+
 def test_readiness_pass_report_validates_and_never_authorizes_deployment(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     report = _assess(tmp_path, inputs)
@@ -451,6 +485,133 @@ def test_readiness_schema_matches_runtime_contracts() -> None:
     assert schema["properties"]["production_qualified"]["const"] is False
     assert schema["properties"]["deployment"]["properties"]["authorized"]["const"] is False
     assert schema["properties"]["deployment"]["properties"]["performed"]["const"] is False
+    assert "allOf" in schema
+    assert set(schema["$defs"]["incomplete_subject"]["required"]) == set(SUBJECT_FIELDS)
+    assert set(schema["$defs"]["pass_release"]["required"]) == set(RELEASE_FIELDS)
+    assert set(schema["$defs"]["pass_bindings"]["required"]) == set(READINESS_BINDING_NAMES)
+
+
+def test_readiness_schema_is_valid_and_accepts_incomplete_preflight_report(tmp_path: Path) -> None:
+    Draft202012Validator.check_schema(_readiness_schema())
+    report = _incomplete_report(tmp_path)
+
+    assert report["state"] != PASS
+    assert report["ready"] is False
+    assert report["staging_target"] is None
+    assert report["release"]["manifest_sha256"] is None
+    assert report["release"]["subject"] == {
+        "tag": None,
+        "commit": None,
+        "source_repository": None,
+    }
+    assert report["release"]["digests"] == {}
+    assert set(report["bindings"]) == set(READINESS_BINDING_NAMES)
+    assert all(binding is None for binding in report["bindings"].values())
+    assert report["evidence"] == []
+    assert _schema_errors(report) == []
+
+
+def test_schema_rejects_malformed_incomplete_report(tmp_path: Path) -> None:
+    report = _incomplete_report(tmp_path)
+    report["checks"] = "not-a-list"
+    report["unexpected"] = True
+
+    errors = _schema_errors(report)
+
+    assert errors
+    assert any("checks" in error for error in errors)
+    assert any("unexpected" in error for error in errors)
+
+
+def test_pass_report_is_schema_valid(tmp_path: Path) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+
+    assert report["state"] == PASS
+    assert _schema_errors(report) == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda report: report["staging_target"].__setitem__("name", None),
+        lambda report: report["release"].__setitem__("manifest_sha256", None),
+        lambda report: report["release"]["subject"].__setitem__("tag", None),
+        lambda report: report["repository"].__setitem__("commit", None),
+    ],
+)
+def test_pass_schema_rejects_null_required_values(
+    tmp_path: Path,
+    mutate: Any,
+) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+    mutate(report)
+
+    assert _schema_errors(report)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda report: report["bindings"].__setitem__("manifest", None),
+        lambda report: report["bindings"].pop("target"),
+    ],
+)
+def test_pass_schema_rejects_missing_bindings(
+    tmp_path: Path,
+    mutate: Any,
+) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+    mutate(report)
+
+    assert _schema_errors(report)
+
+
+@pytest.mark.parametrize("state", [FAIL, NOT_RUN, UNAVAILABLE, SIMULATED])
+def test_pass_schema_rejects_non_pass_required_checks(tmp_path: Path, state: str) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+    check = next(item for item in report["checks"] if item["name"] == "manifest")
+    check["state"] = state
+    if state == SIMULATED:
+        check["mode"] = "simulated"
+
+    assert _schema_errors(report)
+
+
+def test_pass_schema_rejects_preflight_live_checks(tmp_path: Path) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+    report["mode"] = "preflight"
+
+    errors = _schema_errors(report)
+
+    assert errors
+    assert any("live-read-only" in error for error in errors)
+
+
+def test_schema_rejects_contradictory_state_and_ready_flags(tmp_path: Path) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+
+    non_pass = copy.deepcopy(report)
+    non_pass["state"] = FAIL
+    assert _schema_errors(non_pass)
+
+    not_ready = copy.deepcopy(report)
+    not_ready["ready"] = False
+    assert _schema_errors(not_ready)
+
+    optional_gpu = copy.deepcopy(report)
+    optional_gpu["gpu_ready"] = True
+    assert _schema_errors(optional_gpu)
+
+    required_gpu = copy.deepcopy(report)
+    required_gpu["gpu_required"] = True
+    assert _schema_errors(required_gpu)
+
+
+def test_schema_rejects_tampered_binding_hash(tmp_path: Path) -> None:
+    _, report, _, _ = _pass_report(tmp_path)
+    report["bindings"]["manifest"]["sha256"] = "sha256:not-a-digest"
+
+    assert _schema_errors(report)
 
 
 def test_preflight_mode_stays_offline_and_does_not_validate_credentials(tmp_path: Path) -> None:
