@@ -29,6 +29,7 @@ from tools.release.qualification import QUALIFICATION_PROFILES, qualification_re
 from tools.release.readiness import (
     DEPLOYMENT_FIELDS,
     MANDATORY_READINESS_CHECKS,
+    READINESS_ALL_REPORT_FIELDS,
     READINESS_BINDING_FIELDS,
     READINESS_BINDING_NAMES,
     READINESS_CHECK_FIELDS,
@@ -523,7 +524,7 @@ def test_readiness_schema_matches_runtime_contracts() -> None:
     assert schema["properties"]["schema_version"]["const"] == READINESS_SCHEMA_VERSION
     assert schema["properties"]["profile"]["const"] == READINESS_PROFILE
     assert set(schema["required"]) == set(READINESS_REPORT_FIELDS)
-    assert set(schema["properties"]) == set(READINESS_REPORT_FIELDS)
+    assert set(schema["properties"]) == set(READINESS_ALL_REPORT_FIELDS)
     assert set(schema["$defs"]["check"]["required"]) == set(READINESS_CHECK_FIELDS)
     assert set(schema["$defs"]["evidence"]["required"]) == set(READINESS_EVIDENCE_FIELDS)
     assert set(schema["$defs"]["binding"]["required"]) == set(READINESS_BINDING_FIELDS)

@@ -18,6 +18,7 @@ implements that control plane:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -100,7 +101,17 @@ STAGING_TARGET_REQUIRED_FIELDS = (
     "compose_files",
     "gpu",
 )
-STAGING_TARGET_OPTIONAL_FIELDS = ("previous_manifest", "previous_verification_report")
+STAGING_TARGET_STATEMENT = (
+    "This target is an explicitly authorized staging environment and is not production."
+)
+STAGING_TARGET_OPTIONAL_FIELDS = (
+    "previous_manifest",
+    "previous_verification_report",
+    "staging_statement",
+    "allowed_hostnames",
+    "allow_private_network",
+    "production_hostnames",
+)
 STAGING_TARGET_FIELDS = STAGING_TARGET_REQUIRED_FIELDS + STAGING_TARGET_OPTIONAL_FIELDS
 STAGING_TARGET_RELEASE_FIELDS = ("tag", "commit", "source_repository")
 STAGING_SUBJECT_FIELDS = ("tag", "commit", "source_repository")
@@ -224,6 +235,45 @@ def _production_marker(value: str) -> bool:
     return any(token in PRODUCTION_TOKENS for token in tokens)
 
 
+def _hostname_errors(value: Any, label: str) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return [f"{label} must be a non-empty hostname"]
+    host = value.strip().lower()
+    if host != value.strip():
+        return [f"{label} must be lowercase and contain no surrounding whitespace"]
+    if "://" in host or "/" in host or "@" in host or ":" in host:
+        return [f"{label} must be a bare hostname, not a URL"]
+    if "*" in host:
+        return [f"{label} must not contain wildcards"]
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        pattern = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+        if re.fullmatch(pattern, host) is None:
+            return [f"{label} is not a valid DNS hostname"]
+        return []
+    if address.is_multicast or address.is_unspecified:
+        return [f"{label} must not be a multicast or unspecified address"]
+    return []
+
+
+def _private_hostname(value: str) -> bool:
+    host = value.strip().lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return bool(
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
 def _relative_path_errors(value: Any, label: str) -> list[str]:
     if not isinstance(value, str) or not value.strip():
         return [f"{label} must be a non-empty relative path"]
@@ -312,6 +362,63 @@ def staging_target_errors(payload: Mapping[str, Any]) -> list[str]:
             errors.append("compose_files must not contain duplicates")
     if not isinstance(payload.get("gpu"), bool):
         errors.append("gpu must be a boolean")
+
+    statement = payload.get("staging_statement")
+    if statement is not None and statement != STAGING_TARGET_STATEMENT:
+        errors.append("staging_statement must be the exact explicit staging declaration")
+    allow_private = payload.get("allow_private_network", False)
+    if not isinstance(allow_private, bool):
+        errors.append("allow_private_network must be a boolean")
+        allow_private = False
+    allowed_hostnames = payload.get("allowed_hostnames")
+    allowed_set: set[str] = set()
+    if allowed_hostnames is not None:
+        if not isinstance(allowed_hostnames, list) or not allowed_hostnames:
+            errors.append("allowed_hostnames must be a non-empty array")
+        else:
+            for index, item in enumerate(allowed_hostnames):
+                host_errors = _hostname_errors(item, f"allowed_hostnames[{index}]")
+                errors.extend(host_errors)
+                if not host_errors and isinstance(item, str):
+                    normalized = item.strip().lower()
+                    if normalized in allowed_set:
+                        errors.append("allowed_hostnames must not contain duplicates")
+                    allowed_set.add(normalized)
+                    if _production_marker(normalized):
+                        errors.append(f"allowed_hostnames[{index}] looks like a production hostname")
+    production_hostnames = payload.get("production_hostnames")
+    production_set: set[str] = set()
+    if production_hostnames is not None:
+        if not isinstance(production_hostnames, list):
+            errors.append("production_hostnames must be an array")
+        else:
+            for index, item in enumerate(production_hostnames):
+                host_errors = _hostname_errors(item, f"production_hostnames[{index}]")
+                errors.extend(host_errors)
+                if not host_errors and isinstance(item, str):
+                    normalized = item.strip().lower()
+                    if normalized in production_set:
+                        errors.append("production_hostnames must not contain duplicates")
+                    production_set.add(normalized)
+    if allowed_set and production_set & allowed_set:
+        errors.append("allowed_hostnames must not overlap production_hostnames")
+
+    for field in ("api_url", "web_url", "ws_url"):
+        value = payload.get(field)
+        if isinstance(value, str):
+            host = urlsplit(value).hostname
+            if host:
+                normalized = host.lower()
+                if allowed_set and normalized not in allowed_set:
+                    errors.append(f"{field} hostname is not listed in allowed_hostnames")
+                if normalized in production_set:
+                    errors.append(f"{field} hostname matches a declared production hostname")
+                if not allow_private and _private_hostname(normalized):
+                    errors.append(
+                        f"{field} hostname is private or loopback; set allow_private_network "
+                        "only for an explicitly authorized staging profile"
+                    )
+
     if "previous_manifest" in payload and payload["previous_manifest"] is not None:
         errors.extend(_relative_path_errors(payload["previous_manifest"], "previous_manifest"))
     if "previous_verification_report" in payload and payload["previous_verification_report"] is not None:
@@ -321,6 +428,46 @@ def staging_target_errors(payload: Mapping[str, Any]) -> list[str]:
                 "previous_verification_report",
             )
         )
+    return errors
+
+
+def staging_target_live_errors(
+    payload: Mapping[str, Any],
+    *,
+    production_hosts: Sequence[str] = (),
+) -> list[str]:
+    """Return V28 requirements for contacting an explicit staging target."""
+    errors: list[str] = []
+    if payload.get("staging_statement") != STAGING_TARGET_STATEMENT:
+        errors.append(
+            "staging_statement is required before live checks and must be the exact "
+            "explicit staging declaration"
+        )
+    allowed = payload.get("allowed_hostnames")
+    if not isinstance(allowed, list) or not allowed:
+        errors.append("allowed_hostnames is required before live checks")
+    if "production_hostnames" not in payload:
+        errors.append(
+            "production_hostnames must be declared before live checks; an empty array "
+            "means no production hostnames are known"
+        )
+    target_hosts = {
+        urlsplit(str(payload.get(field, ""))).hostname.lower()
+        for field in ("api_url", "web_url", "ws_url")
+        if urlsplit(str(payload.get(field, ""))).hostname
+    }
+    denied = {
+        str(host).strip().lower()
+        for host in (*payload.get("production_hostnames", []), *production_hosts)
+        if isinstance(host, str) and host.strip()
+    }
+    overlap = sorted(target_hosts & denied)
+    if overlap:
+        errors.append("target hostnames match declared production hosts: " + ", ".join(overlap))
+    if allowed:
+        missing = sorted(target_hosts - {str(item).strip().lower() for item in allowed})
+        if missing:
+            errors.append("target hostnames are not listed in allowed_hostnames: " + ", ".join(missing))
     return errors
 
 

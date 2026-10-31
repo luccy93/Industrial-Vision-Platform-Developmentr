@@ -500,6 +500,12 @@ def _build_parser() -> argparse.ArgumentParser:
     readiness_parser.add_argument("--previous-manifest", type=Path)
     readiness_parser.add_argument("--previous-verification-report", type=Path)
     readiness_parser.add_argument("--rollback-evidence", type=Path)
+    readiness_parser.add_argument("--artifacts-dir", type=Path)
+    readiness_parser.add_argument("--migration-report", type=Path)
+    readiness_parser.add_argument("--backup-documentation", type=Path)
+    readiness_parser.add_argument("--docker-host")
+    readiness_parser.add_argument("--production-host", action="append", default=[])
+    readiness_parser.add_argument("--connectivity-timeout", type=float, default=10.0)
     readiness_parser.add_argument("--output", type=Path, required=True)
     readiness_parser.add_argument("--evidence-dir", type=Path)
     readiness_parser.add_argument("--tag")
@@ -964,6 +970,13 @@ def main(argv: list[str] | None = None) -> int:
                 previous_manifest_path=args.previous_manifest,
                 previous_verification_report_path=args.previous_verification_report,
                 rollback_evidence_path=args.rollback_evidence,
+                inspection_profile="v28",
+                artifacts_dir=args.artifacts_dir,
+                migration_report_path=args.migration_report,
+                backup_documentation_path=args.backup_documentation,
+                docker_host=args.docker_host,
+                production_hosts=args.production_host,
+                connectivity_timeout=args.connectivity_timeout,
                 expected_tag=args.tag,
                 expected_commit=args.commit,
                 expected_repository=args.repository,

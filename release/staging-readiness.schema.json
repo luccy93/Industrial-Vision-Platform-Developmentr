@@ -33,6 +33,10 @@
     "profile": {
       "const": "staging_readiness"
     },
+    "inspection_profile": {
+      "const": "v28",
+      "description": "Optional V28 opt-in marker. Legacy V26/V27 reports omit it; V28 reports include it and are validated against the additional live inspection gates."
+    },
     "generated_at": {
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
@@ -329,6 +333,69 @@
               "type": "null"
             }
           ]
+        },
+        "live_inspection": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "live-inspection"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "migration_report": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "migration-report"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "backup_documentation": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/binding"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "backup-documentation"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -452,6 +519,80 @@
         "properties": {
           "gpu_ready": {
             "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "inspection_profile": {
+            "const": "v28"
+          },
+          "mode": {
+            "const": "live-read-only"
+          },
+          "state": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "inspection_profile",
+          "mode",
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "bindings": {
+            "required": [
+              "live_inspection",
+              "migration_report",
+              "backup_documentation"
+            ]
+          },
+          "evidence": {
+            "allOf": [
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "live-inspection"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "migration-report"
+                    }
+                  }
+                }
+              },
+              {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "backup-documentation"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -663,6 +804,29 @@
         },
         "gpu": {
           "type": "boolean"
+        },
+        "staging_statement": {
+          "const": "This target is an explicitly authorized staging environment and is not production."
+        },
+        "allowed_hostnames": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allow_private_network": {
+          "type": "boolean"
+        },
+        "production_hostnames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -689,7 +853,13 @@
             "release",
             "tooling",
             "github",
+            "github-release",
+            "registry",
+            "attestation",
             "target",
+            "connectivity",
+            "docker-host",
+            "rollback",
             "deployment",
             "gpu"
           ]
@@ -1059,6 +1229,48 @@
               "properties": {
                 "kind": {
                   "const": "rollback-evidence"
+                }
+              }
+            }
+          ]
+        },
+        "live_inspection": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "live-inspection"
+                }
+              }
+            }
+          ]
+        },
+        "migration_report": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "migration-report"
+                }
+              }
+            }
+          ]
+        },
+        "backup_documentation": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/pass_binding"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "backup-documentation"
                 }
               }
             }

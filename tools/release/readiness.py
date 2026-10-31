@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from tools.release import inspection
 from tools.release.deployment import (
     DeploymentError,
     deployment_config_checks,
@@ -53,7 +54,7 @@ from tools.release.manifest import (
     utc_now_iso,
 )
 from tools.release.rehearsal import REHEARSAL_SCHEMA_VERSION, STEP_NAMES
-from tools.release.staging import staging_target_errors
+from tools.release.staging import staging_target_errors, staging_target_live_errors
 from tools.release.verification import (
     FAIL,
     NOT_RUN,
@@ -67,6 +68,7 @@ from tools.release.verification import (
 
 READINESS_SCHEMA_VERSION = 1
 READINESS_PROFILE = "staging_readiness"
+READINESS_INSPECTION_PROFILE = "v28"
 READINESS_EVIDENCE_DIR_NAME = "readiness-evidence"
 READINESS_MODES = ("preflight", "live-read-only")
 CHECK_MODES = ("local", "live-read-only", "simulated")
@@ -75,7 +77,13 @@ CHECK_CATEGORIES = (
     "release",
     "tooling",
     "github",
+    "github-release",
+    "registry",
+    "attestation",
     "target",
+    "connectivity",
+    "docker-host",
+    "rollback",
     "deployment",
     "gpu",
 )
@@ -97,12 +105,21 @@ READINESS_BINDING_NAMES = (
     "previous_verification",
     "rollback_evidence",
 )
+READINESS_OPTIONAL_BINDING_NAMES = (
+    "live_inspection",
+    "migration_report",
+    "backup_documentation",
+)
+READINESS_ALL_BINDING_NAMES = READINESS_BINDING_NAMES + READINESS_OPTIONAL_BINDING_NAMES
 READINESS_BINDING_KINDS = {
     "target": "staging-target",
     "manifest": "release-manifest",
     "previous_manifest": "previous-manifest",
     "previous_verification": "previous-verification",
     "rollback_evidence": "rollback-evidence",
+    "live_inspection": "live-inspection",
+    "migration_report": "migration-report",
+    "backup_documentation": "backup-documentation",
 }
 READINESS_REPORT_FIELDS = (
     "schema_version",
@@ -125,6 +142,8 @@ READINESS_REPORT_FIELDS = (
     "limitations",
     "next_steps",
 )
+READINESS_OPTIONAL_REPORT_FIELDS = ("inspection_profile",)
+READINESS_ALL_REPORT_FIELDS = READINESS_REPORT_FIELDS + READINESS_OPTIONAL_REPORT_FIELDS
 REPOSITORY_FIELDS = (
     "source_repository",
     "commit",
@@ -207,7 +226,73 @@ OPTIONAL_READINESS_CHECKS = (
     "network-github",
     "network-ghcr",
 )
-READINESS_CHECK_NAMES = MANDATORY_READINESS_CHECKS + OPTIONAL_READINESS_CHECKS + GPU_CHECKS
+V28_GITHUB_CHECKS = (
+    "github-tag-exists",
+    "github-tag-commit",
+    "github-release-exists",
+    "github-release-identity",
+    "github-release-assets",
+    "github-workflow-run",
+)
+V28_TARGET_CHECKS = ("staging-target-live-policy",)
+V28_REGISTRY_CHECKS = (
+    "ghcr-api",
+    "ghcr-web",
+    "ghcr-api-gpu",
+    "ghcr-platform-metadata",
+)
+V28_ATTESTATION_CHECKS = (
+    "attestation-cli",
+    "attestation-api",
+    "attestation-web",
+    "attestation-api-gpu",
+    "attestation-sbom",
+)
+V28_ARTIFACT_CHECKS = ("sbom-evidence", "scan-evidence")
+V28_CONNECTIVITY_CHECKS = (
+    "dns-resolution",
+    "tcp-connectivity",
+    "tls-certificate",
+    "https-live",
+    "https-ready",
+    "https-health",
+    "https-security-headers",
+    "wss-connectivity",
+    "service-identity",
+)
+V28_DOCKER_CHECKS = (
+    "docker-host-inspection",
+    "docker-host-compose",
+    "docker-host-containers",
+    "docker-host-gpu-runtime",
+)
+V28_ROLLBACK_CHECKS = (
+    "rollback-previous-digests",
+    "rollback-migration-evidence",
+    "rollback-backup-documentation",
+)
+V28_LIVE_CHECKS = (
+    V28_TARGET_CHECKS
+    + V28_GITHUB_CHECKS
+    + V28_REGISTRY_CHECKS
+    + V28_ATTESTATION_CHECKS
+    + V28_ARTIFACT_CHECKS
+    + V28_CONNECTIVITY_CHECKS
+    + V28_DOCKER_CHECKS
+    + V28_ROLLBACK_CHECKS
+)
+V28_OPTIONAL_LIVE_CHECKS = ("service-identity", "docker-host-gpu-runtime")
+V28_CHECK_CATEGORIES = {
+    **{name: "target" for name in V28_TARGET_CHECKS},
+    **{name: "github-release" for name in V28_GITHUB_CHECKS},
+    **{name: "registry" for name in V28_REGISTRY_CHECKS},
+    **{name: "attestation" for name in V28_ATTESTATION_CHECKS},
+    **{name: "release" for name in V28_ARTIFACT_CHECKS},
+    **{name: "connectivity" for name in V28_CONNECTIVITY_CHECKS},
+    **{name: "docker-host" for name in V28_DOCKER_CHECKS},
+    **{name: "rollback" for name in V28_ROLLBACK_CHECKS},
+}
+READINESS_CHECK_NAMES = MANDATORY_READINESS_CHECKS + OPTIONAL_READINESS_CHECKS + GPU_CHECKS + V28_LIVE_CHECKS
 ROLLBACK_REQUIRED_CHECKS = (
     "target-manifest",
     "previous-manifest",
@@ -266,6 +351,11 @@ def _aggregate(checks: Sequence[Mapping[str, Any]]) -> str:
     if NOT_RUN in required_states:
         return NOT_RUN
     return PASS
+
+
+def _binding_state(checks_by_name: Mapping[str, Mapping[str, Any]], name: str) -> str:
+    check = checks_by_name.get(name)
+    return str(check.get("state")) if isinstance(check, Mapping) else FAIL
 
 
 def _sanitize_detail(detail: str) -> str:
@@ -2374,6 +2464,117 @@ def _previous_release_checks(
     return checks, previous, previous_sha, previous_valid
 
 
+def _v28_preflight_checks() -> list[dict[str, Any]]:
+    """Describe every V28 live gate without contacting anything."""
+    detail = (
+        "V28 live inspection was not run in preflight; rerun with --execute-live, "
+        "an explicit authorized staging target, and the required evidence inputs."
+    )
+    return [
+        _check(name, V28_CHECK_CATEGORIES[name], NOT_RUN, False, "local", detail) for name in V28_LIVE_CHECKS
+    ]
+
+
+def _v28_checks(
+    *,
+    manifest: Mapping[str, Any] | None,
+    artifacts_dir: Path | None,
+    target_live_errors: Sequence[str],
+    execute_live: bool,
+    environment: Mapping[str, str],
+    runner: CommandRunner,
+    which: Callable[[str], str | None],
+    http_get: inspection.HttpGet | None,
+    now: Callable[[], str],
+    timeout: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run the V28 read-only GitHub, GHCR, attestation, and artifact gates."""
+    if not execute_live:
+        return _v28_preflight_checks(), {"mode": "preflight"}
+    policy_check = _check(
+        "staging-target-live-policy",
+        "target",
+        FAIL if target_live_errors else PASS,
+        True,
+        "local",
+        "; ".join(target_live_errors[:8])
+        if target_live_errors
+        else "the explicit staging target satisfies the V28 live hostname and statement policy",
+    )
+    payload = manifest if manifest is not None else {}
+    token = next(
+        (environment.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN") if environment.get(name)),
+        None,
+    )
+    github_checks, github_observation = inspection.inspect_github_release(
+        payload,
+        token=token,
+        timeout=timeout,
+        http_get=http_get,
+        now=now,
+    )
+    registry_checks, registry_observation = inspection.inspect_ghcr(
+        payload,
+        runner=runner,
+        which=which,
+        timeout=max(timeout, inspection.DEFAULT_REGISTRY_TIMEOUT),
+        now=now,
+    )
+    attestation_checks, attestation_observation = inspection.inspect_attestations(
+        payload,
+        runner=runner,
+        which=which,
+        artifacts_dir=artifacts_dir,
+        timeout=max(timeout, inspection.DEFAULT_ATTESTATION_TIMEOUT),
+        now=now,
+    )
+    artifact_checks, artifact_observation = inspection.inspect_artifacts(
+        payload,
+        artifacts_dir=artifacts_dir,
+        now=now,
+    )
+    observation = {
+        "schema_version": 1,
+        "mode": "live-read-only",
+        "generated_at": now(),
+        "target_policy": {
+            "state": policy_check["state"],
+            "detail": policy_check["detail"],
+        },
+        "github": github_observation,
+        "registry": registry_observation,
+        "attestation": attestation_observation,
+        "artifacts": artifact_observation,
+        "mutation": {
+            "performed": False,
+            "statement": (
+                "V28 inspection performed read-only GET, digest, attestation, and "
+                "local artifact checks only; no release, registry, host, database, "
+                "network, or deployment mutation was performed."
+            ),
+        },
+    }
+    return (
+        [policy_check]
+        + list(github_checks)
+        + list(registry_checks)
+        + list(attestation_checks)
+        + list(artifact_checks),
+        observation,
+    )
+
+
+def _write_live_inspection(evidence_dir: Path, payload: Mapping[str, Any]) -> Path:
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    path = evidence_dir / "live-inspection.json"
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return path
+
+
 def _subject_errors(subject: Any, manifest: Mapping[str, Any], label: str) -> list[str]:
     expected = _subject(manifest)
     if not isinstance(subject, Mapping):
@@ -2765,6 +2966,88 @@ def _next_steps(checks: Sequence[Mapping[str, Any]]) -> list[str]:
         "release-tag-remote": ("Run with --execute-live and an explicit --tag after the release exists."),
         "network-github": ("Run with --execute-live on a host with network access to api.github.com."),
         "network-ghcr": "Run with --execute-live on a host with network access to ghcr.io.",
+        "staging-target-live-policy": (
+            "Add the exact staging_statement, allowed_hostnames, and production_hostnames "
+            "declaration to the explicit target before live checks."
+        ),
+        "github-tag-exists": (
+            "Create the stable tag through the separately authorized release process; "
+            "V28 never creates or moves tags."
+        ),
+        "github-tag-commit": (
+            "Ensure the stable tag resolves to the exact commit recorded in the release manifest."
+        ),
+        "github-release-exists": (
+            "Create the GitHub Release through the authorized release workflow; V28 never creates releases."
+        ),
+        "github-release-identity": (
+            "Ensure the GitHub Release belongs to the manifest repository, tag, and commit."
+        ),
+        "github-release-assets": (
+            "Attach every required manifest, SBOM, attestation, and scan asset to the GitHub Release."
+        ),
+        "github-workflow-run": (
+            "Record a completed successful release workflow run in the manifest and verify its identity."
+        ),
+        "ghcr-api": "Publish the api digest to GHCR and configure read-only registry access.",
+        "ghcr-web": "Publish the web digest to GHCR and configure read-only registry access.",
+        "ghcr-api-gpu": "Publish the api-gpu digest to GHCR and configure read-only registry access.",
+        "ghcr-platform-metadata": (
+            "Inspect the api digest with docker buildx imagetools and verify its platform metadata."
+        ),
+        "attestation-cli": (
+            "Install a GitHub CLI version that supports 'gh attestation verify' "
+            "in the authorized environment."
+        ),
+        "attestation-api": "Attach and verify the api provenance attestation through the release workflow.",
+        "attestation-web": "Attach and verify the web provenance attestation through the release workflow.",
+        "attestation-api-gpu": (
+            "Attach and verify the api-gpu provenance attestation through the release workflow."
+        ),
+        "attestation-sbom": (
+            "Attach and verify SBOM attestations bound to the local SPDX SBOMs through the release workflow."
+        ),
+        "sbom-evidence": "Supply the release artifacts directory with --artifacts-dir.",
+        "scan-evidence": "Supply the release artifacts directory with --artifacts-dir.",
+        "dns-resolution": "Verify the explicit target hostnames resolve from the authorized inspection host.",
+        "tcp-connectivity": "Verify TCP 443 is reachable for the explicit target hostnames.",
+        "tls-certificate": (
+            "Present a valid, hostname-matching certificate with at least 14 days of remaining validity."
+        ),
+        "https-live": "Make GET /live return HTTP 200 with status=ok.",
+        "https-ready": "Make GET /ready return HTTP 200 with ready=true.",
+        "https-health": "Make GET /health return HTTP 200 with status=ok.",
+        "https-security-headers": (
+            "Serve the required API and web security headers, including HSTS and a CSP."
+        ),
+        "wss-connectivity": "Verify the explicit WSS endpoint completes a bounded WebSocket handshake.",
+        "service-identity": (
+            "Verify the API and web roots identify the expected product; this optional check does not block."
+        ),
+        "docker-host-inspection": (
+            "Configure a read-only Docker context with --docker-host, or run on the authorized Docker host."
+        ),
+        "docker-host-compose": "Resolve the target Compose files against the authorized Docker host.",
+        "docker-host-containers": (
+            "Ensure the target Compose project containers are inspectable and not restarting or dead."
+        ),
+        "docker-host-gpu-runtime": (
+            "Enable the NVIDIA container runtime on the authorized Docker host, or use the CPU profile."
+        ),
+        "rollback-previous-digests": (
+            "Supply a distinct previous manifest, its production verification report, and executed "
+            "rollback rehearsal evidence."
+        ),
+        "rollback-migration-evidence": (
+            "Generate a V25 migration compatibility report bound to the manifest and pass --migration-report."
+        ),
+        "rollback-backup-documentation": (
+            "Supply backup and restore documentation covering PostgreSQL, Redis, and named volumes "
+            "with --backup-documentation."
+        ),
+        "live_inspection": ("Run with --execute-live and retain the generated live-inspection evidence."),
+        "migration_report": "Supply the V25 migration compatibility report with --migration-report.",
+        "backup_documentation": "Supply the backup and restore documentation with --backup-documentation.",
     }
     steps: list[str] = []
     for check in checks:
@@ -2800,6 +3083,14 @@ def assess_staging_readiness(
     previous_manifest_path: Path | None = None,
     previous_verification_report_path: Path | None = None,
     rollback_evidence_path: Path | None = None,
+    inspection_profile: str | None = None,
+    artifacts_dir: Path | None = None,
+    migration_report_path: Path | None = None,
+    backup_documentation_path: Path | None = None,
+    docker_host: str | None = None,
+    production_hosts: Sequence[str] = (),
+    connectivity_timeout: float = 10.0,
+    http_get: inspection.HttpGet | None = None,
     expected_tag: str | None = None,
     expected_commit: str | None = None,
     expected_repository: str | None = None,
@@ -2816,6 +3107,15 @@ def assess_staging_readiness(
 ) -> dict[str, Any]:
     """Assess readiness without deploying, publishing, or authorizing anything."""
     environment = os.environ if env is None else env
+    if inspection_profile not in (None, READINESS_INSPECTION_PROFILE):
+        raise ReadinessError(f"inspection_profile must be {READINESS_INSPECTION_PROFILE!r} when supplied")
+    v28 = inspection_profile == READINESS_INSPECTION_PROFILE
+    if artifacts_dir is not None and not artifacts_dir.is_absolute():
+        artifacts_dir = repo_root / artifacts_dir
+    if migration_report_path is not None and not migration_report_path.is_absolute():
+        migration_report_path = repo_root / migration_report_path
+    if backup_documentation_path is not None and not backup_documentation_path.is_absolute():
+        backup_documentation_path = repo_root / backup_documentation_path
     runner = _resolved_runner(
         runner,
         which=which,
@@ -2852,6 +3152,16 @@ def assess_staging_readiness(
                 if target_problems:
                     target = None
                     target_error = "staging target is invalid:\n- " + "\n- ".join(target_problems)
+
+    target_live_errors: list[str] = []
+    if v28 and execute_live:
+        if target is None:
+            target_live_errors = ["no valid staging target was supplied for live inspection"]
+        else:
+            target_live_errors = staging_target_live_errors(
+                target,
+                production_hosts=production_hosts,
+            )
 
     checks, repository = _repository_checks(
         repo_root=repo_root,
@@ -2953,6 +3263,22 @@ def assess_staging_readiness(
         now=now,
     )
     checks.extend(previous_checks)
+    v28_checks: list[dict[str, Any]] = []
+    v28_observation: dict[str, Any] = {}
+    if v28:
+        v28_checks, v28_observation = _v28_checks(
+            manifest=manifest,
+            artifacts_dir=artifacts_dir,
+            target_live_errors=target_live_errors,
+            execute_live=execute_live,
+            environment=environment,
+            runner=runner,
+            which=which,
+            http_get=http_get,
+            now=now,
+            timeout=connectivity_timeout,
+        )
+        checks.extend(v28_checks)
     checks.extend(
         _gpu_checks(
             manifest=manifest,
@@ -2974,20 +3300,66 @@ def assess_staging_readiness(
     evidence: list[dict[str, Any]] = []
     check_by_name = {str(check.get("name")): check for check in checks}
     bindings: dict[str, Any] = {}
-    for binding_name, kind, source, check_name in (
-        ("target", "staging-target", target_path, "staging-target"),
-        ("manifest", "release-manifest", manifest_path, "manifest"),
-        ("previous_manifest", "previous-manifest", previous_manifest_path, "previous-release"),
+    live_inspection_path: Path | None = None
+    if v28 and execute_live:
+        v28_observation = dict(v28_observation)
+        v28_observation["manifest_sha256"] = manifest_sha
+        v28_observation["subject"] = release.get("subject") if isinstance(release, Mapping) else None
+        v28_observation["target"] = target_summary
+        live_inspection_path = _write_live_inspection(evidence_dir, v28_observation)
+    binding_specs: list[tuple[str, str, Path | None, str]] = [
+        ("target", "staging-target", target_path, _binding_state(check_by_name, "staging-target")),
+        ("manifest", "release-manifest", manifest_path, _binding_state(check_by_name, "manifest")),
+        (
+            "previous_manifest",
+            "previous-manifest",
+            previous_manifest_path,
+            _binding_state(check_by_name, "previous-release"),
+        ),
         (
             "previous_verification",
             "previous-verification",
             previous_verification_report_path,
-            "previous-verification",
+            _binding_state(check_by_name, "previous-verification"),
         ),
-        ("rollback_evidence", "rollback-evidence", rollback_evidence_path, "rollback-evidence"),
-    ):
-        check = check_by_name.get(check_name)
-        binding_state = str(check.get("state")) if isinstance(check, Mapping) else FAIL
+        (
+            "rollback_evidence",
+            "rollback-evidence",
+            rollback_evidence_path,
+            _binding_state(check_by_name, "rollback-evidence"),
+        ),
+    ]
+    if v28:
+        if execute_live:
+            required_v28 = [check for check in v28_checks if check.get("required") is True]
+            live_state = _aggregate(required_v28) if required_v28 else NOT_RUN
+        else:
+            live_state = NOT_RUN
+        migration_check = check_by_name.get("rollback-migration-evidence")
+        backup_check = check_by_name.get("rollback-backup-documentation")
+        binding_specs.extend(
+            [
+                (
+                    "live_inspection",
+                    "live-inspection",
+                    live_inspection_path,
+                    live_state,
+                ),
+                (
+                    "migration_report",
+                    "migration-report",
+                    migration_report_path if execute_live else None,
+                    str(migration_check.get("state")) if isinstance(migration_check, Mapping) else NOT_RUN,
+                ),
+                (
+                    "backup_documentation",
+                    "backup-documentation",
+                    backup_documentation_path if execute_live else None,
+                    str(backup_check.get("state")) if isinstance(backup_check, Mapping) else NOT_RUN,
+                ),
+            ]
+        )
+    for binding_name, kind, source, binding_state in binding_specs:
         bindings[binding_name] = _retain_evidence(
             source,
             evidence_dir,
@@ -2997,8 +3369,9 @@ def assess_staging_readiness(
         )
 
     retention_blockers: list[str] = []
+    required_binding_names = READINESS_ALL_BINDING_NAMES if v28 else READINESS_BINDING_NAMES
     if ready:
-        for binding_name in READINESS_BINDING_NAMES:
+        for binding_name in required_binding_names:
             binding = bindings.get(binding_name)
             if not isinstance(binding, Mapping):
                 retention_blockers.append(
@@ -3028,6 +3401,7 @@ def assess_staging_readiness(
     return {
         "schema_version": READINESS_SCHEMA_VERSION,
         "profile": READINESS_PROFILE,
+        **({"inspection_profile": READINESS_INSPECTION_PROFILE} if v28 else {}),
         "generated_at": now(),
         "mode": mode,
         "repository": repository,
@@ -3134,12 +3508,18 @@ def readiness_report_errors(
     if not isinstance(report, Mapping):
         return ["readiness report must be a JSON object"]
     errors: list[str] = []
-    unknown = sorted(set(report) - set(READINESS_REPORT_FIELDS))
+    unknown = sorted(set(report) - set(READINESS_ALL_REPORT_FIELDS))
     missing = [field for field in READINESS_REPORT_FIELDS if field not in report]
     if unknown:
         errors.append("readiness report has unknown fields: " + ", ".join(unknown))
     if missing:
         errors.append("readiness report is missing fields: " + ", ".join(missing))
+    inspection_profile = report.get("inspection_profile")
+    if inspection_profile is not None and inspection_profile != READINESS_INSPECTION_PROFILE:
+        errors.append(
+            f"readiness report inspection_profile must be {READINESS_INSPECTION_PROFILE!r} when supplied"
+        )
+    v28 = inspection_profile == READINESS_INSPECTION_PROFILE
     if report.get("schema_version") != READINESS_SCHEMA_VERSION:
         errors.append(f"readiness report schema_version must be {READINESS_SCHEMA_VERSION}")
     if report.get("profile") != READINESS_PROFILE:
@@ -3387,6 +3767,26 @@ def readiness_report_errors(
     elif report.get("gpu_ready") is not False:
         errors.append("readiness report gpu_ready must be false when GPU is optional")
 
+    if v28:
+        for name in V28_LIVE_CHECKS:
+            check = checks_by_name.get(name)
+            if not isinstance(check, Mapping):
+                errors.append(f"readiness report has no {name} check")
+                continue
+            if mode == "preflight":
+                if check.get("required") is not False:
+                    errors.append(f"readiness preflight V28 check {name} must not be required")
+                if check.get("mode") != "local":
+                    errors.append(f"readiness preflight V28 check {name} must use local mode")
+                if check.get("state") not in (NOT_RUN, UNAVAILABLE):
+                    errors.append(f"readiness preflight V28 check {name} must be NOT_RUN or UNAVAILABLE")
+            else:
+                expected_required = name not in V28_OPTIONAL_LIVE_CHECKS
+                if name == "docker-host-gpu-runtime":
+                    expected_required = gpu_required
+                if check.get("required") is not expected_required:
+                    errors.append(f"readiness V28 check {name} required flag contradicts the live profile")
+
     evidence = report.get("evidence")
     if not isinstance(evidence, list):
         errors.append("readiness report evidence is missing")
@@ -3427,7 +3827,8 @@ def readiness_report_errors(
             continue
         if actual != digest:
             errors.append(f"readiness report evidence hash does not match {item.get('path')}")
-    expected_kinds = set(READINESS_BINDING_KINDS.values())
+    expected_binding_names = READINESS_ALL_BINDING_NAMES if v28 else READINESS_BINDING_NAMES
+    expected_kinds = {READINESS_BINDING_KINDS[name] for name in expected_binding_names}
     if set(evidence_by_kind) != expected_kinds:
         errors.append("readiness report evidence kinds do not match the required bindings")
 
@@ -3437,6 +3838,7 @@ def readiness_report_errors(
         supplied_manifest = None
 
     target_evidence = evidence_by_kind.get("staging-target")
+    target_payload: dict[str, Any] | None = None
     if isinstance(target_evidence, Mapping):
         target_payload = _retained_json(directory, target_evidence)
         if target_payload is None:
@@ -3460,6 +3862,44 @@ def readiness_report_errors(
                         errors.append(
                             f"readiness report target evidence release.{field} does not match the manifest"
                         )
+
+    if v28 and mode == "live-read-only" and target_payload is not None:
+        for problem in staging_target_live_errors(target_payload):
+            errors.append(f"readiness report live target policy is invalid: {problem}")
+        live_evidence = evidence_by_kind.get("live-inspection")
+        if isinstance(live_evidence, Mapping):
+            live_payload = _retained_json(directory, live_evidence)
+            if live_payload is None:
+                errors.append("readiness report live inspection evidence is unreadable")
+            else:
+                if live_payload.get("schema_version") != 1:
+                    errors.append("readiness report live inspection schema_version must be 1")
+                if live_payload.get("mode") != "live-read-only":
+                    errors.append("readiness report live inspection mode must be live-read-only")
+                if isinstance(release, Mapping) and live_payload.get("manifest_sha256") != release.get(
+                    "manifest_sha256"
+                ):
+                    errors.append("readiness report live inspection is not bound to the manifest")
+                live_subject = live_payload.get("subject")
+                if isinstance(release, Mapping) and isinstance(release.get("subject"), Mapping):
+                    for field in SUBJECT_FIELDS:
+                        if not isinstance(live_subject, Mapping) or live_subject.get(field) != release[
+                            "subject"
+                        ].get(field):
+                            errors.append(
+                                f"readiness report live inspection subject.{field} does not match the release"
+                            )
+                mutation = live_payload.get("mutation")
+                if not isinstance(mutation, Mapping):
+                    errors.append("readiness report live inspection mutation statement is missing")
+                else:
+                    if mutation.get("performed") is not False:
+                        errors.append("readiness report live inspection must never claim mutation")
+                    if (
+                        not isinstance(mutation.get("statement"), str)
+                        or "no " not in str(mutation.get("statement")).lower()
+                    ):
+                        errors.append("readiness report live inspection mutation statement is not explicit")
 
     previous_evidence = evidence_by_kind.get("previous-manifest")
     previous_payload: dict[str, Any] | None = None
@@ -3521,10 +3961,13 @@ def readiness_report_errors(
     if not isinstance(bindings, Mapping):
         errors.append("readiness report bindings are missing")
     else:
-        if sorted(bindings) != sorted(READINESS_BINDING_NAMES):
+        if sorted(bindings) != sorted(expected_binding_names):
             errors.append("readiness report bindings have unexpected fields")
-        for name in READINESS_BINDING_NAMES:
+        for name in expected_binding_names:
             binding = bindings.get(name)
+            optional_preflight = v28 and mode == "preflight" and name in READINESS_OPTIONAL_BINDING_NAMES
+            if binding is None and optional_preflight:
+                continue
             if not isinstance(binding, Mapping):
                 errors.append(f"readiness report {name} binding is missing")
                 continue

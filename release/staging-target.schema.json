@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/staging-target.schema.json",
   "title": "Industrial Vision Platform controlled staging target",
-  "description": "An explicit, named staging target consumed by tools/release/staging.py. The environment must be staging, the release binding must match the immutable manifest, and every URL must be HTTPS/WSS. Production targets are rejected before any command runs. The target never contains credentials; the smoke password is read from the named environment variable.",
+  "description": "An explicit, named staging target consumed by tools/release/staging.py. The environment must be staging, the release binding must match the immutable manifest, and every URL must be HTTPS/WSS. Production targets are rejected before any command runs. V28 adds an optional hostname policy and an explicit staging statement; both are required before live connectivity checks. The target never contains credentials; the smoke password is read from the named environment variable.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -103,6 +103,33 @@
         "null"
       ],
       "description": "Optional previous production verification report used only for an executed rollback rehearsal. Relative to the repository root."
+    },
+    "staging_statement": {
+      "const": "This target is an explicitly authorized staging environment and is not production.",
+      "description": "V28 explicit staging declaration. Required before live connectivity checks."
+    },
+    "allowed_hostnames": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Exact hostnames permitted for the API, web, and WebSocket URLs. No wildcards."
+    },
+    "allow_private_network": {
+      "type": "boolean",
+      "description": "Explicitly allow a private or loopback staging target. Defaults to false."
+    },
+    "production_hostnames": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Known production hostnames that the staging target must not match."
     }
   }
 }

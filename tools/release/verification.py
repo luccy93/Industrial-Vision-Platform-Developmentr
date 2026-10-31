@@ -716,6 +716,51 @@ def _attestation_check(
     return _check(label, PASS if ok else FAIL, True, detail, command)
 
 
+def verify_attestation_evidence(
+    image: Mapping[str, Any],
+    *,
+    source_repository: str,
+    tag: str,
+    commit: str,
+    predicate: str,
+    expected_predicate: Any | None = None,
+    require_predicate_match: bool = False,
+    runner: CommandRunner = default_runner,
+    which: Callable[[str], str | None] = shutil.which,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Read-only wrapper around the V23 attestation verification path."""
+    name = label or f"attestation:{image.get('name')}"
+    return _attestation_check(
+        name,
+        image,
+        source_repository=source_repository,
+        tag=tag,
+        commit=commit,
+        predicate=predicate,
+        expected_predicate=expected_predicate,
+        require_predicate_match=require_predicate_match,
+        runner=runner,
+        which=which,
+    )
+
+
+def verify_sbom_evidence(
+    image: Mapping[str, Any],
+    artifacts_dir: Path,
+) -> tuple[dict[str, Any], Any | None]:
+    """Read-only wrapper around the V23 local SBOM verifier."""
+    return _verify_sbom(str(image.get("name")), image, artifacts_dir)
+
+
+def verify_scan_evidence(
+    image: Mapping[str, Any],
+    artifacts_dir: Path,
+) -> dict[str, Any]:
+    """Read-only wrapper around the V23 local scan verifier."""
+    return _verify_scan(str(image.get("name")), image, artifacts_dir)
+
+
 def _bundle_signature_check(
     label: str,
     image: Mapping[str, Any],
