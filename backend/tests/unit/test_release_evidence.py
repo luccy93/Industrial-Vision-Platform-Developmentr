@@ -111,13 +111,16 @@ def test_local_evidence_collection_is_honest_and_hashes_artifacts(tmp_path: Path
     assert set(artifacts_report) == {"api", "web", "api-gpu"}
     assert artifacts_report["api"]["sbom_sha256"] == sha256_file(artifacts / "api.spdx.json")
     assert artifacts_report["api"]["scan_log_sha256"] == sha256_file(artifacts / "api.scan.txt")
-    assert evidence_report_errors(
-        report,
-        json.loads(manifest_path.read_text(encoding="utf-8")),
-        manifest_path=manifest_path,
-        artifacts_dir=artifacts,
-        require_live=False,
-    ) == []
+    assert (
+        evidence_report_errors(
+            report,
+            json.loads(manifest_path.read_text(encoding="utf-8")),
+            manifest_path=manifest_path,
+            artifacts_dir=artifacts,
+            require_live=False,
+        )
+        == []
+    )
     assert "Release evidence: NOT_RUN" in render_evidence_summary(report)
 
 
@@ -129,13 +132,16 @@ def test_live_evidence_collection_requires_published_github_release(tmp_path: Pa
     assert report["verified"] is True
     assert report["production_verified"] is True
     assert _checks(report)["github-release"]["state"] == PASS
-    assert evidence_report_errors(
-        report,
-        manifest,
-        manifest_path=manifest_path,
-        artifacts_dir=artifacts,
-        require_live=True,
-    ) == []
+    assert (
+        evidence_report_errors(
+            report,
+            manifest,
+            manifest_path=manifest_path,
+            artifacts_dir=artifacts,
+            require_live=True,
+        )
+        == []
+    )
 
 
 def test_live_evidence_fails_for_draft_release(tmp_path: Path) -> None:
@@ -196,13 +202,16 @@ def test_evidence_report_errors_detect_artifact_tampering(tmp_path: Path) -> Non
     report = _collect(manifest_path, artifacts, execute=True)
     report_path = tmp_path / "release-evidence.json"
     write_evidence_report(report, report_path)
-    assert evidence_report_errors(
-        report,
-        manifest,
-        manifest_path=manifest_path,
-        artifacts_dir=artifacts,
-        require_live=True,
-    ) == []
+    assert (
+        evidence_report_errors(
+            report,
+            manifest,
+            manifest_path=manifest_path,
+            artifacts_dir=artifacts,
+            require_live=True,
+        )
+        == []
+    )
     (artifacts / "api.spdx.json").write_text("{}", encoding="utf-8")
     errors = evidence_report_errors(
         report,
@@ -230,9 +239,7 @@ def test_evidence_report_errors_detect_manifest_tampering(tmp_path: Path) -> Non
 
 
 def test_release_evidence_schema_matches_contract() -> None:
-    schema = json.loads(
-        (REPO_ROOT / "release" / "release-evidence.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads((REPO_ROOT / "release" / "release-evidence.schema.json").read_text(encoding="utf-8"))
     assert set(schema["required"]) == set(EVIDENCE_REPORT_FIELDS)
     assert set(schema["$defs"]["check"]["required"]) == set(EVIDENCE_CHECK_FIELDS)
     assert set(schema["$defs"]["artifact"]["required"]) == set(EVIDENCE_ARTIFACT_FIELDS)

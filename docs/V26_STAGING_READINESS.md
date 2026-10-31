@@ -89,6 +89,19 @@ keys, or secret environment values. It records only whether a named environment
 variable is present. Evidence files that appear to contain secret assignments
 or private-key material are not copied into the evidence directory.
 
+### V27 incomplete-report compatibility
+
+The schema keeps `schema_version: 1` and applies conditional rules. A
+non-`PASS` report may legitimately contain `null` for the staging target,
+repository identity strings, release identity fields, and all five evidence
+bindings, and may omit release digest entries while `ready` is `false`. This
+allows an honest preflight report to be schema-valid when required inputs are
+absent. A `PASS` report remains strictly validated and must contain the
+complete target, release subject and digests, resolved repository identity, all
+five `PASS` bindings, retained evidence, and at least 47 checks with no required
+non-`PASS` result. Schema validity never replaces the runtime
+`check-readiness` gate.
+
 ## Check categories
 
 | Category | Examples |
@@ -105,6 +118,13 @@ A Docker CLI installation without a reachable daemon is reported as
 `UNAVAILABLE`, never `PASS`. A credential environment variable that exists but
 was not validated in the selected mode is not treated as proof of working
 authentication.
+
+V27 resolves tools before probing them. On Windows, `.cmd` and `.bat` shims are
+invoked through `cmd.exe` with an argument list and bounded timeout; unsafe
+shell metacharacters are rejected instead of interpolated. This covers Node.js,
+npm, Docker CLI/daemon/Compose, GitHub CLI, and NVIDIA tooling. The report keeps
+CLI-present and daemon-unavailable distinct, as well as npm-shim-valid,
+missing, failed, and timed-out states.
 
 ## Staging target policy
 
@@ -136,7 +156,9 @@ acceleration or GPU production qualification.
 
 ## Integrity and fail-closed behavior
 
-`check-readiness` revalidates the report instead of trusting its summary. It
+`check-readiness` revalidates the report instead of trusting its summary. A
+schema-valid incomplete or non-`PASS` report is still rejected by the gate; the
+schema only describes which incomplete shapes are legitimate evidence. The gate
 fails closed on:
 
 - an unknown report, check, evidence, binding, repository, release, target, or
@@ -214,3 +236,11 @@ staging target, previous release evidence, or an NVIDIA GPU, the honest result
 is a non-`PASS` readiness report with `UNAVAILABLE` or `NOT_RUN` checks and
 explicit blockers. That is expected and must not be weakened into a pass. The
 next safe actions are listed in the report's `next_steps`.
+
+On the Windows host used for V27 implementation, Node.js, npm, the Docker CLI,
+and Docker Compose resolved successfully; the Docker daemon, GitHub CLI,
+GitHub/GHCR authentication, and all live evidence remained `UNAVAILABLE`; and
+optional GPU checks remained `NOT_RUN`. The resulting report was intentionally
+non-`PASS` and was schema-valid without claiming deployment authorization or
+production qualification. See
+[V27_CROSS_PLATFORM_READINESS.md](V27_CROSS_PLATFORM_READINESS.md).

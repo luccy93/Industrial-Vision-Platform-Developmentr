@@ -561,6 +561,25 @@ def test_readiness_schema_is_valid_and_accepts_incomplete_preflight_report(tmp_p
     assert _schema_errors(report) == []
 
 
+@pytest.mark.parametrize("state", [FAIL, NOT_RUN, UNAVAILABLE, SIMULATED])
+def test_schema_accepts_incomplete_non_pass_reports(tmp_path: Path, state: str) -> None:
+    report = _incomplete_report(tmp_path)
+    report["state"] = state
+
+    assert report["ready"] is False
+    assert _schema_errors(report) == []
+
+
+def test_incomplete_report_cannot_be_schema_valid_as_pass(tmp_path: Path) -> None:
+    report = _incomplete_report(tmp_path)
+    report["state"] = PASS
+
+    errors = _schema_errors(report)
+
+    assert errors
+    assert any("staging_target" in error or "release" in error for error in errors)
+
+
 def test_schema_rejects_malformed_incomplete_report(tmp_path: Path) -> None:
     report = _incomplete_report(tmp_path)
     report["checks"] = "not-a-list"
@@ -988,6 +1007,35 @@ def test_cli_check_readiness_accepts_valid_report_and_rejects_tampered_report(
     )
     assert exit_code == 1
     assert "bytes changed" in capsys.readouterr().err
+
+
+def test_check_readiness_still_rejects_schema_valid_incomplete_report(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    report = _incomplete_report(tmp_path)
+    manifest_path = tmp_path / "release-artifacts" / "release-manifest.json"
+    assert _schema_errors(report) == []
+    path, digest = _write_report(tmp_path, report)
+
+    exit_code = main(
+        [
+            "check-readiness",
+            "--report",
+            str(path),
+            "--manifest",
+            str(manifest_path),
+            "--report-sha256",
+            digest,
+        ]
+    )
+
+    assert exit_code == 1
+    errors = capsys.readouterr().err
+    assert "required checks are not PASS" in errors
+    assert "staging target is missing" in errors
+    assert "bindings are missing" in errors or "binding is missing" in errors
+    assert "not bound to the supplied manifest" in errors
 
 
 def test_readiness_report_sha256_binds_exact_report_bytes(tmp_path: Path) -> None:

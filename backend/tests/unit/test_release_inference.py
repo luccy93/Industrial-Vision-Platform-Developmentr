@@ -189,9 +189,7 @@ def test_inference_report_errors_detect_tampering(tmp_path: Path) -> None:
 
 
 def test_inference_schema_matches_contract() -> None:
-    schema = json.loads(
-        (REPO_ROOT / "release" / "gpu-inference.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads((REPO_ROOT / "release" / "gpu-inference.schema.json").read_text(encoding="utf-8"))
     assert set(schema["required"]) == set(INFERENCE_REPORT_FIELDS)
     assert set(schema["$defs"]["check"]["required"]) == set(INFERENCE_CHECK_FIELDS)
     assert set(schema["$defs"]["subject"]["required"]) == set(INFERENCE_SUBJECT_FIELDS)

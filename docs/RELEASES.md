@@ -336,6 +336,31 @@ always records `production_qualified: false` and
 `deployment: {authorized: false, performed: false}`; it never authorizes a
 deployment. See [V26_STAGING_READINESS.md](V26_STAGING_READINESS.md).
 
+## Cross-platform readiness compatibility (V27)
+
+V27 fixes two V26 operational gaps without weakening any release gate:
+
+- `release/staging-readiness.schema.json` now validates legitimate incomplete
+  non-`PASS` reports with nullable staging-target, repository identity, release
+  identity, and binding values. `PASS` remains strict: complete target,
+  release subject and digests, resolved repository identity, all five `PASS`
+  bindings, retained evidence, at least 47 checks, no required non-`PASS`
+  check, and `ready: true`.
+- Readiness tool discovery now handles Windows `.cmd`/`.bat` shims through
+  `cmd.exe` with argument lists, bounded timeouts, rejected unsafe
+  metacharacters, and sanitized failures. Node.js, npm, Docker
+  CLI/daemon/Compose, GitHub CLI, and NVIDIA tooling keep distinct
+  `PASS`/`UNAVAILABLE`/`NOT_RUN` outcomes.
+
+`check-readiness` still revalidates the full report at runtime, so a
+schema-valid incomplete report is not a passing gate. V24 production
+qualification, V25 staging qualification and mutation authorization, and V26
+readiness checks are unchanged. V27 adds offline compatibility and tooling
+tests and the `jsonschema` development dependency; no live GitHub, GHCR,
+Docker, staging, GPU, release, publication, workflow, deployment, or migration
+action is part of V27. See
+[V27_CROSS_PLATFORM_READINESS.md](V27_CROSS_PLATFORM_READINESS.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit

@@ -228,6 +228,17 @@ time is evaluated in the same cycle. Analytics history queries keep the strict
 exclusive boundary by default. Regression tests cover both behaviours, replacing
 the timing-dependent alerting failures instead of skipping or weakening them.
 
+## V27 compatibility note
+
+V27 changes only the V26 readiness report schema and its tool probes. It does
+not change the V25 staging target contract, staging modes, required checks,
+mutation authorization, evidence binding, or the `check-staging` gate. A V26
+readiness report that is incomplete and non-`PASS` may now be schema-valid, but
+`check-readiness` still rejects it and V25 staging qualification still requires
+its own complete evidence. V27 never converts readiness into staging
+qualification or production qualification. See
+[V27_CROSS_PLATFORM_READINESS.md](V27_CROSS_PLATFORM_READINESS.md).
+
 ## Current limitations
 
 The execution and evidence code is implemented and covered by offline tests,

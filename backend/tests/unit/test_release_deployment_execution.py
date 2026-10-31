@@ -58,9 +58,7 @@ def _runner(
         if args[:2] == ["docker", "inspect"]:
             container = args[-1]
             image_name = "api" if "api" in container else "web"
-            image_id = (
-                "sha256:" + "f" * 64 if image_mismatch else images[image_name]["image_id"]
-            )
+            image_id = "sha256:" + "f" * 64 if image_mismatch else images[image_name]["image_id"]
             return subprocess.CompletedProcess(args, 0, image_id + "\n", "")
         return subprocess.CompletedProcess(args, 1, "", "unexpected command")
 
