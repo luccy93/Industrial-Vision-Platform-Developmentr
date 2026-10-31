@@ -280,6 +280,91 @@ def _sanitize_detail(detail: str) -> str:
     return text[:500]
 
 
+class CommandResolutionError(ValueError):
+    """A readiness command cannot be resolved or safely constructed."""
+
+
+_UNSAFE_WINDOWS_SHELL_CHARACTERS = frozenset('&|<>^%!"\r\n\x00')
+
+
+def _find_executable(
+    executable: str,
+    which: Callable[[str], str | None],
+    platform_name: str,
+) -> tuple[str, str] | tuple[None, None]:
+    """Return the command name and resolved path for an executable."""
+    candidates = [executable]
+    if platform_name == "win32" and not Path(executable).suffix:
+        candidates.extend([f"{executable}.cmd", f"{executable}.bat"])
+    for index, candidate in enumerate(candidates):
+        resolved = which(candidate)
+        if not resolved:
+            continue
+        # A real Windows shell shim must exist. Keep the primary lookup
+        # injectable for tests, but do not treat a fake fallback as present.
+        if index > 0 and not Path(resolved).is_file():
+            continue
+        return candidate, resolved
+    return None, None
+
+
+def _validate_windows_token(value: str) -> None:
+    if not value or any(character in _UNSAFE_WINDOWS_SHELL_CHARACTERS for character in value):
+        raise CommandResolutionError("command contains unsafe Windows shell characters")
+
+
+def _resolve_command(
+    args: Sequence[str],
+    *,
+    which: Callable[[str], str | None],
+    platform_name: str,
+    environment: Mapping[str, str],
+) -> list[str]:
+    """Resolve a command without ever interpolating untrusted text into a shell."""
+    if not args:
+        raise CommandResolutionError("empty command")
+    executable = str(args[0])
+    candidate, resolved = _find_executable(executable, which, platform_name)
+    if candidate is None or resolved is None:
+        raise CommandResolutionError(f"{executable} is not installed")
+    arguments = [str(argument) for argument in args[1:]]
+    if platform_name == "win32" and Path(resolved).suffix.lower() in {".cmd", ".bat"}:
+        _validate_windows_token(resolved)
+        for argument in arguments:
+            _validate_windows_token(argument)
+        comspec = environment.get("COMSPEC") or os.environ.get("COMSPEC") or "cmd.exe"
+        _validate_windows_token(comspec)
+        # cmd.exe only accepts a command string for /c, so use its built-in
+        # ``call`` with an argument list. Python quotes each argument for the
+        # Windows command line; no user-controlled text is concatenated.
+        return [comspec, "/d", "/s", "/v:off", "/c", "call", resolved, *arguments]
+    return [candidate, *arguments]
+
+
+def _resolved_runner(
+    runner: CommandRunner,
+    *,
+    which: Callable[[str], str | None],
+    platform_name: str,
+    environment: Mapping[str, str],
+) -> CommandRunner:
+    def resolved(
+        args: Sequence[str],
+        *,
+        timeout: int = 180,
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        command = _resolve_command(
+            args,
+            which=which,
+            platform_name=platform_name,
+            environment=environment,
+        )
+        return runner(command, timeout=timeout, env=env)
+
+    return resolved
+
+
 def _run(
     runner: CommandRunner,
     args: Sequence[str],
@@ -291,6 +376,27 @@ def _run(
         return runner(list(args), timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
+
+
+def _run_probe(
+    runner: CommandRunner,
+    args: Sequence[str],
+    *,
+    timeout: int = 30,
+) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
+    """Run a tool version probe and return a sanitized failure reason."""
+    try:
+        return runner(list(args), timeout=timeout), None
+    except CommandResolutionError:
+        return None, "not_found"
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except FileNotFoundError:
+        return None, "execution_error"
+    except ValueError:
+        return None, "unsafe"
+    except (OSError, subprocess.SubprocessError):
+        return None, "execution_error"
 
 
 def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
@@ -479,20 +585,18 @@ def _tool_check(
     category: str,
     required: bool,
     runner: CommandRunner,
-    which: Callable[[str], str | None],
     mode: str = "local",
 ) -> dict[str, Any]:
-    if which(executable) is None:
-        return _check(
-            name,
-            category,
-            UNAVAILABLE,
-            required,
-            mode,
-            f"{executable} is not installed",
-        )
-    result = _run(runner, version_args)
-    if result is None or result.returncode != 0:
+    result, failure = _run_probe(runner, version_args)
+    if failure is not None:
+        detail = {
+            "not_found": f"{executable} is not installed",
+            "timeout": f"{executable} version probe timed out after 30s",
+            "unsafe": f"{executable} command was rejected as unsafe",
+            "execution_error": f"{executable} could not be executed",
+        }.get(failure, f"{executable} could not be executed")
+        return _check(name, category, UNAVAILABLE, required, mode, detail)
+    if result is None:
         return _check(
             name,
             category,
@@ -500,6 +604,15 @@ def _tool_check(
             required,
             mode,
             f"{executable} could not be executed",
+        )
+    if result.returncode != 0:
+        return _check(
+            name,
+            category,
+            UNAVAILABLE,
+            required,
+            mode,
+            f"{executable} version probe failed with exit code {result.returncode}",
         )
     first_line = (result.stdout or executable).strip().splitlines()
     detail = first_line[0] if first_line else f"{executable} is available"
@@ -540,7 +653,6 @@ def _docker_checks(
             category="tooling",
             required=required,
             runner=runner,
-            which=which,
         )
     ]
     daemon = _run(runner, ["docker", "version", "--format", "{{.Server.Version}}"])
@@ -611,7 +723,6 @@ def _github_checks(
             category="github",
             required=True,
             runner=runner,
-            which=which,
         )
     ]
     github_token = next(
@@ -813,7 +924,6 @@ def _repository_checks(
             category="tooling",
             required=True,
             runner=runner,
-            which=which,
         )
     )
     git_missing = which("git") is None
@@ -2700,11 +2810,18 @@ def assess_staging_readiness(
     env: Mapping[str, str] | None = None,
     runner: CommandRunner = default_runner,
     which: Callable[[str], str | None] = shutil.which,
+    platform_name: str = sys.platform,
     network_probe: Callable[[str, int], bool] = _tcp_reachable,
     now: Callable[[], str] = utc_now_iso,
 ) -> dict[str, Any]:
     """Assess readiness without deploying, publishing, or authorizing anything."""
     environment = os.environ if env is None else env
+    runner = _resolved_runner(
+        runner,
+        which=which,
+        platform_name=platform_name,
+        environment=environment,
+    )
     mode = "live-read-only" if execute_live else "preflight"
     if not repo_root.is_dir():
         raise ReadinessError(f"repository root does not exist: {repo_root}")
@@ -2782,7 +2899,6 @@ def assess_staging_readiness(
                 category="tooling",
                 required=True,
                 runner=runner,
-                which=which,
             )
         )
     checks.extend(_docker_checks(runner=runner, which=which, required=True))

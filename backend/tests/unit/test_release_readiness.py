@@ -43,6 +43,8 @@ from tools.release.readiness import (
     ROLLBACK_REQUIRED_CHECKS,
     SUBJECT_FIELDS,
     TARGET_FIELDS,
+    _find_executable,
+    _resolve_command,
     assess_staging_readiness,
     readiness_report_errors,
     readiness_report_sha256,
@@ -67,6 +69,8 @@ GENERATED_AT = "2026-10-26T00:00:00Z"
 TOKEN_SENTINEL = "ghp_readiness_sentinel_do_not_disclose"
 REGISTRY_SENTINEL = "ghcr_readiness_sentinel_do_not_disclose"
 SMOKE_SENTINEL = "smoke_readiness_sentinel_do_not_disclose"
+WINDOWS_COMSPEC = r"C:\Windows\System32\cmd.exe"
+WINDOWS_NPM_CMD = r"C:\Program Files\nodejs\npm.CMD"
 
 
 def _target_payload(**overrides: Any) -> dict[str, Any]:
@@ -250,6 +254,52 @@ class _FakeRunner:
                 "" if self.compose_ok else "compose failed",
             )
         return subprocess.CompletedProcess(args, 1, "", "unexpected command")
+
+
+class _WindowsShimRunner(_FakeRunner):
+    """Fake runner that recognizes the Windows ``cmd.exe call`` shim."""
+
+    def __call__(
+        self,
+        args: Any,
+        *,
+        timeout: int = 120,
+        env: Any = None,
+    ) -> subprocess.CompletedProcess[str]:
+        args = list(args)
+        if args[:7] == [WINDOWS_COMSPEC, "/d", "/s", "/v:off", "/c", "call", WINDOWS_NPM_CMD]:
+            self.calls.append(args)
+            if args[7:] == ["--version"]:
+                return subprocess.CompletedProcess(args, 0, "11.11.0\n", "")
+            return subprocess.CompletedProcess(args, 1, "", "unexpected npm probe")
+        return super().__call__(args, timeout=timeout, env=env)
+
+
+class _NpmProbeRunner(_WindowsShimRunner):
+    """Return or raise a configured result for the Windows npm probe."""
+
+    def __init__(self, manifest: dict[str, Any], probe: Any) -> None:
+        super().__init__(manifest)
+        self.probe = probe
+
+    def __call__(
+        self,
+        args: Any,
+        *,
+        timeout: int = 120,
+        env: Any = None,
+    ) -> subprocess.CompletedProcess[str]:
+        args = list(args)
+        if args[:7] == [WINDOWS_COMSPEC, "/d", "/s", "/v:off", "/c", "call", WINDOWS_NPM_CMD]:
+            self.calls.append(args)
+            return self.probe(args)
+        return super().__call__(args, timeout=timeout, env=env)
+
+
+def _windows_which(name: str) -> str | None:
+    if name == "npm":
+        return WINDOWS_NPM_CMD
+    return rf"C:\tools\{name}.exe"
 
 
 def _environment(**overrides: Any) -> dict[str, str]:
@@ -994,6 +1044,281 @@ def test_live_probes_issue_only_read_only_commands(tmp_path: Path) -> None:
             assert call[:2] in (["gh", "--version"], ["gh", "auth"], ["gh", "release"]), call
         if call[0] == "docker":
             assert call[1] in ("--version", "version", "compose", "manifest", "info"), call
+
+
+def test_windows_npm_cmd_shim_is_discovered_and_probed(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    runner = _WindowsShimRunner(inputs["manifest"])
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=runner,
+        which=_windows_which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+    checks = _checks(report)
+
+    assert checks["node"]["state"] == PASS
+    assert checks["npm"]["state"] == PASS
+    assert checks["npm"]["detail"] == "11.11.0"
+    assert [
+        WINDOWS_COMSPEC,
+        "/d",
+        "/s",
+        "/v:off",
+        "/c",
+        "call",
+        WINDOWS_NPM_CMD,
+        "--version",
+    ] in runner.calls
+    assert ["node", "--version"] in runner.calls
+
+
+def test_windows_cmd_resolution_uses_comspec_call() -> None:
+    command = _resolve_command(
+        ["npm", "--version"],
+        which=_windows_which,
+        platform_name="win32",
+        environment={"COMSPEC": WINDOWS_COMSPEC},
+    )
+
+    assert command == [
+        WINDOWS_COMSPEC,
+        "/d",
+        "/s",
+        "/v:off",
+        "/c",
+        "call",
+        WINDOWS_NPM_CMD,
+        "--version",
+    ]
+
+
+def test_windows_cmd_resolution_handles_spaces_and_parentheses() -> None:
+    shim = r"C:\Program Files (x86)\nodejs\npm.CMD"
+
+    command = _resolve_command(
+        ["npm", "--version"],
+        which=lambda name: shim if name == "npm" else None,
+        platform_name="win32",
+        environment={"COMSPEC": WINDOWS_COMSPEC},
+    )
+
+    assert command[6] == shim
+    assert command[-1] == "--version"
+
+
+def test_windows_non_shim_command_is_not_wrapped() -> None:
+    command = _resolve_command(
+        ["node", "--version"],
+        which=lambda name: r"C:\Program Files\nodejs\node.exe",
+        platform_name="win32",
+        environment={"COMSPEC": WINDOWS_COMSPEC},
+    )
+
+    assert command == ["node", "--version"]
+
+
+def test_posix_command_with_cmd_suffix_is_not_wrapped() -> None:
+    command = _resolve_command(
+        ["npm", "--version"],
+        which=lambda name: "/usr/bin/npm.cmd",
+        platform_name="linux",
+        environment={},
+    )
+
+    assert command == ["npm", "--version"]
+
+
+def test_windows_cmd_resolution_rejects_unsafe_arguments() -> None:
+    with pytest.raises(ValueError, match="unsafe Windows"):
+        _resolve_command(
+            ["npm", "--version", "bad&whoami"],
+            which=_windows_which,
+            platform_name="win32",
+            environment={"COMSPEC": WINDOWS_COMSPEC},
+        )
+
+
+def test_windows_cmd_resolution_rejects_unsafe_comspec() -> None:
+    with pytest.raises(ValueError, match="unsafe Windows"):
+        _resolve_command(
+            ["npm", "--version"],
+            which=_windows_which,
+            platform_name="win32",
+            environment={"COMSPEC": "cmd.exe & whoami"},
+        )
+
+
+def test_windows_cmd_fallback_requires_a_real_shim_file(tmp_path: Path) -> None:
+    shim = tmp_path / "npm.cmd"
+    shim.write_text("@echo off\n", encoding="utf-8")
+
+    def which(name: str) -> str | None:
+        return str(shim) if name == "npm.cmd" else None
+
+    assert _find_executable("npm", which, "win32") == ("npm.cmd", str(shim))
+
+
+def test_windows_cmd_fallback_ignores_nonexistent_shim(tmp_path: Path) -> None:
+    def which(name: str) -> str | None:
+        return str(tmp_path / "missing" / "npm.cmd") if name == "npm.cmd" else None
+
+    assert _find_executable("npm", which, "win32") == (None, None)
+
+
+def test_missing_executable_is_resolved_as_not_installed() -> None:
+    with pytest.raises(ValueError, match="is not installed"):
+        _resolve_command(
+            ["npm", "--version"],
+            which=lambda name: None,
+            platform_name="win32",
+            environment={"COMSPEC": WINDOWS_COMSPEC},
+        )
+
+
+@pytest.mark.parametrize("missing", ["node", "npm"])
+def test_missing_windows_node_or_npm_is_unavailable(tmp_path: Path, missing: str) -> None:
+    def which(name: str) -> str | None:
+        if name in {missing, f"{missing}.cmd", f"{missing}.bat"}:
+            return None
+        return rf"C:\tools\{name}.exe"
+
+    inputs = _inputs(tmp_path)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=_WindowsShimRunner(inputs["manifest"]),
+        which=which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+    checks = _checks(report)
+
+    assert checks[missing]["state"] == UNAVAILABLE
+    assert "is not installed" in checks[missing]["detail"]
+
+
+def test_npm_version_probe_failure_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    runner = _NpmProbeRunner(
+        inputs["manifest"],
+        lambda args: subprocess.CompletedProcess(args, 1, "", "failed"),
+    )
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=runner,
+        which=_windows_which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+
+    assert _checks(report)["npm"]["state"] == UNAVAILABLE
+    assert "exit code 1" in _checks(report)["npm"]["detail"]
+
+
+def test_npm_version_probe_timeout_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+
+    def timeout(args: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(args, 30)
+
+    runner = _NpmProbeRunner(inputs["manifest"], timeout)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=runner,
+        which=_windows_which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+
+    assert _checks(report)["npm"]["state"] == UNAVAILABLE
+    assert "timed out after 30s" in _checks(report)["npm"]["detail"]
+
+
+def test_npm_invalid_executable_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+
+    def invalid(args: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "missing executable")
+
+    runner = _NpmProbeRunner(inputs["manifest"], invalid)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=runner,
+        which=_windows_which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+
+    assert _checks(report)["npm"]["state"] == UNAVAILABLE
+    assert "could not be executed" in _checks(report)["npm"]["detail"]
+
+
+def test_npm_probe_error_is_sanitized(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+
+    def failed(args: Any) -> subprocess.CompletedProcess[str]:
+        raise OSError("token=super_secret_value")
+
+    runner = _NpmProbeRunner(inputs["manifest"], failed)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=runner,
+        which=_windows_which,
+        platform_name="win32",
+        env=_environment(COMSPEC=WINDOWS_COMSPEC),
+    )
+    path, _ = _write_report(tmp_path, report)
+    text = path.read_text(encoding="utf-8")
+
+    assert _checks(report)["npm"]["state"] == UNAVAILABLE
+    assert "could not be executed" in _checks(report)["npm"]["detail"]
+    assert "super_secret_value" not in text
+
+
+def test_compose_plugin_absent_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(
+        tmp_path,
+        inputs,
+        runner=_FakeRunner(inputs["manifest"], compose_ok=False),
+    )
+    checks = _checks(report)
+
+    assert checks["docker-cli"]["state"] == PASS
+    assert checks["docker-daemon"]["state"] == PASS
+    assert checks["docker-compose"]["state"] == UNAVAILABLE
+
+
+def test_github_token_presence_without_live_probe_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    report = _assess(tmp_path, inputs, execute_live=False)
+    checks = _checks(report)
+
+    assert checks["github-auth-config"]["state"] == UNAVAILABLE
+    assert "not validated" in checks["github-auth-config"]["detail"]
+    assert "credentials are not assumed valid" in checks["github-auth-config"]["detail"]
+
+
+def test_required_gpu_without_docker_runtime_is_unavailable(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path, gpu=True)
+    report = _assess(
+        tmp_path,
+        inputs,
+        require_gpu=True,
+        runner=_FakeRunner(inputs["manifest"], gpu=True),
+        which=lambda name: None if name == "docker" else f"/usr/bin/{name}",
+    )
+    checks = _checks(report)
+
+    assert checks["gpu-container-runtime"]["state"] == UNAVAILABLE
+    assert "docker is not installed" in checks["gpu-container-runtime"]["detail"]
 
 
 def test_retained_evidence_tampering_is_rejected(tmp_path: Path) -> None:
