@@ -102,6 +102,31 @@ five `PASS` bindings, retained evidence, and at least 47 checks with no required
 non-`PASS` result. Schema validity never replaces the runtime
 `check-readiness` gate.
 
+### V28 live infrastructure extension
+
+V28 is an explicit opt-in profile of this same report, selected by
+`inspection_profile: "v28"` (the CLI always selects it). It keeps
+`schema_version: 1` and `profile: staging_readiness`, so legacy V26/V27 reports
+remain valid. V28 adds:
+
+- an exact staging statement, an `allowed_hostnames` list, an optional
+  `allow_private_network` flag, and declared `production_hostnames` in the
+  target;
+- optional `live_inspection`, `migration_report`, and `backup_documentation`
+  bindings, which are null in preflight and retained in live mode;
+- the `github-release`, `registry`, `attestation`, `connectivity`,
+  `docker-host`, and `rollback` check categories;
+- bounded read-only inspection of GitHub, GHCR, attestations, artifacts, the
+  explicit staging target, an existing Docker context, and rollback evidence.
+
+A V28 live report is `PASS` only when every required V28 check is `PASS`, the
+live-inspection evidence is bound to the manifest and target, the mutation
+statement confirms that no mutation was performed, and the migration and backup
+evidence are valid. A target that fails the live policy is never contacted.
+Preflight V28 checks are local, optional, and `NOT_RUN`; they never turn a
+preflight into a live `PASS`. See
+[V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
 ## Check categories
 
 | Category | Examples |
@@ -113,6 +138,12 @@ non-`PASS` result. Schema validity never replaces the runtime
 | `target` | explicit target, staging environment, HTTPS/WSS URLs, production exclusion, release binding, smoke configuration, credential presence |
 | `deployment` | Compose files, digest-pinned Compose resolution, service pins, PostgreSQL, Redis, named volumes, health endpoints, loopback ports, environment references |
 | `gpu` | GPU profile, NVIDIA hardware, driver, container runtime, and `api-gpu` digest |
+| `github-release` | tag, commit, release identity, assets, and workflow run (V28 live) |
+| `registry` | GHCR digests and platform metadata (V28 live) |
+| `attestation` | GitHub CLI support and image/SBOM attestations (V28 live) |
+| `connectivity` | bounded DNS, TCP, TLS, HTTPS, WSS, headers, and identity (V28 live) |
+| `docker-host` | existing Docker context, Compose, containers, and GPU runtime (V28 live) |
+| `rollback` | previous digests, migration evidence, and backup documentation (V28 live) |
 
 A Docker CLI installation without a reachable daemon is reported as
 `UNAVAILABLE`, never `PASS`. A credential environment variable that exists but
@@ -225,6 +256,11 @@ not prove production qualification.
   are unchanged.
 - V26 consumes V24/V25 evidence as input. It does not create releases, tags,
   workflow runs, deployments, or staging mutations.
+- V27 cross-platform tool discovery and incomplete-report schema compatibility
+  are unchanged.
+- V28 is an opt-in live inspection profile over the same report. It does not
+  relax V22-V27 gates, does not execute a rollback, and does not mutate any
+  external system.
 - Readiness `PASS` does not satisfy V24 production evidence requirements and
   does not authorize a deployment. V24 production qualification remains a
   separate, stricter gate.
@@ -244,3 +280,11 @@ optional GPU checks remained `NOT_RUN`. The resulting report was intentionally
 non-`PASS` and was schema-valid without claiming deployment authorization or
 production qualification. See
 [V27_CROSS_PLATFORM_READINESS.md](V27_CROSS_PLATFORM_READINESS.md).
+
+V28 adds the same honest behavior for external infrastructure. Without an
+explicit staging target, GitHub/GHCR credentials, a reachable Docker context,
+release evidence, rollback evidence, migration evidence, backup documentation,
+or a GPU, the V28 live profile reports `UNAVAILABLE` or `NOT_RUN` and blocks.
+It never guesses a host, never scans ports, and never converts missing evidence
+into a pass. See
+[V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).

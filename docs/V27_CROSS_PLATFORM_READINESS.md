@@ -127,3 +127,19 @@ The honest result remains a non-`PASS` readiness report with explicit
 `UNAVAILABLE` or `NOT_RUN` checks and blockers. No live GitHub, GHCR, Docker,
 staging, GPU, release, publication, workflow, deployment, or migration action
 was performed for V27.
+
+## V28 follow-up
+
+V28 builds on the V27 report contract without changing V27 behavior. The V27
+cross-platform tool discovery and incomplete-report schema compatibility remain
+in force. V28 adds an explicit `inspection_profile: "v28"` opt-in, three
+optional live evidence bindings, and read-only GitHub, GHCR, attestation,
+bounded connectivity, Docker context, and rollback inspection. V26/V27 reports
+that omit the marker remain valid and are still evaluated by the unchanged
+runtime gate.
+
+V28 also keeps the V27 rule that a missing tool, credential, network, target,
+or GPU is reported honestly. Its live profile is opt-in, bounded, and
+read-only; no deployment, publication, workflow dispatch, migration, rollback,
+or infrastructure mutation is performed. See
+[V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).

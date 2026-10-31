@@ -21,7 +21,7 @@ from backend.tests.unit.test_release_readiness import (
     _target_payload,
 )
 from backend.tests.unit.test_release_v28_inspection import _FakeGitHub
-from backend.tests.unit.test_release_verification import make_release
+from backend.tests.unit.test_release_verification import make_release, make_runner
 from tools.release import docker_host, rollback
 from tools.release.manifest import sha256_file
 from tools.release.readiness import (
@@ -467,6 +467,8 @@ class _V28AssessmentRunner(_FakeRunner):
     def __init__(self, manifest: dict[str, Any], **kwargs: Any) -> None:
         super().__init__(manifest, **kwargs)
         self._v28 = _V28Runner(manifest, **kwargs)
+        self._attestations = make_runner()
+        self.v28_calls: list[list[str]] = []
 
     def __call__(
         self,
@@ -476,6 +478,9 @@ class _V28AssessmentRunner(_FakeRunner):
         env: Any = None,
     ) -> subprocess.CompletedProcess[str]:
         args = list(args)
+        self.v28_calls.append(args)
+        if args[:2] == ["gh", "attestation"]:
+            return self._attestations(args, timeout=timeout, env=env)
         if (
             args[:2] == ["docker", "--context"]
             or args[:3] == ["docker", "buildx", "version"]

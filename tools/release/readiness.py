@@ -2481,11 +2481,17 @@ def _v28_preflight_checks() -> list[dict[str, Any]]:
 def _v28_connectivity_checks(
     target: Mapping[str, Any] | None,
     *,
+    policy_errors: Sequence[str] = (),
     timeout: float,
     probe: Callable[..., tuple[list[dict[str, Any]], dict[str, Any]]],
     now: Callable[[], str],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if target is None:
+    if target is None or policy_errors:
+        detail = (
+            "no valid staging target was supplied; no network probe was attempted"
+            if target is None
+            else "the staging target did not satisfy the V28 live policy; no network probe was attempted"
+        )
         return (
             [
                 _check(
@@ -2494,7 +2500,7 @@ def _v28_connectivity_checks(
                     NOT_RUN,
                     name != "service-identity",
                     "live-read-only",
-                    "no valid staging target was supplied; no network probe was attempted",
+                    detail,
                 )
                 for name in V28_CONNECTIVITY_CHECKS
             ],
@@ -2706,6 +2712,7 @@ def _v28_checks(
     )
     connectivity_checks, connectivity_observation = _v28_connectivity_checks(
         target,
+        policy_errors=target_live_errors,
         timeout=timeout,
         probe=connectivity_probe,
         now=now,
@@ -4046,7 +4053,10 @@ def readiness_report_errors(
         if actual != digest:
             errors.append(f"readiness report evidence hash does not match {item.get('path')}")
     expected_binding_names = READINESS_ALL_BINDING_NAMES if v28 else READINESS_BINDING_NAMES
-    expected_kinds = {READINESS_BINDING_KINDS[name] for name in expected_binding_names}
+    evidence_binding_names = (
+        READINESS_ALL_BINDING_NAMES if v28 and mode == "live-read-only" else READINESS_BINDING_NAMES
+    )
+    expected_kinds = {READINESS_BINDING_KINDS[name] for name in evidence_binding_names}
     if set(evidence_by_kind) != expected_kinds:
         errors.append("readiness report evidence kinds do not match the required bindings")
 

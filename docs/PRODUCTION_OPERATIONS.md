@@ -222,6 +222,45 @@ digest-pinned, so a rebuild may pull new base packages; the image scan is the
 control that surfaces that before a deployment. Gate list, severity policy and
 the accepted-risk register: `docs/SECURITY_SCANNING.md`.
 
+### Live infrastructure verification (V28)
+
+Before a separately authorized staging deployment, V28 can inspect the external
+release infrastructure read-only. The live profile checks the GitHub tag,
+release, assets, and workflow run; GHCR digests and platform metadata; GitHub
+attestations and local SBOM/scan evidence; bounded DNS/TCP/TLS/HTTPS/WSS
+reachability; an existing Docker context; and rollback prerequisites.
+
+```powershell
+python -m tools.release.cli staging-readiness `
+  --manifest release-artifacts/release-manifest.json `
+  --target staging-target.json `
+  --previous-manifest previous-manifest.json `
+  --previous-verification-report previous-release-verification.json `
+  --rollback-evidence rollback-rehearsal.json `
+  --artifacts-dir release-artifacts `
+  --migration-report migration-compatibility.json `
+  --backup-documentation docs/BACKUP_RESTORE.md `
+  --docker-host staging-east `
+  --connectivity-timeout 10 `
+  --execute-live `
+  --output release-artifacts/staging-readiness.json
+```
+
+The target is never inferred. It must state exactly that it is an explicitly
+authorized staging environment and is not production, list every allowed
+hostname, and declare production hostnames. A target that fails this policy is
+not contacted. Connectivity uses only the target URLs, a 1-60 second timeout,
+certificate and hostname validation, and no port scanning. `--docker-host`
+names an existing Docker context; only read-only `version`, `context inspect`,
+`compose version`, `ps`, and `info` commands run.
+
+A V28 `PASS` is preparation evidence only. It never authorizes deployment and
+does not replace V24 production qualification. Missing credentials, a missing
+release, an unreachable registry, an unreachable Docker daemon, or absent
+staging evidence is reported as `UNAVAILABLE` or `NOT_RUN`, never converted
+into a pass. See
+[V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

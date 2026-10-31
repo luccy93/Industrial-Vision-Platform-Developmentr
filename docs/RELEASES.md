@@ -361,6 +361,45 @@ Docker, staging, GPU, release, publication, workflow, deployment, or migration
 action is part of V27. See
 [V27_CROSS_PLATFORM_READINESS.md](V27_CROSS_PLATFORM_READINESS.md).
 
+## Live infrastructure verification (V28)
+
+V28 extends readiness with an explicitly authorized, read-only inspection of
+the external release infrastructure. In live mode it verifies the GitHub tag,
+release, assets, and workflow run; the published GHCR digests and platform
+metadata; GitHub attestations and local SBOM/scan evidence; bounded DNS, TCP,
+TLS, HTTPS, and WSS reachability of an explicit staging target; an existing
+Docker context; and rollback prerequisites.
+
+```bash
+python -m tools.release.cli staging-readiness \
+  --manifest release-artifacts/release-manifest.json \
+  --target staging-target.json \
+  --previous-manifest previous-manifest.json \
+  --previous-verification-report previous-release-verification.json \
+  --rollback-evidence rollback-rehearsal.json \
+  --artifacts-dir release-artifacts \
+  --migration-report migration-compatibility.json \
+  --backup-documentation docs/BACKUP_RESTORE.md \
+  --docker-host staging-east \
+  --connectivity-timeout 10 \
+  --execute-live \
+  --output release-artifacts/staging-readiness.json
+```
+
+The target must contain the exact staging statement, list every allowed
+hostname, and declare production hostnames. A target that fails that policy is
+never contacted. Connectivity is limited to the target URLs with a 1-60 second
+timeout, certificate and hostname validation, and no port scanning.
+`--docker-host` names an existing Docker context and only read-only `version`,
+`context inspect`, `compose version`, `ps`, and `info` commands are executed.
+
+V28 keeps `schema_version: 1`, adds the optional `inspection_profile: "v28"`
+marker and optional `live_inspection`, `migration_report`, and
+`backup_documentation` bindings. Preflight reports leave those bindings null;
+live reports retain secret-free evidence. A readiness `PASS` remains
+preparation evidence only and never authorizes a deployment. See
+[V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
