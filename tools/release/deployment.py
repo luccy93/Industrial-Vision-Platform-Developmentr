@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -28,6 +27,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import redact_text, scan_text
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -69,51 +69,6 @@ DEPLOYMENT_REPORT_FIELDS = (
 )
 DEPLOYMENT_SUBJECT_FIELDS = ("tag", "commit", "source_repository")
 DEPLOYMENT_CHECK_FIELDS = ("name", "state", "required", "detail", "command")
-
-# High-signal credential patterns. Redaction markers are deliberately excluded
-# so the log filter's own output never causes a false positive. Only pattern
-# names are reported; matched values are never echoed.
-SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
-    (
-        "github-token",
-        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,})\b"),
-    ),
-    ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    (
-        "jwt",
-        re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
-    ),
-    (
-        "authorization-header",
-        re.compile(
-            r"(?i)\b(?:proxy-)?authorization\s*:\s*(?:bearer|basic|digest)\s+"
-            r"(?!\[redacted\]|\*{3,}|<redacted>)\S{8,}"
-        ),
-    ),
-    (
-        "credential-url",
-        re.compile(
-            r"(?i)\b(?:postgres(?:ql)?(?:\+[a-z0-9]+)?|redis|amqp|https?|wss?)://"
-            r"[^\s:/@]+:(?!\[redacted\]|\*{3,}|<redacted>)[^\s@/]{8,}@"
-        ),
-    ),
-    (
-        "secret-assignment",
-        re.compile(
-            r"(?i)\b(?:password|passwd|secret|client[_-]?secret|api[_-]?key|"
-            r"access[_-]?token|refresh[_-]?token)\b\s*[=:]\s*[\"']?"
-            r"(?!\[redacted\]|\*{3,}|<redacted>|redacted\b)[^\s\"',}]{12,}"
-        ),
-    ),
-    (
-        "csrf-or-ticket",
-        re.compile(
-            r"(?i)\b(?:csrf[_-]?token|ws[_-]?ticket|session[_-]?token)\b\s*[=:]\s*"
-            r"[\"']?(?!\[redacted\]|\*{3,}|<redacted>)[A-Za-z0-9._~-]{16,}"
-        ),
-    ),
-)
 
 
 class DeploymentError(RuntimeError):
@@ -333,8 +288,8 @@ def _check(
     return {
         "name": name,
         "state": state,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
         "required": required,
     }
 
@@ -375,12 +330,8 @@ def _aggregate(checks: Sequence[Mapping[str, Any]]) -> str:
 
 
 def scan_log_text(text: str) -> list[str]:
-    """Return the names of credential patterns found in deployment logs."""
-    found: set[str] = set()
-    for name, pattern in SECRET_PATTERNS:
-        if pattern.search(text):
-            found.add(name)
-    return sorted(found)
+    """Return credential categories found in deployment logs without echoing values."""
+    return scan_text(text)
 
 
 def _log_check(

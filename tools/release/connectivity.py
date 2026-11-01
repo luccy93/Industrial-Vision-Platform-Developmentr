@@ -18,6 +18,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from backend.app.core.redaction import redact_text
 from tools.release.verification import FAIL, PASS, UNAVAILABLE
 
 CONNECTIVITY_SCHEMA_VERSION = 1
@@ -60,8 +61,8 @@ def _check(
         "state": state,
         "required": required,
         "mode": "live-read-only",
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 

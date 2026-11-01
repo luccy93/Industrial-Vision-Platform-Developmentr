@@ -8,35 +8,12 @@ contextvar so log lines carry request_id, route template, status, etc.
 from __future__ import annotations
 
 import logging
-import re
 from contextvars import ContextVar
 from typing import Any
 
 from pythonjsonlogger.json import JsonFormatter
 
-_SENSITIVE_PATTERNS = (
-    # Authorization / bearer tokens: redact the credential, not just the
-    # scheme. Listed before the generic `authorization` rule so the token
-    # is removed even though it is separated from the keyword by a space.
-    re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S+"),
-    re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/\-=]+"),
-    re.compile(r"(?i)(password\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(passwd\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(token\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(secret\s*[:=]\s*)\S+"),
-    # Generic authorization scheme. Bearer is handled above; Basic/Digest
-    # carry their credential in trailing tokens, so redact the rest of the
-    # line for those schemes instead of just the first token.
-    re.compile(r"(?i)(authorization\s*[:=]\s*)(?!bearer\b)(?:(?:basic|digest)\b.*|\S+)"),
-    re.compile(r"(?i)(cookie\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(csrf\s*[:=]\s*)\S+"),
-    re.compile(r"(?i)(ws[_-]?ticket\s*[:=]\s*)\S+"),
-    # DSNs with credentials
-    re.compile(r"(?i)(://[^/\s:]+:)[^@\s]+(@)"),
-    # RTSP URLs with credentials
-    re.compile(r"(?i)(rtsp://[^/\s:]+:)[^@\s]+(@)"),
-)
+from backend.app.core.redaction import redact_structure, redact_text
 
 #: Structured record attributes that are never treated as free-form extras.
 _STRUCTURAL_RECORD_ATTRS = frozenset(
@@ -45,10 +22,8 @@ _STRUCTURAL_RECORD_ATTRS = frozenset(
 
 
 def redact(text: str) -> str:
-    redacted = text
-    for pattern in _SENSITIVE_PATTERNS:
-        redacted = pattern.sub(r"\1[REDACTED]\2" if pattern.groups >= 2 else r"\1[REDACTED]", redacted)
-    return redacted
+    """Redact credentials from free-form log text using the V29 policy."""
+    return redact_text(text)
 
 
 # Context carried alongside the request. Set by middleware.
@@ -79,17 +54,19 @@ class RedactingFilter(logging.Filter):
         try:
             if isinstance(record.msg, str):
                 record.msg = redact(record.msg)
+            elif isinstance(record.msg, (dict, list, tuple)):
+                record.msg = redact_structure(record.msg)
         except Exception:
             pass
-        # Redact args
+        # Redact args, including nested structured values.
         try:
             if record.args:
                 if isinstance(record.args, dict):
-                    record.args = {
-                        k: (redact(str(v)) if isinstance(v, str) else v) for k, v in record.args.items()
-                    }
+                    record.args = redact_structure(record.args)
                 elif isinstance(record.args, tuple):
-                    record.args = tuple(redact(str(a)) if isinstance(a, str) else a for a in record.args)
+                    record.args = tuple(redact_structure(arg) for arg in record.args)
+                else:
+                    record.args = redact_structure(record.args)
         except Exception:
             pass
         # Redact exception tracebacks. Setting `exc_text` (and leaving
@@ -100,15 +77,23 @@ class RedactingFilter(logging.Filter):
                 record.exc_text = redact(logging.Formatter().formatException(record.exc_info))
         except Exception:
             pass
-        # Redact free-form structured extras (string-valued attributes set
-        # via `logger.info(..., extra={...})` or the log context).
+        try:
+            if record.stack_info:
+                record.stack_info = redact(record.stack_info)
+        except Exception:
+            pass
+        # Redact free-form structured extras (attributes set via
+        # `logger.info(..., extra={...})` or the log context).
         try:
             for key, value in list(record.__dict__.items()):
-                if key in _STRUCTURAL_RECORD_ATTRS or not isinstance(value, str):
+                if key in _STRUCTURAL_RECORD_ATTRS:
                     continue
-                cleaned = redact(value)
-                if cleaned != value:
-                    setattr(record, key, cleaned)
+                if isinstance(value, str):
+                    cleaned = redact(value)
+                    if cleaned != value:
+                        setattr(record, key, cleaned)
+                elif isinstance(value, (dict, list, tuple)):
+                    setattr(record, key, redact_structure(value))
         except Exception:
             pass
         return True

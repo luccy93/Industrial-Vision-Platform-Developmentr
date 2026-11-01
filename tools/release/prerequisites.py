@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import redact_text
 from tools.release.manifest import utc_now_iso
 from tools.release.qualification import QUALIFICATION_PROFILES, SCOPES
 from tools.release.verification import (
@@ -46,7 +47,7 @@ def _check(name: str, state: str, required: bool, detail: str) -> dict[str, Any]
         "name": name,
         "state": state,
         "required": required,
-        "detail": detail,
+        "detail": redact_text(detail),
     }
 
 

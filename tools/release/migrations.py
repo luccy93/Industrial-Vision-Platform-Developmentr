@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import redact_text
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -54,7 +55,12 @@ class MigrationError(RuntimeError):
 
 
 def _check(name: str, state: str, required: bool, detail: str) -> dict[str, Any]:
-    return {"name": name, "state": state, "required": required, "detail": detail}
+    return {
+        "name": name,
+        "state": state,
+        "required": required,
+        "detail": redact_text(detail),
+    }
 
 
 def _aggregate(checks: Sequence[Mapping[str, Any]]) -> str:

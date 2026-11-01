@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from backend.app.core.redaction import redact_text
 from tools.release.identity import (
     DIGEST_PATTERN,
     REQUIRED_IMAGES,
@@ -67,8 +68,8 @@ def _check(
         "state": state,
         "required": required,
         "mode": mode,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 

@@ -24,6 +24,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import redact_text
 from tools.release.deployment import (
     DeploymentError,
     deployment_environment,
@@ -106,8 +107,8 @@ def _check(
         "name": name,
         "state": state,
         "required": required,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 
@@ -265,8 +266,8 @@ def _step(
     return {
         "name": name,
         "state": state,
-        "detail": detail,
-        "commands": list(commands),
+        "detail": redact_text(detail),
+        "commands": [redact_text(command) for command in commands],
         "checks": [
             {
                 "name": check.get("name"),

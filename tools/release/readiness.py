@@ -31,6 +31,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from backend.app.core.redaction import (
+    contains_sensitive_material,
+    contains_url_credentials,
+    redact_text,
+)
 from tools.release import connectivity as connectivity_probes
 from tools.release import docker_host, inspection
 from tools.release import rollback as rollback_prerequisites
@@ -309,13 +314,6 @@ STAGING_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{2,62}$")
 ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 COMPOSE_PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 PRODUCTION_TOKENS = frozenset({"prod", "production", "prd"})
-SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|"
-    r"private[_-]?key)\b\s*(?P<separator>[=:])\s*[\"']?"
-    r"(?!\[redacted\]|\*{3,}|<redacted>|redacted\b)[^\s\"',}]{8,}"
-)
-PRIVATE_KEY_MATERIAL = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
-URL_CREDENTIALS = re.compile(r"(?i)(https?|wss?)://[^/@\s]+:[^/@\s]+@")
 MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
 
 
@@ -339,7 +337,7 @@ def _check(
         "required": required,
         "mode": mode,
         "detail": _sanitize_detail(detail),
-        "command": command,
+        "command": redact_text(command) if command is not None else None,
     }
 
 
@@ -362,15 +360,7 @@ def _binding_state(checks_by_name: Mapping[str, Mapping[str, Any]], name: str) -
 
 
 def _sanitize_detail(detail: str) -> str:
-    text = URL_CREDENTIALS.sub(r"\1://[redacted]@", str(detail))
-
-    def _redact(match: re.Match[str]) -> str:
-        separator = match.group("separator")
-        key = match.group(0).split(separator, 1)[0]
-        return f"{key}{separator}[redacted]"
-
-    text = SECRET_ASSIGNMENT.sub(_redact, text)
-    return text[:500]
+    return redact_text(str(detail))[:500]
 
 
 class CommandResolutionError(ValueError):
@@ -559,7 +549,7 @@ def _relative_path_errors(value: Any, label: str) -> list[str]:
 def _remote_repository(value: str) -> str | None:
     """Extract owner/repo from a git remote without retaining credentials."""
     text = value.strip()
-    if not text or URL_CREDENTIALS.search(text):
+    if not text or contains_url_credentials(text):
         return None
     candidate = text
     if candidate.startswith("git@") and ":" in candidate:
@@ -627,7 +617,7 @@ def _plain_file_name(value: Any) -> bool:
 
 
 def _secret_material(text: str) -> bool:
-    return bool(SECRET_ASSIGNMENT.search(text) or PRIVATE_KEY_MATERIAL.search(text))
+    return contains_sensitive_material(text)
 
 
 def _retain_evidence(

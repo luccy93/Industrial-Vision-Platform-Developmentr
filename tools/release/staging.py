@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from backend.app.core.redaction import redact_text
 from tools.release.deployment import (
     DeploymentError,
     deploy_release,
@@ -179,8 +180,8 @@ def _check(
         "name": name,
         "state": state,
         "required": required,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 

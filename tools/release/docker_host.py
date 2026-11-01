@@ -14,6 +14,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from backend.app.core.redaction import redact_text
 from tools.release.manifest import utc_now_iso
 from tools.release.verification import (
     FAIL,
@@ -55,8 +56,8 @@ def _check(
         "state": state,
         "required": required,
         "mode": "live-read-only",
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 

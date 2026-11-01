@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from backend.app.core.redaction import redact_text
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -52,8 +53,8 @@ def _check(name: str, state: str, required: bool, detail: str, command: str | No
         "name": name,
         "state": state,
         "required": required,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 

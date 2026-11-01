@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import redact_text
 from tools.release.identity import (
     DIGEST_PATTERN,
     REQUIRED_IMAGES,
@@ -160,8 +161,8 @@ def _check(
         "name": name,
         "state": state,
         "required": required,
-        "detail": detail,
-        "command": command,
+        "detail": redact_text(detail),
+        "command": redact_text(command) if command is not None else None,
     }
 
 
