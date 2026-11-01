@@ -191,7 +191,9 @@ V28 validates rollback evidence but never executes a rollback:
 
 The migration report contract is the existing V25 contract; V28 does not invent
 a second schema. The backup document is validated for content and never
-executed. Secret-bearing files are not copied into the evidence directory.
+executed. Secret-bearing originals are not copied or bound as evidence. V29 may
+write a separately named, sanitized diagnostic copy for operators; it is not
+evidence and its name and hash derive from the sanitized bytes.
 
 ## Report contract
 
@@ -279,6 +281,22 @@ The honest result is a non-`PASS` readiness report with explicit `UNAVAILABLE`
 or `NOT_RUN` checks and blockers. No live GitHub, GHCR, Docker, staging, GPU,
 release, publication, workflow, deployment, migration, rollback, or
 infrastructure mutation was performed for V28.
+
+## V29 credential and evidence hardening
+
+V29 centralizes credential detection in `backend/app/core/redaction.py` and
+applies it to V28 live inspection and retained evidence. The live-inspection
+file and readiness report are sanitized before they are written; their recorded
+SHA-256 values cover the stored sanitized bytes. A V28 input that contains a
+detected secret is still not bound, so the existing `evidence-retention`
+blocker remains. A separately named, sanitized diagnostic copy may be written
+for operators; it is not report evidence and its name and hash derive from the
+sanitized bytes. Unparseable JSON evidence is rejected rather than copied.
+
+V28 check names, the optional `inspection_profile: "v28"` marker, its three
+optional bindings, `schema_version: 1`, and the deployment prohibition are
+unchanged. See
+[V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).
 
 ## Relationship to V22-V27
 

@@ -288,3 +288,15 @@ or a GPU, the V28 live profile reports `UNAVAILABLE` or `NOT_RUN` and blocks.
 It never guesses a host, never scans ports, and never converts missing evidence
 into a pass. See
 [V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
+## V29 credential and evidence hardening
+
+V29 centralizes credential detection in `backend/app/core/redaction.py` and
+sanitizes evidence before it is written, without changing V26 readiness check
+names, status vocabulary, schema compatibility, or deployment prohibition.
+Clean evidence keeps its original bytes and hash. A secret-bearing input is
+still not bound and still produces the existing `evidence-retention` blocker;
+V29 may write a separately named, sanitized diagnostic copy that is not
+evidence and whose name and hash derive from the sanitized bytes. Unparseable
+JSON is rejected rather than retained. See
+[V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).

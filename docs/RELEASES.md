@@ -400,6 +400,27 @@ live reports retain secret-free evidence. A readiness `PASS` remains
 preparation evidence only and never authorizes a deployment. See
 [V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
 
+## Credential and evidence retention hardening (V29)
+
+V29 centralizes credential detection and redaction in
+`backend/app/core/redaction.py`. Backend logging and every release report writer
+share the policy, so prefixed environment names, JSON/YAML-like structured
+fields, URL credentials, authorization/cookie/custom headers, private-key
+blocks, logs, and exception tracebacks are handled consistently.
+
+Report writers sanitize before writing and compute SHA-256 over the exact
+stored sanitized bytes. Readiness evidence that is clean is retained
+byte-for-byte with its original hash. A secret-bearing input is not bound and
+still produces the existing `evidence-retention` blocker; a separately named
+`<kind>-<sanitized_digest[:12]>-redacted<ext>` diagnostic copy may be written
+for operators, but it is not evidence and never reuses the original hash.
+Unparseable JSON is rejected rather than retained.
+
+V29 keeps `schema_version: 1`, the V22-V28 evidence contracts, check names,
+action SHA pins, and release gates unchanged. It does not create a tag, release,
+workflow run, deployment, or infrastructure mutation. See
+[V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
@@ -741,3 +762,8 @@ No real GHCR push, GitHub attestation, or GitHub Release was performed.
 - Attestation verification requires GitHub CLI support for artifact
   attestations and network access to the registry/GitHub API.
 - `latest` is intentionally absent; tooling that expects it must be changed.
+- V29 redaction is pattern- and name-based, not universal data-loss prevention.
+  Unknown proprietary formats, secrets split across fields or lines, encrypted
+  or encoded blobs, and binary, oversized, or non-UTF-8 evidence may not be
+  detected. A stored hash proves the integrity of the stored bytes, not the
+  absence of every possible secret.

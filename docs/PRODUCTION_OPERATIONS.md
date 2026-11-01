@@ -41,6 +41,11 @@ startup.
   logging filter redacts Bearer/Basic/Digest authorization values, cookie/
   CSRF/WS-ticket values, DSN passwords, RTSP passwords, structured extras,
   and exception tracebacks.
+- V29 centralizes detection in `backend/app/core/redaction.py`. Logging and
+  release evidence share the same policy, including prefixed environment names
+  (`POSTGRES_PASSWORD`, `IVP_POSTGRES_PASSWORD`, `SERVICE_API_TOKEN`,
+  `GITHUB_APP_PRIVATE_KEY`), JSON/YAML-like structured fields, URL credentials,
+  authorization/cookie/custom headers, and private-key blocks.
 - The compose stack **requires** an explicit `POSTGRES_PASSWORD` (no weak
   default); the API rejects a weak password at startup in production.
 
@@ -260,6 +265,30 @@ release, an unreachable registry, an unreachable Docker daemon, or absent
 staging evidence is reported as `UNAVAILABLE` or `NOT_RUN`, never converted
 into a pass. See
 [V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
+### Credential and evidence retention hardening (V29)
+
+V29 applies one credential policy before diagnostic data is persisted:
+
+- Release report writers serialize through `dump_sanitized_json` and compute
+  SHA-256 over the exact stored sanitized bytes. A hash is never taken over an
+  unsanitized payload and attached to a sanitized file.
+- Readiness evidence that is clean is retained byte-for-byte with its original
+  hash. A secret-bearing input is not bound and still produces the existing
+  `evidence-retention` blocker. A separately named
+  `<kind>-<sanitized_digest[:12]>-redacted<ext>` diagnostic copy may be written
+  for review; it is not evidence and never reuses the original hash.
+- Unparseable JSON evidence is rejected rather than copied. Oversized and
+  non-UTF-8 inputs are not retained.
+- The logging filter redacts arguments before formatting the message, then
+  stores the sanitized final message, so placeholders such as `token=%s` do
+  not break formatting. A pre-set `exc_text` is sanitized as well.
+
+Use environment-variable indirection in evidence and configuration. If a
+retention blocker appears, remove the secret from the source document and
+re-run; do not copy the raw file into the evidence directory. Rotate any
+credential that may have been written before V29. See
+[V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).
 
 ## Frontend security headers
 

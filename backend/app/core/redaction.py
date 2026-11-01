@@ -153,26 +153,27 @@ _PRIVATE_KEY_BLOCK = re.compile(
     re.DOTALL,
 )
 _PRIVATE_KEY_BEGIN = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")
-_URL_USERINFO = re.compile(r"(?i)\b(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<userinfo>[^/\s?#@]+)@")
+_URL_USERINFO = re.compile(r"(?i)\b(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<userinfo>[^/\s?#]+)@")
 _QUERY_CREDENTIAL = re.compile(
     r"(?i)(?P<prefix>[?&;](?:"
-    r"access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|api[_-]?key|apikey|"
-    r"token|secret|password|passwd|client[_-]?secret|session(?:[_-]?id)?|jwt|ticket|"
-    r"signature|sig|x-amz-signature|x-amz-credential|x-amz-security-token|"
-    r"awsaccesskeyid|googleaccessid"
+    r"access[_-]?token|refresh[_-]?token|id[_-]?token|auth(?:[_-]?token)?|"
+    r"api[_-]?key|apikey|token|secret(?:[_-]?key)?|password|passwd|"
+    r"access[_-]?key|private[_-]?key|client[_-]?secret|credential(?:s)?|"
+    r"session(?:[_-]?id)?|jwt|ticket|signature|sig|x-amz-signature|"
+    r"x-amz-credential|x-amz-security-token|awsaccesskeyid|googleaccessid"
     r")=)(?P<value>[^&#\s\"']*)"
 )
 _HEADER_LINE = re.compile(
     r"(?im)(?P<name>(?<![\w-])(?:proxy-)?authorization|set-cookie|cookie|"
-    r"x-[a-z0-9-]*(?:api-key|apikey|token|secret|auth)[a-z0-9-]*|"
-    r"api-key|apikey|private-token|x-gitlab-token)"
-    r"(?P<separator>\s*[:=]\s*)"
+    r"x-[a-z0-9_-]*(?:api[-_]?key|apikey|token|secret|auth)[a-z0-9_-]*|"
+    r"api[-_]?key|apikey|private[-_]token|x-gitlab-token)"
+    r"(?P<separator>[ \t]*[:=][ \t]*)"
     r"(?P<value>[^\r\n]*)"
 )
 _ASSIGNMENT = re.compile(
     r"(?P<prefix>(?<![\w.-])(?:\\?[\"'])?)"
     r"(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)"
-    r"(?P<suffix>(?:\\?[\"'])?\s*[=:]\s*)"
+    r"(?P<suffix>(?:\\?[\"'])?[ \t]*[=:][ \t]*)"
     r"(?P<value>"
     r"(?i:\[redacted\])"
     r"|\\?\"(?:\\.|[^\"\\])*\\?\""
@@ -180,9 +181,15 @@ _ASSIGNMENT = re.compile(
     r"|[^\s,;&}\]\)\"']+"
     r")"
 )
+_YAML_SCALAR = re.compile(
+    r"(?im)^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)[ \t]*:[ \t]*"
+    r"(?:[|>][0-9]?[-+]?[ \t]*)?\r?\n"
+    r"(?P<block>(?:(?P=indent)[ \t]+[^\r\n]*(?:\r?\n|$))+)"
+)
 _SCHEME_CREDENTIAL = re.compile(
     r"(?i)(?P<scheme>(?<![\w-])(?:basic|bearer|digest|negotiate|ntlm))"
-    r"(?P<space>\s+)"
+    r"(?P<space>[ \t]+)"
     r"(?P<credential>[A-Za-z0-9._~+/=-]{8,})"
 )
 _GITHUB_TOKEN = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,})\b")
@@ -312,7 +319,20 @@ def _url_userinfo_is_credential(userinfo: str) -> bool:
     decoded = unquote(userinfo)
     if ":" in decoded:
         return True
-    return _is_credential_text(decoded)
+    # A bare userinfo is normally a username. Only treat it as a credential
+    # when it matches a well-known token shape; otherwise ordinary identities
+    # such as ``deploy.user@example.test`` would be false positives.
+    return any(
+        pattern.search(decoded)
+        for pattern in (
+            _GITHUB_TOKEN,
+            _AWS_ACCESS_KEY,
+            _JWT,
+            _STRIPE_KEY,
+            _SLACK_TOKEN,
+            _GOOGLE_API_KEY,
+        )
+    )
 
 
 def _url_userinfo_repl(match: re.Match[str]) -> str:
@@ -371,12 +391,20 @@ def _strip_unterminated_private_key(text: str) -> str:
     return f"{text[: match.start()]}{REDACTED}"
 
 
+def _yaml_scalar_repl(match: re.Match[str]) -> str:
+    key = match.group("key")
+    if not (is_sensitive_name(key) or is_sensitive_header(key)):
+        return match.group(0)
+    return f"{match.group('indent')}{match.group('dash') or ''}{key}: {REDACTED}\n"
+
+
 def redact_text(text: str) -> str:
     """Redact credential-bearing substrings while preserving safe context."""
     if not isinstance(text, str) or not text:
         return text
     redacted = _PRIVATE_KEY_BLOCK.sub(REDACTED, text)
     redacted = _strip_unterminated_private_key(redacted)
+    redacted = _YAML_SCALAR.sub(_yaml_scalar_repl, redacted)
     redacted = _URL_USERINFO.sub(_url_userinfo_repl, redacted)
     redacted = _QUERY_CREDENTIAL.sub(_query_repl, redacted)
     redacted = _HEADER_LINE.sub(_header_repl, redacted)
@@ -485,9 +513,20 @@ def scan_text(text: str) -> list[str]:
     for match in _QUERY_CREDENTIAL.finditer(text):
         if not _is_marker(match.group("value")):
             found.add("credential-url")
+    for match in _YAML_SCALAR.finditer(text):
+        key = match.group("key")
+        if not (is_sensitive_name(key) or is_sensitive_header(key)):
+            continue
+        if _is_marker(match.group("block").strip()):
+            continue
+        found.add("secret-assignment")
     for match in _ASSIGNMENT.finditer(text):
         key = match.group("key")
-        _, inner, _ = _split_quoted(match.group("value"))
+        raw_value = match.group("value")
+        _, inner, _ = _split_quoted(raw_value)
+        if re.fullmatch(r"[|>][0-9]?[-+]?", raw_value):
+            # YAML block scalar; the block-aware rule above handles the body.
+            continue
         if key.lower() in _URL_SCHEMES and inner.startswith("//"):
             continue
         if not (is_sensitive_name(key) or is_sensitive_header(key)):

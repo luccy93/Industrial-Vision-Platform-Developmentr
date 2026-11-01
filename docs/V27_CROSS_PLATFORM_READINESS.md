@@ -143,3 +143,13 @@ or GPU is reported honestly. Its live profile is opt-in, bounded, and
 read-only; no deployment, publication, workflow dispatch, migration, rollback,
 or infrastructure mutation is performed. See
 [V28_LIVE_INFRASTRUCTURE_VERIFICATION.md](V28_LIVE_INFRASTRUCTURE_VERIFICATION.md).
+
+## V29 follow-up
+
+V29 adds a central credential-detection and redaction policy and sanitizes
+structured evidence before persistence. It does not change V27 cross-platform
+tool discovery, incomplete-report schema compatibility, readiness check names,
+or any release gate. Clean evidence retains its exact bytes and hash; a
+secret-bearing input remains unbound, and a separately named sanitized
+diagnostic copy is not evidence. See
+[V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).

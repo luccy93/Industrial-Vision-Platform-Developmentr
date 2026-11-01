@@ -50,15 +50,9 @@ class RedactingFilter(logging.Filter):
         for key, value in ctx.items():
             if not hasattr(record, key):
                 setattr(record, key, value)
-        # Redact message
-        try:
-            if isinstance(record.msg, str):
-                record.msg = redact(record.msg)
-            elif isinstance(record.msg, (dict, list, tuple)):
-                record.msg = redact_structure(record.msg)
-        except Exception:
-            pass
-        # Redact args, including nested structured values.
+        # Redact args, including nested structured values, before touching the
+        # message template. Redacting a template such as ``token=%s`` would
+        # consume the placeholder and make ``record.getMessage()`` raise.
         try:
             if record.args:
                 if isinstance(record.args, dict):
@@ -69,12 +63,36 @@ class RedactingFilter(logging.Filter):
                     record.args = redact_structure(record.args)
         except Exception:
             pass
+        # Redact the message. When arguments are present, format first and
+        # store the sanitized final message so the original placeholders are
+        # never lost and the redacted values are used exactly once.
+        try:
+            if isinstance(record.msg, str):
+                if record.args:
+                    try:
+                        message = record.getMessage()
+                    except Exception:
+                        message = record.msg
+                    else:
+                        record.args = ()
+                    record.msg = redact(message)
+                else:
+                    record.msg = redact(record.msg)
+            elif isinstance(record.msg, (dict, list, tuple)):
+                record.msg = redact_structure(record.msg)
+        except Exception:
+            pass
         # Redact exception tracebacks. Setting `exc_text` (and leaving
         # `exc_info`) makes both the text and JSON formatters reuse the
-        # redacted stack rather than formatting the raw one.
+        # redacted stack rather than formatting the raw one. A pre-set
+        # `exc_text` (for example from an upstream handler or a custom
+        # formatter) is sanitized too; otherwise a raw traceback could bypass
+        # the filter entirely.
         try:
             if record.exc_info and not record.exc_text:
-                record.exc_text = redact(logging.Formatter().formatException(record.exc_info))
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            if record.exc_text:
+                record.exc_text = redact(record.exc_text)
         except Exception:
             pass
         try:
