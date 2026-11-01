@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.redaction import redact_text
+from backend.app.core.redaction import dump_sanitized_json, redact_text
 from tools.release.identity import REQUIRED_IMAGES, verify_tag_commit
 from tools.release.manifest import (
     ManifestError,
@@ -338,8 +338,9 @@ def collect_release_evidence(
 
 
 def write_evidence_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the evidence report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def _artifact_errors(

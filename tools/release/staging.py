@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from backend.app.core.redaction import redact_text
+from backend.app.core.redaction import dump_sanitized_json, redact_text
 from tools.release.deployment import (
     DeploymentError,
     deploy_release,
@@ -674,7 +674,7 @@ def _write_evidence(
 ) -> dict[str, Any]:
     path = evidence_dir / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(payload), encoding="utf-8", newline="\n")
     item = {"kind": filename.removesuffix(".json"), "path": path.name, "sha256": sha256_file(path)}
     evidence.append(item)
     return item
@@ -1380,8 +1380,9 @@ def run_staging_qualification(
 
 
 def write_staging_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the staging qualification report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def _plain_file_name(value: Any) -> bool:

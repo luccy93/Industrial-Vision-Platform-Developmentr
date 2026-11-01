@@ -413,6 +413,21 @@ def redact_structure(value: Any) -> Any:
     return value
 
 
+def dump_sanitized_json(payload: Any) -> str:
+    """Return canonical JSON for a sanitized copy of *payload*.
+
+    The returned bytes are the bytes that must be persisted and hashed. The
+    caller must never compute a digest over the unsanitized payload and attach
+    it to the sanitized copy.
+    """
+    cleaned = redact_structure(payload)
+    try:
+        text = json.dumps(cleaned, indent=2, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise RedactionError("structured evidence cannot be serialized safely") from exc
+    return text + "\n"
+
+
 def sanitize_json_document(text: str) -> tuple[Any, str]:
     """Parse, sanitize, and re-serialize a JSON document.
 
@@ -423,8 +438,7 @@ def sanitize_json_document(text: str) -> tuple[Any, str]:
         payload = json.loads(text)
     except (TypeError, json.JSONDecodeError) as exc:
         raise RedactionError("structured evidence is not valid JSON") from exc
-    cleaned = redact_structure(payload)
-    return cleaned, json.dumps(cleaned, indent=2, sort_keys=True) + "\n"
+    return redact_structure(payload), dump_sanitized_json(payload)
 
 
 def contains_url_credentials(text: str) -> bool:

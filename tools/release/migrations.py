@@ -14,12 +14,11 @@ never imports or executes them, so it is safe to run before a deployment.
 from __future__ import annotations
 
 import ast
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.redaction import redact_text
+from backend.app.core.redaction import dump_sanitized_json, redact_text
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -367,8 +366,9 @@ def check_migration_compatibility(
 
 
 def write_migration_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the migration report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def migration_report_errors(

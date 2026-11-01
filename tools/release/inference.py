@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.redaction import redact_text
+from backend.app.core.redaction import dump_sanitized_json, redact_text
 from tools.release.manifest import (
     ManifestError,
     load_manifest,
@@ -464,12 +464,9 @@ def qualify_gpu_inference(
 
 
 def write_inference_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the inference report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def inference_report_errors(

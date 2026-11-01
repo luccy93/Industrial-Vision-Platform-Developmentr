@@ -14,14 +14,13 @@ reported as ``UNAVAILABLE`` or ``FAIL``, never as success.
 from __future__ import annotations
 
 import ast
-import json
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.redaction import redact_text
+from backend.app.core.redaction import dump_sanitized_json, redact_text
 from tools.release.deployment import (
     DeploymentError,
     deployment_config_checks,
@@ -496,8 +495,9 @@ def run_preflight(
 
 
 def write_preflight_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the preflight report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def preflight_report_errors(

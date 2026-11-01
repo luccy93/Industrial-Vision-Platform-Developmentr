@@ -72,6 +72,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import dump_sanitized_json
 from tools.release.deployment import (
     DEFAULT_CPU_COMPOSE,
     DEFAULT_GPU_COMPOSE,
@@ -214,8 +215,9 @@ def _load_inputs(path: Path) -> dict[str, Any]:
 
 
 def _write_json(payload: Any, path: Path) -> None:
+    """Write a sanitized JSON diagnostic without persisting raw credentials."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(payload), encoding="utf-8", newline="\n")
 
 
 def _build_parser() -> argparse.ArgumentParser:

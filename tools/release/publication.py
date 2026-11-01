@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from backend.app.core.redaction import dump_sanitized_json
 from tools.release.identity import DIGEST_PATTERN, REQUIRED_IMAGES
 from tools.release.manifest import utc_now_iso
 from tools.release.verification import is_placeholder_digest
@@ -202,8 +203,9 @@ def build_publication_report(
 
 
 def write_publication_report(report: Mapping[str, Any], path: Path) -> None:
+    """Persist a sanitized diagnostic copy of the publication report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.write_text(dump_sanitized_json(report), encoding="utf-8", newline="\n")
 
 
 def render_publication_summary(report: Mapping[str, Any]) -> str:

@@ -19,6 +19,7 @@ required readiness check.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,8 @@ from urllib.parse import urlsplit
 from backend.app.core.redaction import (
     contains_sensitive_material,
     contains_url_credentials,
+    dump_sanitized_json,
+    redact_structure,
     redact_text,
 )
 from tools.release import connectivity as connectivity_probes
@@ -620,6 +623,49 @@ def _secret_material(text: str) -> bool:
     return contains_sensitive_material(text)
 
 
+def _looks_structured(text: str, suffix: str) -> bool:
+    if suffix.lower() == ".json":
+        return True
+    stripped = text.lstrip()
+    return stripped.startswith("{") or stripped.startswith("[")
+
+
+def _write_redacted_diagnostic(
+    source: Path,
+    evidence_dir: Path,
+    *,
+    kind: str,
+    text: str,
+    payload: Any | None = None,
+) -> Path | None:
+    """Write a sanitized diagnostic copy that never reuses the original digest.
+
+    The diagnostic is deliberately not added to the report evidence list: a
+    secret-bearing input is not accepted as a binding. The file name and its
+    contents are derived from the sanitized bytes, so callers cannot mistake it
+    for, or bind it to, the original.
+    """
+    try:
+        sanitized = redact_text(text) if payload is None else dump_sanitized_json(payload)
+    except (TypeError, ValueError):
+        return None
+    if sanitized == text:
+        return None
+    data = sanitized.encode("utf-8")
+    digest = hashlib.sha256(data).hexdigest()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{kind}-{digest[:12]}-redacted{source.suffix or '.txt'}"
+    destination = evidence_dir / name
+    try:
+        if not destination.exists():
+            destination.write_bytes(data)
+        elif sha256_file(destination) != f"sha256:{digest}":
+            return None
+    except OSError:
+        return None
+    return destination
+
+
 def _retain_evidence(
     source: Path | None,
     evidence_dir: Path,
@@ -630,8 +676,10 @@ def _retain_evidence(
 ) -> dict[str, Any] | None:
     """Retain an input file under a content-addressed name.
 
-    The report never embeds the file contents. Files that appear to contain
-    secret assignments or private-key material are not copied.
+    The report never embeds the file contents. Structured inputs are parsed and
+    sanitized before retention; an unparseable JSON document is rejected rather
+    than copied. A secret-bearing input is not accepted as a binding, but a
+    separately named, sanitized diagnostic copy may be retained for operators.
     """
     if source is None or not source.is_file():
         return None
@@ -642,7 +690,22 @@ def _retain_evidence(
         text = source.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    if _secret_material(text):
+    if _looks_structured(text, source.suffix):
+        try:
+            payload = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if redact_structure(payload) != payload:
+            _write_redacted_diagnostic(
+                source,
+                evidence_dir,
+                kind=kind,
+                text=text,
+                payload=payload,
+            )
+            return None
+    elif _secret_material(text):
+        _write_redacted_diagnostic(source, evidence_dir, kind=kind, text=text)
         return None
     evidence_dir.mkdir(parents=True, exist_ok=True)
     if source.resolve().parent == evidence_dir.resolve():
@@ -2763,10 +2826,15 @@ def _v28_checks(
 
 
 def _write_live_inspection(evidence_dir: Path, payload: Mapping[str, Any]) -> Path:
+    """Write the live inspection only after sanitizing every nested value.
+
+    The retained file, not the in-memory observation, is the evidence. Its
+    digest is computed from these exact sanitized bytes.
+    """
     evidence_dir.mkdir(parents=True, exist_ok=True)
     path = evidence_dir / "live-inspection.json"
     path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        dump_sanitized_json(payload),
         encoding="utf-8",
         newline="\n",
     )
@@ -3642,9 +3710,10 @@ def assess_staging_readiness(
 
 
 def write_readiness_report(report: Mapping[str, Any], path: Path) -> str:
+    """Persist a sanitized readiness report and hash the exact stored bytes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        dump_sanitized_json(report),
         encoding="utf-8",
         newline="\n",
     )
