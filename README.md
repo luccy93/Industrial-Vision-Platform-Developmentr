@@ -79,7 +79,7 @@ No Redis, no auth/RBAC, no new domain features — resilience only.
 **V11 = Backend Hardening.**
 V12 adds the **PostgreSQL + Redis data layer**: pooled, timeout-bounded
 database access; durable operational event history + transactional outbox
-(Alembic `006`); a local-first event bus (V05–V10 genuine events) with
+(Alembic `006`); a local-first event bus (V05–V10 genuine  he events) with the ff
 opt-in Redis pub/sub distribution; lifecycle-owned Redis with
 required/optional policy; Redis-aware health/readiness; and retention
 cleanup. No cache, no new models, no auth/RBAC — reliability only.
