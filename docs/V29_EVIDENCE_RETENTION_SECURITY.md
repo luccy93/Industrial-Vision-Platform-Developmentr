@@ -206,6 +206,18 @@ hash integrity, and false-positive resistance.
 - A readiness `PASS` remains preparation evidence only. It is not production
   qualification and does not authorize a deployment.
 
+## V30 follow-up
+
+V30 adds an optional integrity sidecar and append-only audit chain on top of
+these unchanged V23-V29 reports. It does not add fields to `schema_version: 1`
+reports and it does not change V29 redaction behavior. V30 audit details are
+sanitized with the same central policy before they are hashed, verification
+output is sanitized, and sealing fails closed if sidecar metadata would require
+redaction. A secret-bearing readiness input still follows the V29 rule: it is
+not bound, it produces the `evidence-retention` blocker, and any separately
+named diagnostic copy is not evidence. See
+[V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
+
 ## Known limitations
 
 V29 is a pattern- and name-based control, not a universal data-loss-prevention

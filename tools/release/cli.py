@@ -88,6 +88,21 @@ from tools.release.evidence import (
     render_evidence_summary,
     write_evidence_report,
 )
+from tools.release.evidence_verification import (
+    EvidenceVerificationError,
+    checkpoint_audit_chain,
+    seal_report_evidence,
+    verification_exit_code,
+    verify_audit_file,
+    verify_individual_evidence,
+    verify_report,
+)
+from tools.release.evidence_verification import (
+    render_verification_json as render_evidence_verification_json,
+)
+from tools.release.evidence_verification import (
+    render_verification_summary as render_evidence_verification_summary,
+)
 from tools.release.gpu import (
     GpuError,
     qualify_gpu_runtime,
@@ -108,6 +123,7 @@ from tools.release.inference import (
     render_inference_summary,
     write_inference_report,
 )
+from tools.release.integrity import AuditChainError, IntegrityError
 from tools.release.manifest import (
     ManifestError,
     build_manifest,
@@ -530,6 +546,54 @@ def _build_parser() -> argparse.ArgumentParser:
     readiness_gate.add_argument("--manifest", type=Path, required=True)
     readiness_gate.add_argument("--evidence-dir", type=Path)
     readiness_gate.add_argument("--report-sha256")
+
+    verify_evidence_parser = subparsers.add_parser(
+        "verify-evidence",
+        help="read-only verification of retained evidence, integrity sidecar, and audit chain",
+    )
+    verify_source = verify_evidence_parser.add_mutually_exclusive_group(required=True)
+    verify_source.add_argument("--report", type=Path)
+    verify_source.add_argument("--evidence", type=Path)
+    verify_evidence_parser.add_argument("--expected-sha256")
+    verify_evidence_parser.add_argument("--expected-size", type=int)
+    verify_evidence_parser.add_argument("--evidence-id")
+    verify_evidence_parser.add_argument("--evidence-root", type=Path)
+    verify_evidence_parser.add_argument("--manifest", type=Path)
+    verify_evidence_parser.add_argument("--integrity", type=Path)
+    verify_evidence_parser.add_argument("--audit", type=Path)
+    verify_evidence_parser.add_argument("--checkpoint", type=Path)
+    verify_evidence_parser.add_argument("--report-sha256")
+    verify_evidence_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    verify_audit_parser = subparsers.add_parser(
+        "verify-audit",
+        help="read-only verification of an append-only evidence audit chain",
+    )
+    verify_audit_parser.add_argument("--audit", type=Path, required=True)
+    verify_audit_parser.add_argument("--checkpoint", type=Path)
+    verify_audit_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    seal_parser = subparsers.add_parser(
+        "seal-evidence",
+        help="create a new integrity sidecar and audit chain without modifying evidence",
+    )
+    seal_parser.add_argument("--report", type=Path, required=True)
+    seal_parser.add_argument("--integrity", type=Path)
+    seal_parser.add_argument("--audit", type=Path)
+    seal_parser.add_argument("--evidence-root", type=Path)
+    seal_parser.add_argument("--checkpoint", type=Path)
+    seal_parser.add_argument("--authorized-reuse", action="append", default=[])
+    seal_parser.add_argument("--timestamp")
+    seal_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    checkpoint_parser = subparsers.add_parser(
+        "checkpoint-evidence",
+        help="create a trusted checkpoint from a valid audit chain",
+    )
+    checkpoint_parser.add_argument("--audit", type=Path, required=True)
+    checkpoint_parser.add_argument("--output", type=Path, required=True)
+    checkpoint_parser.add_argument("--source")
+    checkpoint_parser.add_argument("--json", action="store_true", dest="json_output")
 
     evidence_parser = subparsers.add_parser(
         "collect-evidence",
@@ -1089,6 +1153,75 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"error: {error}", file=sys.stderr)
                 return 1
             print(f"GPU inference authorizes staging: {args.report}")
+        elif args.command == "verify-evidence":
+            if args.evidence is not None:
+                if not args.expected_sha256:
+                    print(
+                        "error: --expected-sha256 is required with --evidence",
+                        file=sys.stderr,
+                    )
+                    return 4
+                result = verify_individual_evidence(
+                    args.evidence,
+                    expected_sha256=args.expected_sha256,
+                    expected_size=args.expected_size,
+                    evidence_id=args.evidence_id,
+                    evidence_root=args.evidence_root,
+                )
+            else:
+                result = verify_report(
+                    args.report,
+                    manifest_path=args.manifest,
+                    integrity_path=args.integrity,
+                    evidence_root=args.evidence_root,
+                    audit_path=args.audit,
+                    checkpoint_path=args.checkpoint,
+                    expected_report_sha256=args.report_sha256,
+                )
+            if args.json_output:
+                sys.stdout.write(render_evidence_verification_json(result))
+            else:
+                sys.stdout.write(render_evidence_verification_summary(result))
+            return verification_exit_code(result.outcome)
+        elif args.command == "verify-audit":
+            result = verify_audit_file(args.audit, checkpoint_path=args.checkpoint)
+            if args.json_output:
+                sys.stdout.write(render_evidence_verification_json(result))
+            else:
+                sys.stdout.write(render_evidence_verification_summary(result))
+            return verification_exit_code(result.outcome)
+        elif args.command == "seal-evidence":
+            sealed = seal_report_evidence(
+                args.report,
+                integrity_path=args.integrity,
+                audit_path=args.audit,
+                evidence_root=args.evidence_root,
+                checkpoint_path=args.checkpoint,
+                authorized_reuse=args.authorized_reuse,
+                timestamp=args.timestamp,
+            )
+            if args.json_output:
+                sys.stdout.write(dump_sanitized_json(sealed))
+            else:
+                print(f"sealed evidence for report: {sealed['report']}")
+                print(f"report SHA-256: {sealed['report_sha256']}")
+                print(f"integrity manifest: {sealed['integrity_path']}")
+                print(f"audit chain: {sealed['audit_path']}")
+                print(f"evidence records: {sealed['evidence_count']}")
+                print(f"audit head: {sealed['audit']['head']}")
+        elif args.command == "checkpoint-evidence":
+            checkpoint = checkpoint_audit_chain(
+                args.audit,
+                args.output,
+                source_label=args.source,
+            )
+            if args.json_output:
+                sys.stdout.write(dump_sanitized_json(checkpoint))
+            else:
+                print(f"checkpoint written: {args.output}")
+                print(f"record count: {checkpoint['record_count']}")
+                print(f"final record hash: {checkpoint['final_record_hash']}")
+                print(f"final event: {checkpoint['final_event_id']}")
         elif args.command == "audit-workflows":
             problems = audit_workflows(args.root)
             if problems:
@@ -1114,6 +1247,9 @@ def main(argv: list[str] | None = None) -> int:
         SmokeError,
         StagingError,
         VerificationError,
+        EvidenceVerificationError,
+        AuditChainError,
+        IntegrityError,
         OSError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)

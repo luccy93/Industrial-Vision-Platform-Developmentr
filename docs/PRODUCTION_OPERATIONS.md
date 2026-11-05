@@ -290,6 +290,41 @@ re-run; do not copy the raw file into the evidence directory. Rotate any
 credential that may have been written before V29. See
 [V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).
 
+### Evidence integrity and tamper detection (V30)
+
+V30 adds an optional, separate integrity sidecar and append-only JSONL audit
+chain. Existing reports are not modified and keep their existing
+`schema_version`. Verification is read-only and never repairs, rewrites,
+quarantines, or deletes evidence.
+
+```powershell
+# Create the sidecar and audit chain once, after the report is final.
+python -m tools.release.cli seal-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --evidence-root release-artifacts/readiness-evidence
+
+# Re-read the evidence and verify every binding.
+python -m tools.release.cli verify-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --manifest release-manifest.json
+
+# Anchor the chain and verify against the trusted checkpoint later.
+python -m tools.release.cli checkpoint-evidence `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --output release-artifacts/staging-readiness.checkpoint.json
+python -m tools.release.cli verify-audit `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --checkpoint release-artifacts/staging-readiness.checkpoint.json
+```
+
+Exit codes are `0` for `PASS`, `1` for `FAIL`, `2` for `UNAVAILABLE`, `3` for
+`NOT_RUN`, and `4` for an invalid invocation. Missing evidence or a check that
+could not run is never converted into a pass. A local hash chain is
+tamper-evident, not immutable: an attacker with write access to both the
+evidence and the chain can recompute every hash. Store checkpoints somewhere
+the evidence producer cannot rewrite. See
+[V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

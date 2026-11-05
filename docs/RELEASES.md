@@ -421,6 +421,45 @@ action SHA pins, and release gates unchanged. It does not create a tag, release,
 workflow run, deployment, or infrastructure mutation. See
 [V29_EVIDENCE_RETENTION_SECURITY.md](V29_EVIDENCE_RETENTION_SECURITY.md).
 
+## Evidence integrity and tamper detection (V30)
+
+V30 adds an optional integrity sidecar and an append-only JSONL audit chain
+without changing any V23-V29 report schema. The sidecar binds the exact report
+bytes to deterministic SHA-256 evidence records, the evidence root, and the
+audit-chain head. The chain records `EVIDENCE_CREATED`, `EVIDENCE_VERIFIED`,
+`EVIDENCE_MODIFIED`, `EVIDENCE_MISSING`, `EVIDENCE_REPLACED`,
+`EVIDENCE_REJECTED`, `EVIDENCE_PATH_INVALID`, `MANIFEST_BINDING_MISMATCH`, and
+`AUDIT_CHAIN_INVALID`.
+
+```powershell
+python -m tools.release.cli seal-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --evidence-root release-artifacts/readiness-evidence
+
+python -m tools.release.cli verify-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --manifest release-manifest.json
+
+python -m tools.release.cli verify-audit `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --checkpoint release-artifacts/staging-readiness.checkpoint.json
+```
+
+Verification covers report and evidence existence, readability, size, SHA-256,
+identifier consistency, safe path resolution, traversal and symlink escape,
+manifest binding, audit continuity, schema compatibility, and redacted
+diagnostics. Outcomes are `PASS`, `FAIL`, `UNAVAILABLE`, and `NOT_RUN`; missing
+evidence or an unavailable check is never a pass. Verification is read-only and
+does not repair, rewrite, quarantine, or delete evidence. Exit codes are `0`,
+`1`, `2`, `3`, and `4` for invalid invocation.
+
+A local hash chain is tamper-evident, not immutable. An attacker with write
+access to both the evidence and the entire chain can recompute every hash.
+Checkpoints are explicit local files or an injected provider; no external
+anchor is contacted by default. Store a checkpoint where the evidence producer
+cannot rewrite it if termination evidence matters. See
+[V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
