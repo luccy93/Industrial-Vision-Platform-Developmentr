@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/evidence-integrity.schema.json",
+  "title": "Industrial Vision Platform evidence integrity sidecar",
+  "description": "Optional V30 sidecar produced by tools/release/evidence_verification.py. It binds a report's exact bytes to deterministic evidence records and an append-only JSONL audit chain without changing any V23-V29 report schema. A sidecar does not make evidence immutable: an attacker with write access to both the evidence and the chain can recompute local hashes. Stronger guarantees require an independently protected checkpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "generated_at",
+    "report",
+    "parent_id",
+    "evidence_root",
+    "evidence",
+    "audit",
+    "authorized_reuse",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "evidence_integrity"
+    },
+    "generated_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "schema_version",
+        "profile"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "parent_id": {
+      "type": "string",
+      "pattern": "^report:sha256:[0-9a-f]{64}$"
+    },
+    "evidence_root": {
+      "anyOf": [
+        {
+          "const": "."
+        },
+        {
+          "$ref": "#/$defs/relative_path"
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidence_record"
+      }
+    },
+    "audit": {
+      "$ref": "#/$defs/audit_binding"
+    },
+    "authorized_reuse": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/authorized_reuse"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.?(?:/|$))[^/](?:.*[^/])?$"
+    },
+    "evidence_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "kind",
+        "path",
+        "sha256",
+        "size",
+        "created_at",
+        "schema_version",
+        "parent_id"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,512}$"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+        },
+        "path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "parent_id": {
+          "type": "string",
+          "pattern": "^report:sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "audit_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "record_count",
+        "head",
+        "checkpoint"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "head": {
+          "$ref": "#/$defs/digest"
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/checkpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_count",
+        "final_record_hash",
+        "final_event_id",
+        "final_timestamp"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "final_record_hash": {
+          "$ref": "#/$defs/digest"
+        },
+        "final_event_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "final_timestamp": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "authorized_reuse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "reason"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}
