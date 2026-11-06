@@ -194,6 +194,12 @@ from tools.release.staging import (
     staging_report_errors,
     write_staging_report,
 )
+from tools.release.trust import (
+    TrustError,
+    advance_trust_state,
+    create_signed_checkpoint,
+    write_signed_checkpoint,
+)
 from tools.release.verification import (
     PASS,
     PROFILES,
@@ -563,7 +569,50 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_evidence_parser.add_argument("--audit", type=Path)
     verify_evidence_parser.add_argument("--checkpoint", type=Path)
     verify_evidence_parser.add_argument("--report-sha256")
+    verify_evidence_parser.add_argument(
+        "--trust-store",
+        type=Path,
+        help="independently configured V31 evidence trust store",
+    )
+    verify_evidence_parser.add_argument(
+        "--trusted-key-fingerprint",
+        help="separately supplied sha256:<hex> Ed25519 public-key fingerprint",
+    )
+    verify_evidence_parser.add_argument(
+        "--trust-state",
+        type=Path,
+        help="local monotonic trust-state reference for replay detection",
+    )
+    verify_evidence_parser.add_argument(
+        "--update-trust-state",
+        action="store_true",
+        help="append a verified checkpoint to --trust-state (explicit write)",
+    )
+    verify_evidence_parser.add_argument(
+        "--require-signed-checkpoint",
+        action="store_true",
+        help="fail unless a V31 signed checkpoint verifies",
+    )
+    verify_evidence_parser.add_argument(
+        "--require-independent-freshness",
+        action="store_true",
+        help="require an independently supplied external trust reference",
+    )
     verify_evidence_parser.add_argument("--json", action="store_true", dest="json_output")
+
+    sign_checkpoint_parser = subparsers.add_parser(
+        "sign-checkpoint",
+        help="create a V31 Ed25519-signed evidence checkpoint from a valid audit chain",
+    )
+    sign_checkpoint_parser.add_argument("--audit", type=Path, required=True)
+    sign_checkpoint_parser.add_argument("--report", type=Path, required=True)
+    sign_checkpoint_parser.add_argument("--integrity", type=Path, required=True)
+    sign_checkpoint_parser.add_argument("--private-key", type=Path, required=True)
+    sign_checkpoint_parser.add_argument("--key-id", required=True)
+    sign_checkpoint_parser.add_argument("--sequence", type=int, required=True)
+    sign_checkpoint_parser.add_argument("--output", type=Path, required=True)
+    sign_checkpoint_parser.add_argument("--created-at")
+    sign_checkpoint_parser.add_argument("--json", action="store_true", dest="json_output")
 
     verify_audit_parser = subparsers.add_parser(
         "verify-audit",
@@ -1154,6 +1203,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"GPU inference authorizes staging: {args.report}")
         elif args.command == "verify-evidence":
+            if args.update_trust_state and args.trust_state is None:
+                print(
+                    "error: --update-trust-state requires --trust-state",
+                    file=sys.stderr,
+                )
+                return 4
             if args.evidence is not None:
                 if not args.expected_sha256:
                     print(
@@ -1177,12 +1232,56 @@ def main(argv: list[str] | None = None) -> int:
                     audit_path=args.audit,
                     checkpoint_path=args.checkpoint,
                     expected_report_sha256=args.report_sha256,
+                    trust_store_path=args.trust_store,
+                    trusted_key_fingerprint=args.trusted_key_fingerprint,
+                    trust_state_path=args.trust_state,
+                    require_signed_checkpoint=args.require_signed_checkpoint,
+                    require_independent_freshness=args.require_independent_freshness,
                 )
+            state_update: dict[str, Any] | None = None
+            if args.update_trust_state and args.trust_state is not None:
+                if result.outcome != PASS or result.trust_state_entry is None:
+                    print(
+                        "note: trust state was not updated because verification did not "
+                        "pass with a verified signed checkpoint",
+                        file=sys.stderr,
+                    )
+                else:
+                    state_update = advance_trust_state(
+                        args.trust_state,
+                        result.trust_state_entry,
+                    )
             if args.json_output:
-                sys.stdout.write(render_evidence_verification_json(result))
+                payload = result.to_dict()
+                if state_update is not None:
+                    payload["trust_state_update"] = state_update
+                sys.stdout.write(dump_sanitized_json(payload))
             else:
                 sys.stdout.write(render_evidence_verification_summary(result))
+                if state_update is not None:
+                    print(f"trust state updated: {args.trust_state}")
+                    print(f"recorded checkpoints: {len(state_update['checkpoints'])}")
             return verification_exit_code(result.outcome)
+        elif args.command == "sign-checkpoint":
+            checkpoint = create_signed_checkpoint(
+                audit_path=args.audit,
+                report_path=args.report,
+                integrity_path=args.integrity,
+                private_key_path=args.private_key,
+                key_id=args.key_id,
+                sequence=args.sequence,
+                created_at=args.created_at,
+            )
+            write_signed_checkpoint(args.output, checkpoint, overwrite=False)
+            if args.json_output:
+                sys.stdout.write(dump_sanitized_json(checkpoint))
+            else:
+                print(f"signed checkpoint written: {args.output}")
+                print(f"checkpoint id: {checkpoint['checkpoint_id']}")
+                print(f"sequence: {checkpoint['checkpoint_sequence']}")
+                print(f"key id: {checkpoint['key_id']}")
+                print(f"public key fingerprint: {checkpoint['public_key_fingerprint']}")
+                print(f"payload digest: {checkpoint['payload_digest']}")
         elif args.command == "verify-audit":
             result = verify_audit_file(args.audit, checkpoint_path=args.checkpoint)
             if args.json_output:
@@ -1250,6 +1349,7 @@ def main(argv: list[str] | None = None) -> int:
         EvidenceVerificationError,
         AuditChainError,
         IntegrityError,
+        TrustError,
         OSError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)

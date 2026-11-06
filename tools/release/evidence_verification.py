@@ -67,6 +67,16 @@ from tools.release.integrity import (
     write_checkpoint,
 )
 from tools.release.manifest import sha256_file, utc_now_iso
+from tools.release.trust import (
+    CHECKPOINT_UNSIGNED,
+    SIGNED_CHECKPOINT_REQUIRES_REPORT,
+    SignedCheckpointVerification,
+    TrustError,
+    TrustUnavailable,
+    checkpoint_kind,
+    load_checkpoint_document,
+    verify_signed_checkpoint,
+)
 from tools.release.verification import FAIL, NOT_RUN, PASS, UNAVAILABLE
 
 VERIFICATION_SCHEMA_VERSION = 1
@@ -142,9 +152,10 @@ class VerificationCheck:
     expected: str | None = None
     actual: str | None = None
     event_type: str | None = None
+    reason_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "name": self.name,
             "outcome": self.outcome,
             "required": self.required,
@@ -154,6 +165,9 @@ class VerificationCheck:
             "actual": redact_text(self.actual)[:500] if self.actual is not None else None,
             "event_type": self.event_type,
         }
+        if self.reason_code is not None:
+            payload["reason_code"] = self.reason_code
+        return payload
 
 
 @dataclass(frozen=True)
@@ -166,9 +180,10 @@ class VerificationIssue:
     detail: str
     expected: str | None = None
     actual: str | None = None
+    reason_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "event_type": self.event_type,
             "outcome": self.outcome,
             "evidence_id": self.evidence_id,
@@ -176,6 +191,9 @@ class VerificationIssue:
             "expected": redact_text(self.expected)[:500] if self.expected is not None else None,
             "actual": redact_text(self.actual)[:500] if self.actual is not None else None,
         }
+        if self.reason_code is not None:
+            payload["reason_code"] = self.reason_code
+        return payload
 
 
 @dataclass
@@ -192,6 +210,13 @@ class VerificationResult:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     generated_at: str = field(default_factory=utc_now_iso)
+    signed_checkpoint: dict[str, Any] | None = None
+    trust: dict[str, Any] | None = None
+    freshness: dict[str, Any] | None = None
+    external_anchor: dict[str, Any] | None = None
+    assurance: str = "none"
+    reason_codes: list[str] = field(default_factory=list)
+    trust_state_entry: dict[str, Any] | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         limitations = list(DEFAULT_LIMITATIONS)
@@ -214,10 +239,35 @@ class VerificationResult:
             "mutation": {"performed": False, "statement": MUTATION_STATEMENT},
             "trust_boundary": TRUST_BOUNDARY,
         }
+        if self.signed_checkpoint is not None:
+            payload["signed_checkpoint"] = self.signed_checkpoint
+        if self.trust is not None:
+            payload["trust"] = self.trust
+        if self.freshness is not None:
+            payload["freshness"] = self.freshness
+        if self.external_anchor is not None:
+            payload["external_anchor"] = self.external_anchor
+        if self.assurance != "none":
+            payload["assurance"] = self.assurance
+        if self.reason_codes:
+            payload["reason_codes"] = sorted(set(self.reason_codes))
         cleaned = redact_structure(payload)
         if not isinstance(cleaned, dict):
             raise EvidenceVerificationError("verification result could not be sanitized")
         return cleaned
+
+    def finalize(self) -> VerificationResult:
+        """Aggregate the outcome and collect stable reason codes."""
+        self.outcome = aggregate_outcome(self.checks)
+        codes: list[str] = []
+        for check in self.checks:
+            if check.reason_code is not None and check.outcome != PASS and check.reason_code not in codes:
+                codes.append(check.reason_code)
+        for issue in self.issues:
+            if issue.reason_code is not None and issue.reason_code not in codes:
+                codes.append(issue.reason_code)
+        self.reason_codes = [code for code in self.reason_codes if code not in codes] + codes
+        return self
 
 
 @dataclass(frozen=True)
@@ -266,6 +316,7 @@ def _check(
     expected: str | None = None,
     actual: str | None = None,
     event_type: str | None = None,
+    reason_code: str | None = None,
 ) -> VerificationCheck:
     return VerificationCheck(
         name=name,
@@ -276,6 +327,7 @@ def _check(
         expected=expected,
         actual=actual,
         event_type=event_type,
+        reason_code=reason_code,
     )
 
 
@@ -287,6 +339,7 @@ def _issue(
     evidence_id: str | None = None,
     expected: str | None = None,
     actual: str | None = None,
+    reason_code: str | None = None,
 ) -> VerificationIssue:
     return VerificationIssue(
         event_type=event_type,
@@ -295,6 +348,7 @@ def _issue(
         detail=detail,
         expected=expected,
         actual=actual,
+        reason_code=reason_code,
     )
 
 
@@ -1502,6 +1556,209 @@ def _verify_audit_for_entries(
     return checks, issues, verification, [verification.to_dict()]
 
 
+def _apply_trust_result(result: VerificationResult, trust_result: SignedCheckpointVerification) -> None:
+    for check in trust_result.checks:
+        result.checks.append(
+            _check(
+                check.name,
+                check.outcome,
+                check.detail,
+                required=check.required,
+                event_type=check.event_type,
+                reason_code=check.reason_code,
+            )
+        )
+    for issue in trust_result.issues:
+        result.issues.append(
+            _issue(
+                issue.event_type,
+                issue.outcome,
+                issue.detail,
+                reason_code=issue.reason_code,
+            )
+        )
+    signed_checkpoint = dict(trust_result.checkpoint) if trust_result.checkpoint is not None else None
+    if signed_checkpoint is not None:
+        signed_checkpoint["verification"] = {
+            "outcome": trust_result.outcome,
+            "assurance": trust_result.assurance,
+            "reason_codes": sorted(set(trust_result.reason_codes)),
+        }
+    result.signed_checkpoint = signed_checkpoint
+    result.trust = trust_result.trust
+    result.freshness = trust_result.freshness
+    result.external_anchor = trust_result.external_anchor
+    result.assurance = trust_result.assurance
+    result.reason_codes.extend(trust_result.reason_codes)
+    result.trust_state_entry = trust_result.state_entry
+    result.limitations.extend(trust_result.limitations)
+
+
+def _audit_with_optional_signed_checkpoint(
+    entries: Sequence[BoundEvidence],
+    *,
+    audit_path: Path,
+    checkpoint_path: Path | None,
+    checkpoint: Mapping[str, Any] | None,
+    report_path: Path,
+    integrity_path: Path | None,
+    trust_store_path: Path | None,
+    trusted_key_fingerprint: str | None,
+    trust_state_path: Path | None,
+    external_anchor: Any | None,
+    require_signed_checkpoint: bool,
+    require_independent_freshness: bool,
+) -> tuple[
+    list[VerificationCheck],
+    list[VerificationIssue],
+    AuditVerification,
+    list[dict[str, Any]],
+    SignedCheckpointVerification | None,
+]:
+    checks: list[VerificationCheck] = []
+    issues: list[VerificationIssue] = []
+    trust_result: SignedCheckpointVerification | None = None
+    selected_path = checkpoint_path
+    selected_checkpoint = checkpoint
+    if checkpoint_path is not None:
+        try:
+            document = load_checkpoint_document(checkpoint_path)
+            kind = checkpoint_kind(document)
+        except TrustUnavailable as exc:
+            checks.append(
+                _check(
+                    "audit-checkpoint",
+                    UNAVAILABLE,
+                    str(exc),
+                    event_type=AUDIT_CHAIN_INVALID,
+                    reason_code=exc.reason_code,
+                )
+            )
+            issues.append(
+                _issue(
+                    AUDIT_CHAIN_INVALID,
+                    UNAVAILABLE,
+                    str(exc),
+                    reason_code=exc.reason_code,
+                )
+            )
+            selected_path = None
+            selected_checkpoint = None
+        except TrustError as exc:
+            checks.append(
+                _check(
+                    "audit-checkpoint",
+                    FAIL,
+                    str(exc),
+                    event_type=AUDIT_CHAIN_INVALID,
+                    reason_code=exc.reason_code,
+                )
+            )
+            issues.append(
+                _issue(
+                    AUDIT_CHAIN_INVALID,
+                    FAIL,
+                    str(exc),
+                    reason_code=exc.reason_code,
+                )
+            )
+            selected_path = None
+            selected_checkpoint = None
+        else:
+            if kind == "signed":
+                trust_result = verify_signed_checkpoint(
+                    document,
+                    report_path=report_path,
+                    integrity_path=integrity_path,
+                    audit_path=audit_path,
+                    trust_store_path=trust_store_path,
+                    trusted_key_fingerprint=trusted_key_fingerprint,
+                    trust_state_path=trust_state_path,
+                    external_anchor=external_anchor,
+                    require_independent_freshness=require_independent_freshness,
+                )
+                summary_reason = (
+                    trust_result.reason_codes[0]
+                    if trust_result.outcome != PASS and trust_result.reason_codes
+                    else None
+                )
+                checks.append(
+                    _check(
+                        "signed-checkpoint",
+                        trust_result.outcome,
+                        f"signed checkpoint verification: {trust_result.outcome}",
+                        event_type=EVIDENCE_REJECTED if trust_result.outcome != PASS else EVIDENCE_VERIFIED,
+                        reason_code=summary_reason,
+                    )
+                )
+                selected_checkpoint = trust_result.v30_checkpoint
+                selected_path = None
+            elif kind == "unsigned":
+                if require_signed_checkpoint:
+                    detail = "a signed checkpoint is required but the supplied checkpoint is unsigned"
+                    checks.append(
+                        _check(
+                            "signed-checkpoint",
+                            FAIL,
+                            detail,
+                            event_type=EVIDENCE_REJECTED,
+                            reason_code=CHECKPOINT_UNSIGNED,
+                        )
+                    )
+                    issues.append(
+                        _issue(
+                            EVIDENCE_REJECTED,
+                            FAIL,
+                            detail,
+                            reason_code=CHECKPOINT_UNSIGNED,
+                        )
+                    )
+                if trust_store_path is not None or trusted_key_fingerprint is not None:
+                    checks.append(
+                        _check(
+                            "signed-checkpoint",
+                            NOT_RUN,
+                            "trust material was supplied but the checkpoint is unsigned",
+                            required=False,
+                            event_type=EVIDENCE_REJECTED,
+                        )
+                    )
+                selected_path = checkpoint_path
+                selected_checkpoint = None
+    else:
+        if require_signed_checkpoint:
+            detail = "a signed checkpoint is required but no checkpoint was supplied"
+            checks.append(
+                _check(
+                    "signed-checkpoint",
+                    FAIL,
+                    detail,
+                    event_type=EVIDENCE_REJECTED,
+                    reason_code=CHECKPOINT_UNSIGNED,
+                )
+            )
+            issues.append(_issue(EVIDENCE_REJECTED, FAIL, detail, reason_code=CHECKPOINT_UNSIGNED))
+        elif trust_store_path is not None or trusted_key_fingerprint is not None:
+            checks.append(
+                _check(
+                    "signed-checkpoint",
+                    NOT_RUN,
+                    "trust material was supplied but no checkpoint was supplied",
+                    required=False,
+                    event_type=EVIDENCE_REJECTED,
+                )
+            )
+    audit_checks, audit_issues, audit_verification, audit_payload = _verify_audit_for_entries(
+        entries,
+        audit_path=audit_path,
+        checkpoint_path=selected_path,
+        checkpoint=selected_checkpoint,
+    )
+    checks.extend(audit_checks)
+    issues.extend(audit_issues)
+    return checks, issues, audit_verification, audit_payload, trust_result
+
+
 def verify_report(
     report_path: Path,
     *,
@@ -1511,9 +1768,20 @@ def verify_report(
     audit_path: Path | None = None,
     checkpoint_path: Path | None = None,
     expected_report_sha256: str | None = None,
+    trust_store_path: Path | None = None,
+    trusted_key_fingerprint: str | None = None,
+    trust_state_path: Path | None = None,
+    external_anchor: Any | None = None,
+    require_signed_checkpoint: bool = False,
+    require_independent_freshness: bool = False,
     generated_at: str | None = None,
 ) -> VerificationResult:
-    """Verify a report's evidence, optional integrity sidecar, and audit chain."""
+    """Verify a report's evidence, optional integrity sidecar, and audit chain.
+
+    V30 unsigned checkpoints retain their original behavior. A V31 signed
+    checkpoint requires independent trust material and is never downgraded to an
+    unsigned pass.
+    """
     report_path = Path(report_path)
     result = VerificationResult(
         outcome=NOT_RUN,
@@ -1524,7 +1792,7 @@ def verify_report(
         detail = error or "report is invalid"
         result.checks.append(_check("report-exists", UNAVAILABLE, detail, event_type=EVIDENCE_MISSING))
         result.issues.append(_issue(EVIDENCE_MISSING, UNAVAILABLE, detail))
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     result.checks.append(
         _check("report-exists", PASS, "report is readable JSON", event_type=EVIDENCE_VERIFIED)
@@ -1535,7 +1803,7 @@ def verify_report(
         detail = "report bytes could not be hashed"
         result.checks.append(_check("report-readable", UNAVAILABLE, detail, event_type=EVIDENCE_REJECTED))
         result.issues.append(_issue(EVIDENCE_REJECTED, UNAVAILABLE, detail))
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     result.report = {
         "path": str(report_path),
@@ -1639,7 +1907,7 @@ def verify_report(
                 event_type=MANIFEST_BINDING_MISMATCH,
             )
             result.issues.append(_issue(MANIFEST_BINDING_MISMATCH, FAIL, detail))
-            result.outcome = aggregate_outcome(result.checks)
+            result.finalize()
             result.limitations.extend(DEFAULT_LIMITATIONS)
             return result
         result.integrity = integrity.payload
@@ -1765,14 +2033,26 @@ def verify_report(
                 if audit_path is not None
                 else _resolve_manifest_path(base, integrity.audit["path"], label="audit chain")
             )
-            audit_checks, audit_issues, audit_verification, audit_payload = _verify_audit_for_entries(
-                manifest_entries,
-                audit_path=audit_target,
-                checkpoint_path=checkpoint_path,
-                checkpoint=integrity.audit["checkpoint"],
+            audit_checks, audit_issues, audit_verification, audit_payload, trust_result = (
+                _audit_with_optional_signed_checkpoint(
+                    manifest_entries,
+                    audit_path=audit_target,
+                    checkpoint_path=checkpoint_path,
+                    checkpoint=integrity.audit["checkpoint"],
+                    report_path=report_path,
+                    integrity_path=resolved_integrity,
+                    trust_store_path=trust_store_path,
+                    trusted_key_fingerprint=trusted_key_fingerprint,
+                    trust_state_path=trust_state_path,
+                    external_anchor=external_anchor,
+                    require_signed_checkpoint=require_signed_checkpoint,
+                    require_independent_freshness=require_independent_freshness,
+                )
             )
             result.checks.extend(audit_checks)
             result.issues.extend(audit_issues)
+            if trust_result is not None:
+                _apply_trust_result(result, trust_result)
             result.audit = audit_payload[0] if audit_payload else audit_verification.to_dict()
             if audit_verification.outcome == PASS:
                 try:
@@ -1928,14 +2208,55 @@ def verify_report(
         result.issues.extend(evidence_issues)
         result.evidence = evidence_summaries
         if audit_path is not None:
-            audit_checks, audit_issues, audit_verification, audit_payload = _verify_audit_for_entries(
-                entries,
-                audit_path=Path(audit_path),
-                checkpoint_path=checkpoint_path,
+            audit_checks, audit_issues, audit_verification, audit_payload, trust_result = (
+                _audit_with_optional_signed_checkpoint(
+                    entries,
+                    audit_path=Path(audit_path),
+                    checkpoint_path=checkpoint_path,
+                    checkpoint=None,
+                    report_path=report_path,
+                    integrity_path=None,
+                    trust_store_path=trust_store_path,
+                    trusted_key_fingerprint=trusted_key_fingerprint,
+                    trust_state_path=trust_state_path,
+                    external_anchor=external_anchor,
+                    require_signed_checkpoint=require_signed_checkpoint,
+                    require_independent_freshness=require_independent_freshness,
+                )
             )
             result.checks.extend(audit_checks)
             result.issues.extend(audit_issues)
+            if trust_result is not None:
+                _apply_trust_result(result, trust_result)
             result.audit = audit_payload[0] if audit_payload else audit_verification.to_dict()
+        elif checkpoint_path is not None:
+            try:
+                checkpoint_document = load_checkpoint_document(checkpoint_path)
+                checkpoint_type = checkpoint_kind(checkpoint_document)
+            except TrustError:
+                checkpoint_type = None
+            if checkpoint_type == "signed":
+                audit_checks, audit_issues, audit_verification, audit_payload, trust_result = (
+                    _audit_with_optional_signed_checkpoint(
+                        entries,
+                        audit_path=default_audit_path(report_path),
+                        checkpoint_path=checkpoint_path,
+                        checkpoint=None,
+                        report_path=report_path,
+                        integrity_path=None,
+                        trust_store_path=trust_store_path,
+                        trusted_key_fingerprint=trusted_key_fingerprint,
+                        trust_state_path=trust_state_path,
+                        external_anchor=external_anchor,
+                        require_signed_checkpoint=require_signed_checkpoint,
+                        require_independent_freshness=require_independent_freshness,
+                    )
+                )
+                result.checks.extend(audit_checks)
+                result.issues.extend(audit_issues)
+                if trust_result is not None:
+                    _apply_trust_result(result, trust_result)
+                result.audit = audit_payload[0] if audit_payload else audit_verification.to_dict()
 
     manifest_checks, manifest_issues, manifest_details = verify_manifest_binding(
         report,
@@ -1945,7 +2266,7 @@ def verify_report(
     result.checks.extend(manifest_checks)
     result.issues.extend(manifest_issues)
     result.manifest = manifest_details
-    result.outcome = aggregate_outcome(result.checks)
+    result.finalize()
     return result
 
 
@@ -1965,17 +2286,75 @@ def verify_audit_file(
         detail = "audit chain is missing"
         result.checks.append(_check("audit-chain", UNAVAILABLE, detail, event_type=AUDIT_CHAIN_INVALID))
         result.issues.append(_issue(AUDIT_CHAIN_INVALID, UNAVAILABLE, detail))
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     checkpoint: dict[str, Any] | None = None
     if checkpoint_path is not None:
         try:
-            checkpoint = load_checkpoint(checkpoint_path)
-        except (AuditChainError, IntegrityError):
+            document = load_checkpoint_document(checkpoint_path)
+            kind = checkpoint_kind(document)
+        except TrustUnavailable as exc:
+            detail = str(exc)
+            result.checks.append(
+                _check(
+                    "audit-checkpoint",
+                    UNAVAILABLE,
+                    detail,
+                    event_type=AUDIT_CHAIN_INVALID,
+                    reason_code=exc.reason_code,
+                )
+            )
+            result.issues.append(
+                _issue(AUDIT_CHAIN_INVALID, UNAVAILABLE, detail, reason_code=exc.reason_code)
+            )
+            result.finalize()
+            return result
+        except TrustError as exc:
+            detail = str(exc)
+            result.checks.append(
+                _check(
+                    "audit-checkpoint",
+                    FAIL,
+                    detail,
+                    event_type=AUDIT_CHAIN_INVALID,
+                    reason_code=exc.reason_code,
+                )
+            )
+            result.issues.append(_issue(AUDIT_CHAIN_INVALID, FAIL, detail, reason_code=exc.reason_code))
+            result.finalize()
+            return result
+        if kind == "signed":
+            detail = (
+                "signed checkpoints require verify-evidence with --report and --integrity; "
+                "audit-only verification cannot establish report or manifest binding"
+            )
+            result.checks.append(
+                _check(
+                    "audit-checkpoint",
+                    FAIL,
+                    detail,
+                    event_type=EVIDENCE_REJECTED,
+                    reason_code=SIGNED_CHECKPOINT_REQUIRES_REPORT,
+                )
+            )
+            result.issues.append(
+                _issue(
+                    EVIDENCE_REJECTED,
+                    FAIL,
+                    detail,
+                    reason_code=SIGNED_CHECKPOINT_REQUIRES_REPORT,
+                )
+            )
+            result.reason_codes.append(SIGNED_CHECKPOINT_REQUIRES_REPORT)
+            result.outcome = FAIL
+            return result
+        try:
+            checkpoint = validate_checkpoint(document)
+        except IntegrityError:
             detail = "trusted checkpoint is missing or invalid"
             result.checks.append(_check("audit-checkpoint", FAIL, detail, event_type=AUDIT_CHAIN_INVALID))
             result.issues.append(_issue(AUDIT_CHAIN_INVALID, FAIL, detail))
-            result.outcome = aggregate_outcome(result.checks)
+            result.finalize()
             return result
     verification = verify_audit_chain(audit_path, checkpoint=checkpoint)
     result.checks.append(
@@ -2045,7 +2424,7 @@ def verify_audit_file(
     except OSError:
         payload["sha256"] = None
     result.audit = payload
-    result.outcome = aggregate_outcome(result.checks)
+    result.finalize()
     return result
 
 
@@ -2086,7 +2465,7 @@ def verify_individual_evidence(
                     evidence_id=identifier,
                 )
             )
-            result.outcome = aggregate_outcome(result.checks)
+            result.finalize()
             return result
         bound = BoundEvidence(
             evidence_id=identifier,
@@ -2101,14 +2480,14 @@ def verify_individual_evidence(
         result.checks.extend(checks)
         result.issues.extend(issues)
         result.evidence = summaries
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     path = Path(evidence_path)
     if not path.is_file():
         detail = "evidence file is missing"
         result.checks.append(_check(f"evidence:{identifier}", FAIL, detail, event_type=EVIDENCE_MISSING))
         result.issues.append(_issue(EVIDENCE_MISSING, FAIL, detail, evidence_id=identifier))
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     try:
         digest = hash_evidence_file(path)
@@ -2118,7 +2497,7 @@ def verify_individual_evidence(
             _check(f"evidence:{identifier}", UNAVAILABLE, detail, event_type=EVIDENCE_REJECTED)
         )
         result.issues.append(_issue(EVIDENCE_REJECTED, UNAVAILABLE, detail, evidence_id=identifier))
-        result.outcome = aggregate_outcome(result.checks)
+        result.finalize()
         return result
     summary = {
         "evidence_id": identifier,
@@ -2193,7 +2572,7 @@ def verify_individual_evidence(
         )
         summary["outcome"] = PASS
     result.evidence = [summary]
-    result.outcome = aggregate_outcome(result.checks)
+    result.finalize()
     return result
 
 
@@ -2430,6 +2809,24 @@ def render_verification_summary(result: VerificationResult) -> str:
             f"Audit chain: {audit.get('record_count')} records, head {audit.get('head')}, "
             f"anchored={audit.get('anchored')}"
         )
+    if payload.get("signed_checkpoint"):
+        signed = payload["signed_checkpoint"]
+        lines.append(
+            f"Signed checkpoint: {signed.get('checkpoint_id')} "
+            f"sequence {signed.get('checkpoint_sequence')} key {signed.get('key_id')}"
+        )
+    if payload.get("trust"):
+        trust = payload["trust"]
+        lines.append(f"Trust: {trust.get('source')} key {trust.get('key_id')} status {trust.get('status')}")
+    if payload.get("assurance"):
+        lines.append(f"Assurance: {payload.get('assurance')}")
+    if payload.get("freshness"):
+        freshness = payload["freshness"]
+        lines.append(f"Freshness: {freshness.get('status')} ({freshness.get('assurance')})")
+    if payload.get("external_anchor"):
+        lines.append(f"External anchor: {payload['external_anchor'].get('status')}")
+    if payload.get("reason_codes"):
+        lines.append(f"Reason codes: {', '.join(payload['reason_codes'])}")
     lines.append("Checks:")
     for check in payload["checks"]:
         lines.append(f"- {check['name']}: {check['outcome']} - {check['detail']}")

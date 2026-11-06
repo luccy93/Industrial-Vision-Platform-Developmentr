@@ -36,3 +36,7 @@ redis>=5.0,<6
 prometheus-client>=0.20,<1
 # V18 structured JSON logging (maintained).
 python-json-logger>=2.0,<5
+# V31 signed evidence checkpoints: Ed25519 signing and verification through
+# the maintained cryptography package. Imported lazily by the release tools;
+# the API and V30 verification remain functional without a signing key.
+cryptography>=42.0,<50

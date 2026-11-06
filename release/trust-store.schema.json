@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/trust-store.schema.json",
+  "title": "Industrial Vision Platform evidence trust store",
+  "description": "V31 independently configured trust store. A public key carried inside a checkpoint is untrusted until its fingerprint appears here or is supplied separately. The trust store is intentionally strict: unknown fields, duplicate key identifiers, duplicate fingerprints, unsupported algorithms, invalid timestamps, and malformed lifecycle metadata are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "policy_version",
+    "public_key_encoding",
+    "historical_revocation_policy",
+    "keys"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "evidence_trust_store"
+    },
+    "policy_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
+    },
+    "public_key_encoding": {
+      "const": "base64url"
+    },
+    "historical_revocation_policy": {
+      "enum": [
+        "allow_before_revocation",
+        "deny"
+      ]
+    },
+    "keys": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trusted_key"
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "trusted_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_id",
+        "public_key",
+        "fingerprint",
+        "purpose",
+        "allowed_algorithms",
+        "activated_at",
+        "expires_at",
+        "revoked_at",
+        "revocation_reason"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+        },
+        "public_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "purpose": {
+          "const": "evidence_checkpoint_signing"
+        },
+        "allowed_algorithms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "const": "ed25519"
+          }
+        },
+        "activated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revocation_reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

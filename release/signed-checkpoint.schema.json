@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/signed-checkpoint.schema.json",
+  "title": "Industrial Vision Platform signed evidence checkpoint",
+  "description": "V31 Ed25519-signed checkpoint over an exact canonical payload. The checkpoint-supplied public key is an untrusted candidate; verification requires a separately configured trust store or trusted key fingerprint. A signature proves possession of the signing key over the exact payload, not that the evidence is truthful or complete.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "checkpoint_id",
+    "evidence_report_id",
+    "audit_chain_terminal_hash",
+    "audit_chain_terminal_event_id",
+    "audit_chain_terminal_timestamp",
+    "audit_record_count",
+    "evidence_manifest_digest",
+    "checkpoint_sequence",
+    "created_at",
+    "key_id",
+    "public_key_fingerprint",
+    "public_key",
+    "signature_algorithm",
+    "payload_digest",
+    "signature_encoding",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "profile": {
+      "const": "evidence_checkpoint_signed"
+    },
+    "checkpoint_id": {
+      "type": "string",
+      "pattern": "^chk-[0-9a-f]{32}$"
+    },
+    "evidence_report_id": {
+      "$ref": "#/$defs/report_id"
+    },
+    "audit_chain_terminal_hash": {
+      "$ref": "#/$defs/digest"
+    },
+    "audit_chain_terminal_event_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,512}$"
+    },
+    "audit_chain_terminal_timestamp": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "audit_record_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "evidence_manifest_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "checkpoint_sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "public_key_fingerprint": {
+      "$ref": "#/$defs/digest"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "signature_algorithm": {
+      "const": "ed25519"
+    },
+    "payload_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "signature_encoding": {
+      "const": "hex"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "report_id": {
+      "type": "string",
+      "pattern": "^report:sha256:[0-9a-f]{64}$"
+    }
+  }
+}
