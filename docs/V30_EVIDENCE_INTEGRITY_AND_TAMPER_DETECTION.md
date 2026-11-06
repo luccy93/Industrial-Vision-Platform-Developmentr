@@ -292,6 +292,25 @@ backslash, and reserved-name cases; a skipped symlink test is not a pass and
 should be run on a host that permits symlink creation when that guarantee
 matters.
 
+## V31 follow-up
+
+V31 adds an optional signed-checkpoint and trust layer on top of the unchanged
+V30 integrity sidecar and audit chain. V30 unsigned checkpoints remain
+`schema_version: 1` and verify exactly as before. V31 signed checkpoints are
+`schema_version: 2` in a separate file and bind the exact report bytes,
+integrity-manifest bytes, and audit-chain terminal state with an Ed25519
+signature. Verification requires a separately configured trust store or
+trusted public-key fingerprint; a checkpoint-supplied public key is never
+trusted by self-assertion. Missing trust material is `UNAVAILABLE`, never
+`PASS`.
+
+V30 verification remains the integrity and audit-chain layer. V31 does not
+replace it: signed-checkpoint verification first establishes the V30 bindings,
+then resolves the signing key independently, evaluates key status and policy,
+verifies the exact domain-separated payload signature, and checks replay and
+rollback state. The V30 exit codes `0`/`1`/`2`/`3`/`4` are preserved. See
+[V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
+
 ## Known limitations
 
 - A local hash chain is tamper-evident, not immutable. An attacker with write

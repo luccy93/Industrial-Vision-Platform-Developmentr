@@ -460,6 +460,57 @@ anchor is contacted by default. Store a checkpoint where the evidence producer
 cannot rewrite it if termination evidence matters. See
 [V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
 
+## Signed evidence checkpoints and trust anchoring (V31)
+
+V31 adds optional Ed25519-signed checkpoints on top of the unchanged V30
+integrity sidecar and audit chain. Signed checkpoints are separate
+`schema_version: 2` files with a deterministic canonical payload, an explicit
+domain prefix, an Ed25519-only algorithm allowlist, an exact-payload signature,
+and a key identity resolved from a separately configured trust store or trusted
+fingerprint. V30 unsigned checkpoints remain `schema_version: 1` and verify
+unchanged.
+
+```powershell
+python tools/manage_evidence_trust.py generate-key `
+  --key-id evidence-2026-01 `
+  --private-key keys/evidence-2026-01.pem `
+  --public-key keys/evidence-2026-01.pub.json
+
+python tools/manage_evidence_trust.py init-store --store trust-store.json
+python tools/manage_evidence_trust.py register-key `
+  --store trust-store.json `
+  --public-key keys/evidence-2026-01.pub.json `
+  --activated-at 2026-11-01T00:00:00Z
+
+python -m tools.release.cli sign-checkpoint `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --report release-artifacts/staging-readiness.json `
+  --integrity release-artifacts/staging-readiness.integrity.json `
+  --private-key keys/evidence-2026-01.pem `
+  --key-id evidence-2026-01 --sequence 1 `
+  --output release-artifacts/staging-readiness.signed-checkpoint.json
+
+python -m tools.release.cli verify-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --integrity release-artifacts/staging-readiness.integrity.json `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --checkpoint release-artifacts/staging-readiness.signed-checkpoint.json `
+  --trust-store trust-store.json `
+  --trust-state trust-state.json
+```
+
+Verification requires independent trust material; a missing trust store or
+fingerprint is `UNAVAILABLE` (exit `2`), never `PASS`. The trust store supports
+key IDs, public keys, fingerprints, purpose, allowed algorithms, policy version,
+activation, expiration, revocation, and historical-revocation policy. The local
+trust state detects replay and rollback within its recorded history but is not
+independently monotonic; V31 reports `assurance: "reduced"` in that case.
+`--require-independent-freshness` requires a separately supplied external
+reference and otherwise returns `NOT_RUN` (exit `3`). No external service is
+contacted and no external anchoring is claimed. V30 exit codes remain `0`/`1`/
+`2`/`3`/`4`, and all diagnostics pass through V29 redaction. See
+[V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit

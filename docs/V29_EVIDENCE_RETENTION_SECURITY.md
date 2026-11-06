@@ -218,6 +218,20 @@ not bound, it produces the `evidence-retention` blocker, and any separately
 named diagnostic copy is not evidence. See
 [V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
 
+## V31 follow-up
+
+V31 adds optional signed evidence checkpoints and an explicit offline key
+lifecycle without changing V29 redaction behavior or any V23-V30 report schema.
+Private signing keys are never written to evidence directories, logs, reports,
+exceptions, checkpoints, or trust stores. The offline key manager writes an
+unencrypted PKCS#8 key with `0600` permissions on POSIX and best-effort platform
+permissions on Windows; it never prints private-key material. Verification
+output, including signed-checkpoint and trust diagnostics, passes through the
+same V29 redaction policy before it is printed or serialized. A V31 `PASS` does
+not claim that retained evidence is free of secrets: V29 redaction is not a
+content scanner. See
+[V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
+
 ## Known limitations
 
 V29 is a pattern- and name-based control, not a universal data-loss-prevention

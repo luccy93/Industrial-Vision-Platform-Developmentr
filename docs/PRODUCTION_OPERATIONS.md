@@ -325,6 +325,61 @@ evidence and the chain can recompute every hash. Store checkpoints somewhere
 the evidence producer cannot rewrite. See
 [V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md](V30_EVIDENCE_INTEGRITY_AND_TAMPER_DETECTION.md).
 
+### Signed evidence checkpoints and trust anchoring (V31)
+
+V31 adds optional Ed25519-signed checkpoints and an explicit offline trust-key
+lifecycle. The V30 sidecar and audit chain remain the integrity layer; V31
+establishes producer-key trust only through a separately configured trust store
+or a separately supplied public-key fingerprint. A checkpoint-supplied public
+key is never trusted merely because the checkpoint claims it is trusted.
+
+```powershell
+# Generate an offline key and export only its public descriptor.
+python tools/manage_evidence_trust.py generate-key `
+  --key-id evidence-2026-01 `
+  --private-key keys/evidence-2026-01.pem `
+  --public-key keys/evidence-2026-01.pub.json
+
+# Create and populate a trust store that the evidence producer cannot rewrite.
+python tools/manage_evidence_trust.py init-store --store trust-store.json
+python tools/manage_evidence_trust.py register-key `
+  --store trust-store.json `
+  --public-key keys/evidence-2026-01.pub.json `
+  --activated-at 2026-11-01T00:00:00Z
+
+# Sign a checkpoint after the V30 sidecar and audit chain are final.
+python -m tools.release.cli sign-checkpoint `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --report release-artifacts/staging-readiness.json `
+  --integrity release-artifacts/staging-readiness.integrity.json `
+  --private-key keys/evidence-2026-01.pem `
+  --key-id evidence-2026-01 --sequence 1 `
+  --output release-artifacts/staging-readiness.signed-checkpoint.json
+
+# Verify with independent trust material and optional replay state.
+python -m tools.release.cli verify-evidence `
+  --report release-artifacts/staging-readiness.json `
+  --integrity release-artifacts/staging-readiness.integrity.json `
+  --audit release-artifacts/staging-readiness.audit.jsonl `
+  --checkpoint release-artifacts/staging-readiness.signed-checkpoint.json `
+  --trust-store trust-store.json `
+  --trust-state trust-state.json
+```
+
+`--update-trust-state` is an explicit write and only runs after a `PASS` with a
+verified signed checkpoint. Verification is read-only by default. A signed
+checkpoint without trust material is `UNAVAILABLE` (exit `2`), never `PASS`. A
+local trust state detects replay within its recorded history but is not
+independently monotonic; V31 reports `assurance: "reduced"` and never calls
+local state an external anchor. No external trust-anchor service, cloud KMS,
+GitHub API, registry, staging system, or production endpoint is contacted.
+
+Before rotating, register the replacement public key explicitly, activate it,
+and revoke the old key. Historical checkpoints verify under the configured
+`allow_before_revocation` or `deny` policy. Never commit or store a private key
+with evidence. See
+[V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP
