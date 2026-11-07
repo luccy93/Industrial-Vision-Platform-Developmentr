@@ -358,6 +358,31 @@ publish a checkpoint, or contact a service.
 - `cryptography` is declared in `backend/requirements.txt`; the release tools
   import it lazily and fail closed if it is unavailable.
 
+## V32 follow-up
+
+V32 adds a separate append-only transparency log, RFC 6962/9162 Merkle
+inclusion and consistency proofs, Ed25519-signed tree heads, a separate local
+transparency trust state, and a provider-neutral anchor interface. It consumes
+V31 signed checkpoints without changing their payload semantics: the V31
+`schema_version: 2` profile, exact fields, canonicalization, domain prefix, and
+signature coverage remain unchanged.
+
+V32 adds the additive key purpose `transparency_tree_head_signing` to the V31
+trust store. V31 evidence-checkpoint verification still requires
+`evidence_checkpoint_signing`; a tree-head key is not accepted for evidence
+checkpoints, and an evidence-checkpoint key is not accepted for tree heads. The
+V31 trust-store and trust-state formats are otherwise unchanged, and V31
+verification behavior, check names, assurance reporting, and exit codes are
+preserved.
+
+V32 keeps its tree-head monotonic reference in a new separate
+`transparency_trust_state` document rather than modifying the V31 evidence
+trust state. The only shipped anchor provider is a local deterministic test
+provider whose receipts are `SIMULATED`. No external transparency service,
+cloud KMS, GitHub API, registry, staging system, or production endpoint is
+configured or contacted, and V32 never claims external anchoring. See
+[V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
+
 ## Validation
 
 All V31 tests use synthetic temporary keys, evidence, reports, manifests, audit

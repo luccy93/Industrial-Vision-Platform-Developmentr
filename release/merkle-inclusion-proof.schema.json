@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/merkle-inclusion-proof.schema.json",
+  "title": "Industrial Vision Platform RFC 6962 Merkle inclusion proof",
+  "description": "V32 deterministic inclusion proof. Leaf and node domain separation is documented in tools/release/merkle.py: leaf = SHA256(0x00 || leaf_bytes), node = SHA256(0x01 || left || right), empty root = SHA256(b''). The proof's own root is untrusted; verification requires a separately trusted root. Siblings are ordered leaf to root, and each position must match the RFC 6962 tree shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "algorithm",
+    "log_id",
+    "tree_size",
+    "leaf_index",
+    "leaf_digest",
+    "siblings",
+    "root"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "merkle_inclusion_proof"
+    },
+    "algorithm": {
+      "const": "rfc6962-sha256-v1"
+    },
+    "log_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "tree_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "leaf_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "leaf_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "siblings": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position",
+          "hash"
+        ],
+        "properties": {
+          "position": {
+            "enum": [
+              "left",
+              "right"
+            ]
+          },
+          "hash": {
+            "$ref": "#/$defs/digest"
+          }
+        }
+      }
+    },
+    "root": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

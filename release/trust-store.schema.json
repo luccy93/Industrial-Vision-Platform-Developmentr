@@ -76,7 +76,10 @@
           "$ref": "#/$defs/digest"
         },
         "purpose": {
-          "const": "evidence_checkpoint_signing"
+          "enum": [
+            "evidence_checkpoint_signing",
+            "transparency_tree_head_signing"
+          ]
         },
         "allowed_algorithms": {
           "type": "array",

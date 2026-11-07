@@ -311,6 +311,24 @@ verifies the exact domain-separated payload signature, and checks replay and
 rollback state. The V30 exit codes `0`/`1`/`2`/`3`/`4` are preserved. See
 [V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
 
+## V32 follow-up
+
+V32 adds a separate append-only transparency log that stores only V31
+signed-checkpoint references and digests, plus RFC 6962/9162 Merkle inclusion
+and consistency proofs, Ed25519-signed tree heads, a separate local
+transparency trust state, and a provider-neutral anchor interface. The V30
+integrity sidecar, unsigned `schema_version: 1` checkpoint, audit chain, report
+schemas, check names, and verification behavior are unchanged.
+
+V32 uses V31 signed checkpoints as the authenticated input to the log. It does
+not change the V31 signed-checkpoint payload or make the V30 unsigned checkpoint
+signed. The only shipped anchor provider is a local deterministic test provider
+whose receipts are `SIMULATED`; no external service is contacted and no external
+anchoring is claimed. V30 verification remains the evidence-integrity and
+audit-continuity layer, V31 remains the producer-authentication layer, and V32
+adds transparency and append-only consistency evidence on top. See
+[V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
+
 ## Known limitations
 
 - A local hash chain is tamper-evident, not immutable. An attacker with write

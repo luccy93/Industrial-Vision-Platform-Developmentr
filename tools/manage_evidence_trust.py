@@ -33,6 +33,7 @@ from typing import Any
 from backend.app.core.redaction import dump_sanitized_json
 from tools.release.trust import (
     HISTORICAL_REVOCATION_POLICIES,
+    SUPPORTED_KEY_PURPOSES,
     TrustError,
     activate_key,
     expire_key,
@@ -103,6 +104,12 @@ def _parser() -> argparse.ArgumentParser:
     register.add_argument("--public-key", type=Path, required=True)
     register.add_argument("--activated-at")
     register.add_argument("--expires-at")
+    register.add_argument(
+        "--purpose",
+        choices=SUPPORTED_KEY_PURPOSES,
+        default=SUPPORTED_KEY_PURPOSES[0],
+        help="explicit key purpose; V31 checkpoints use evidence_checkpoint_signing",
+    )
     register.add_argument("--json", action="store_true", dest="json_output")
 
     activate = subparsers.add_parser("activate-key", help="set a key's activation time")
@@ -135,6 +142,11 @@ def _parser() -> argparse.ArgumentParser:
     rotate.add_argument("--expires-at")
     rotate.add_argument("--revoke-at")
     rotate.add_argument("--reason")
+    rotate.add_argument(
+        "--purpose",
+        choices=SUPPORTED_KEY_PURPOSES,
+        default=SUPPORTED_KEY_PURPOSES[0],
+    )
     rotate.add_argument("--json", action="store_true", dest="json_output")
 
     show_store = subparsers.add_parser("show-store", help="validate and print a trust store")
@@ -272,6 +284,7 @@ def run(argv: list[str] | None = None) -> int:
                 descriptor,
                 activated_at=args.activated_at,
                 expires_at=args.expires_at,
+                purpose=args.purpose,
             )
             write_trust_store(args.store, updated)
             _emit(
@@ -322,6 +335,7 @@ def run(argv: list[str] | None = None) -> int:
                 revoke_old_key_id=args.old_key_id,
                 revoke_at=args.revoke_at,
                 reason=args.reason,
+                purpose=args.purpose,
             )
             write_trust_store(args.store, updated)
             _emit(

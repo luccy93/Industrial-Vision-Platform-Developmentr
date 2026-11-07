@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/transparency-trust-state.schema.json",
+  "title": "Industrial Vision Platform local transparency trust state",
+  "description": "V32 separate local tree-head monotonic reference. It is deliberately distinct from the V31 evidence trust state and is not independent monotonic storage: a writer who can rewrite this file, the log, and the tree heads can rewrite the recorded history. Failed verification must never overwrite this state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "updated_at",
+    "tree_heads",
+    "state_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "transparency_trust_state"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "tree_heads": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "log_id",
+          "tree_head_id",
+          "tree_size",
+          "merkle_root",
+          "tree_head_digest",
+          "timestamp",
+          "key_id"
+        ],
+        "properties": {
+          "log_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          },
+          "tree_head_id": {
+            "type": "string",
+            "pattern": "^sth-[0-9a-f]{32}$"
+          },
+          "tree_size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "merkle_root": {
+            "$ref": "#/$defs/digest"
+          },
+          "tree_head_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "timestamp": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "key_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          }
+        }
+      }
+    },
+    "state_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

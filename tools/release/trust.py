@@ -98,6 +98,11 @@ SUPPORTED_SIGNATURE_ALGORITHMS = (SIGNATURE_ALGORITHM,)
 PUBLIC_KEY_ENCODING = "base64url"
 SIGNATURE_ENCODING = "hex"
 KEY_PURPOSE_EVIDENCE_CHECKPOINT = "evidence_checkpoint_signing"
+KEY_PURPOSE_TRANSPARENCY_TREE_HEAD = "transparency_tree_head_signing"
+SUPPORTED_KEY_PURPOSES = (
+    KEY_PURPOSE_EVIDENCE_CHECKPOINT,
+    KEY_PURPOSE_TRANSPARENCY_TREE_HEAD,
+)
 HISTORICAL_REVOCATION_ALLOW = "allow_before_revocation"
 HISTORICAL_REVOCATION_DENY = "deny"
 HISTORICAL_REVOCATION_POLICIES = (
@@ -1058,7 +1063,7 @@ def validate_trust_store(payload: Mapping[str, Any]) -> TrustStore:
                 "trusted-key fingerprint does not match its public key",
                 reason_code=TRUST_FINGERPRINT_MISMATCH,
             )
-        if item.get("purpose") != KEY_PURPOSE_EVIDENCE_CHECKPOINT:
+        if item.get("purpose") not in SUPPORTED_KEY_PURPOSES:
             raise TrustInvalid("trusted-key purpose is unsupported", reason_code=TRUST_KEY_PURPOSE_INVALID)
         algorithms = item.get("allowed_algorithms")
         if not isinstance(algorithms, list) or not algorithms:
@@ -1122,7 +1127,7 @@ def validate_trust_store(payload: Mapping[str, Any]) -> TrustStore:
                 key_id=key_id,
                 public_key=item["public_key"],
                 fingerprint=fingerprint,
-                purpose=KEY_PURPOSE_EVIDENCE_CHECKPOINT,
+                purpose=item["purpose"],
                 allowed_algorithms=tuple(normalized_algorithms),
                 activated_at=activated_at,
                 expires_at=expires_at,
@@ -1179,9 +1184,12 @@ def register_public_key(
     expires_at: str | None = None,
     policy_version: str = "v31",
     historical_revocation_policy: str = HISTORICAL_REVOCATION_ALLOW,
+    purpose: str = KEY_PURPOSE_EVIDENCE_CHECKPOINT,
 ) -> TrustStore:
     """Register a public key explicitly; a replacement key is never auto-trusted."""
     normalized = validate_public_key_descriptor(descriptor)
+    if purpose not in SUPPORTED_KEY_PURPOSES:
+        raise TrustInvalid("trusted-key purpose is unsupported", reason_code=TRUST_KEY_PURPOSE_INVALID)
     if store is None:
         store = new_trust_store(
             policy_version=policy_version,
@@ -1199,7 +1207,7 @@ def register_public_key(
             "key_id": normalized["key_id"],
             "public_key": normalized["public_key"],
             "fingerprint": normalized["fingerprint"],
-            "purpose": KEY_PURPOSE_EVIDENCE_CHECKPOINT,
+            "purpose": purpose,
             "allowed_algorithms": [SIGNATURE_ALGORITHM],
             "activated_at": activation,
             "expires_at": expiration,
@@ -1319,6 +1327,7 @@ def rotate_key(
     revoke_old_key_id: str | None = None,
     revoke_at: str | None = None,
     reason: str | None = None,
+    purpose: str = KEY_PURPOSE_EVIDENCE_CHECKPOINT,
 ) -> TrustStore:
     """Register a replacement key explicitly and optionally revoke the old key."""
     if revoke_old_key_id is not None and revoke_old_key_id == descriptor.get("key_id"):
@@ -1328,6 +1337,7 @@ def rotate_key(
         descriptor,
         activated_at=activated_at,
         expires_at=expires_at,
+        purpose=purpose,
     )
     if revoke_old_key_id is not None:
         rotated = revoke_key(
@@ -2752,6 +2762,8 @@ __all__ = [
     "HISTORICAL_REVOCATION_DENY",
     "INDEPENDENT_FRESHNESS_UNAVAILABLE",
     "KEY_PURPOSE_EVIDENCE_CHECKPOINT",
+    "KEY_PURPOSE_TRANSPARENCY_TREE_HEAD",
+    "SUPPORTED_KEY_PURPOSES",
     "KeyStatus",
     "MANIFEST_DIGEST_ROLLBACK",
     "PRIVATE_KEY_INVALID",

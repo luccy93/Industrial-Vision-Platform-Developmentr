@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/transparency-anchor-receipt.schema.json",
+  "title": "Industrial Vision Platform transparency anchor receipt",
+  "description": "V32 provider-neutral anchor receipt. The signature covers the exact canonical payload with the domain prefix b'industrial-vision-platform:transparency-anchor-receipt:v1\\x00'. A local_test provider may only issue SIMULATED receipts. An external provider receipt must report EXTERNAL_VERIFIED, but V32 ships no external provider and refuses that claim unless an external provider is genuinely configured and verified.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "receipt_id",
+    "provider_id",
+    "provider_type",
+    "anchor_status",
+    "log_id",
+    "tree_size",
+    "merkle_root",
+    "tree_head_id",
+    "tree_head_digest",
+    "receipt_timestamp",
+    "signature_algorithm",
+    "key_id",
+    "public_key_fingerprint",
+    "public_key",
+    "payload_digest",
+    "signature_encoding",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "transparency_anchor_receipt"
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^rcpt-[0-9a-f]{32}$"
+    },
+    "provider_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "provider_type": {
+      "enum": [
+        "local_test",
+        "external"
+      ]
+    },
+    "anchor_status": {
+      "enum": [
+        "SIMULATED",
+        "NOT_CONFIGURED",
+        "UNAVAILABLE",
+        "EXTERNAL_VERIFIED"
+      ]
+    },
+    "log_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "tree_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "merkle_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "tree_head_id": {
+      "type": "string",
+      "pattern": "^sth-[0-9a-f]{32}$"
+    },
+    "tree_head_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "receipt_timestamp": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "signature_algorithm": {
+      "const": "ed25519"
+    },
+    "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "public_key_fingerprint": {
+      "$ref": "#/$defs/digest"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "payload_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "signature_encoding": {
+      "const": "hex"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider_type": {
+            "const": "local_test"
+          }
+        },
+        "required": [
+          "provider_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "anchor_status": {
+            "const": "SIMULATED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider_type": {
+            "const": "external"
+          }
+        },
+        "required": [
+          "provider_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "anchor_status": {
+            "const": "EXTERNAL_VERIFIED"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

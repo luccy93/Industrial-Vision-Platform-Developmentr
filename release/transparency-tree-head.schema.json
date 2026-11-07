@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/transparency-tree-head.schema.json",
+  "title": "Industrial Vision Platform signed transparency tree head",
+  "description": "V32 Ed25519-signed Merkle tree head. The signature covers the exact canonical payload with the domain prefix b'industrial-vision-platform:transparency-tree-head:v1\\x00'. The tree-head-supplied public key is an untrusted candidate; verification requires a V31 trust store key with purpose transparency_tree_head_signing or a separately supplied fingerprint pin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "tree_head_id",
+    "log_id",
+    "tree_size",
+    "merkle_root",
+    "timestamp",
+    "hash_algorithm",
+    "signature_algorithm",
+    "key_id",
+    "public_key_fingerprint",
+    "public_key",
+    "payload_digest",
+    "signature_encoding",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "transparency_tree_head_signed"
+    },
+    "tree_head_id": {
+      "type": "string",
+      "pattern": "^sth-[0-9a-f]{32}$"
+    },
+    "log_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "tree_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "merkle_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "timestamp": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "hash_algorithm": {
+      "const": "sha256"
+    },
+    "signature_algorithm": {
+      "const": "ed25519"
+    },
+    "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "public_key_fingerprint": {
+      "$ref": "#/$defs/digest"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "payload_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "signature_encoding": {
+      "const": "hex"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

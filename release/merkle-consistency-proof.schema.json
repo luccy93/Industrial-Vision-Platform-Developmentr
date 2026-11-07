@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/luccy93/Industrial-Vision-Platform-Developmentr/release/merkle-consistency-proof.schema.json",
+  "title": "Industrial Vision Platform RFC 6962 Merkle consistency proof",
+  "description": "V32 deterministic append-only consistency proof. The empty tree is trivially consistent with every tree and uses an empty proof. Equal-size transitions require equal roots and an empty proof. The proof's own roots are untrusted; verification requires separately trusted old and new roots.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "algorithm",
+    "log_id",
+    "old_tree_size",
+    "new_tree_size",
+    "old_root",
+    "new_root",
+    "proof"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile": {
+      "const": "merkle_consistency_proof"
+    },
+    "algorithm": {
+      "const": "rfc6962-sha256-v1"
+    },
+    "log_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "old_tree_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "new_tree_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "old_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "new_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "proof": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
