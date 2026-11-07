@@ -511,6 +511,71 @@ contacted and no external anchoring is claimed. V30 exit codes remain `0`/`1`/
 `2`/`3`/`4`, and all diagnostics pass through V29 redaction. See
 [V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
 
+## Transparency log and independent checkpoint anchoring (V32)
+
+V32 adds an optional append-only JSONL transparency log, RFC 6962/9162 Merkle
+inclusion and consistency proofs, Ed25519-signed tree heads, a separate local
+transparency trust state, and a provider-neutral anchor interface. It consumes
+V31 signed checkpoints without changing their payload semantics and adds only
+the key purpose `transparency_tree_head_signing` to the existing V31 trust
+store. V30 unsigned checkpoints and V31 signed checkpoints verify unchanged.
+
+```powershell
+python -m tools.transparency_log init-log `
+  --log release-artifacts/transparency.jsonl `
+  --log-id evidence-log `
+  --timestamp 2026-01-01T00:00:00Z
+
+python -m tools.transparency_log append-checkpoint `
+  --log release-artifacts/transparency.jsonl `
+  --checkpoint release-artifacts/staging-readiness.signed-checkpoint.json `
+  --timestamp 2026-01-07T00:00:01Z
+
+python -m tools.transparency_log verify-log `
+  --log release-artifacts/transparency.jsonl
+
+python -m tools.transparency_log create-tree-head `
+  --log release-artifacts/transparency.jsonl `
+  --private-key keys/transparency-2026-01.pem `
+  --key-id transparency-2026-01 `
+  --output release-artifacts/transparency-tree-head.json `
+  --timestamp 2026-01-09T00:00:00Z
+
+python -m tools.transparency_log verify-tree-head `
+  --tree-head release-artifacts/transparency-tree-head.json `
+  --trust-store trust-store.json `
+  --trust-state transparency-state.json `
+  --consistency-proof release-artifacts/consistency-3.json `
+  --update-trust-state `
+  --state-updated-at 2026-01-10T00:00:00Z
+```
+
+Merkle leaves use RFC 6962 domain separation: `SHA256(0x00 || leaf)` for leaves
+and `SHA256(0x01 || left || right)` for internal nodes, with the documented
+empty root `SHA256(b"")`. Inclusion proofs bind tree size, leaf index, leaf
+digest, sibling path, log ID, algorithm, and expected root. Consistency proofs
+cover empty-to-empty, empty-to-nonempty, single-leaf growth, power-of-two and
+non-power-of-two transitions, and multiple appends.
+
+The separate `transparency_trust_state` detects tree-size and root rollback,
+conflicting roots and heads, duplicate tree-head IDs, stale or invalid receipts,
+missing consistency proofs, inconsistent growth, and split-view evidence.
+Failed verification never overwrites previously trusted tree-head state, and a
+newer timestamp alone is not consistency evidence. The local state is
+tamper-evident, not independently monotonic; V32 reports `assurance: "reduced"`
+in that case.
+
+The only shipped anchor provider is a local deterministic test provider whose
+receipts are `SIMULATED`; `anchor-tree-head` requires explicit `--provider-key`
+and `--receipt-dir` and otherwise reports `NOT_CONFIGURED` (exit `2`). An
+unavailable provider reports `UNAVAILABLE` (exit `2`), and there is no silent
+fallback. `EXTERNAL_VERIFIED` is reserved for a future genuinely configured and
+verified external provider. V32 ships none, contacts no external transparency
+service, cloud KMS, GitHub API, registry, staging system, or production
+endpoint, and never claims external anchoring. Exit codes remain `0`/`1`/`2`/
+`3`/`4`, and all diagnostics pass through V29 redaction. See
+[V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit

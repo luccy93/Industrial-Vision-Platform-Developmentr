@@ -380,6 +380,72 @@ and revoke the old key. Historical checkpoints verify under the configured
 with evidence. See
 [V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md](V31_SIGNED_EVIDENCE_AND_TRUST_ANCHORING.md).
 
+### Transparency log and independent checkpoint anchoring (V32)
+
+V32 adds an optional append-only JSONL transparency log that stores only V31
+signed-checkpoint references and digests, RFC 6962/9162 Merkle inclusion and
+consistency proofs, Ed25519-signed tree heads, a separate local transparency
+trust state, and a provider-neutral anchor interface. The V30 integrity sidecar,
+V31 signed checkpoints, trust store, and evidence trust state are unchanged.
+
+```powershell
+# Create the log and append a verified V31 signed-checkpoint reference.
+python -m tools.transparency_log init-log `
+  --log release-artifacts/transparency.jsonl `
+  --log-id evidence-log `
+  --timestamp 2026-01-01T00:00:00Z
+python -m tools.transparency_log append-checkpoint `
+  --log release-artifacts/transparency.jsonl `
+  --checkpoint release-artifacts/staging-readiness.signed-checkpoint.json `
+  --timestamp 2026-01-07T00:00:01Z
+python -m tools.transparency_log verify-log `
+  --log release-artifacts/transparency.jsonl
+
+# Create and verify an inclusion proof and a consistency proof.
+python -m tools.transparency_log create-inclusion-proof `
+  --log release-artifacts/transparency.jsonl `
+  --leaf-index 0 `
+  --output release-artifacts/inclusion-0.json
+python -m tools.transparency_log create-consistency-proof `
+  --log release-artifacts/transparency.jsonl `
+  --old-tree-size 3 `
+  --output release-artifacts/consistency-3.json
+
+# Sign a tree head with a key registered for transparency_tree_head_signing.
+python -m tools.transparency_log create-tree-head `
+  --log release-artifacts/transparency.jsonl `
+  --private-key keys/transparency-2026-01.pem `
+  --key-id transparency-2026-01 `
+  --output release-artifacts/transparency-tree-head.json `
+  --timestamp 2026-01-09T00:00:00Z
+
+# Verify the tree head and explicitly advance the separate trust state on PASS.
+python -m tools.transparency_log verify-tree-head `
+  --tree-head release-artifacts/transparency-tree-head.json `
+  --trust-store trust-store.json `
+  --trust-state transparency-state.json `
+  --update-trust-state `
+  --state-updated-at 2026-01-10T00:00:00Z
+```
+
+`--update-trust-state` is an explicit write and only runs after a `PASS`;
+verification is read-only by default. A missing log, proof, receipt, tree head,
+or trust material is `UNAVAILABLE` (exit `2`), never `PASS`. The separate
+transparency trust state detects replay, tree-size rollback, root conflicts,
+duplicate tree-head IDs, missing consistency proofs, and timestamp regression.
+Failed verification never overwrites previously trusted tree-head state. A
+newer timestamp alone is not consistency evidence.
+
+The only shipped provider is a local deterministic test provider. Its receipts
+are always `SIMULATED`; `anchor-tree-head` requires explicit `--provider-key`
+and `--receipt-dir` and otherwise reports `NOT_CONFIGURED` (exit `2`). An
+unavailable provider reports `UNAVAILABLE` (exit `2`). No provider fallback is
+performed. `EXTERNAL_VERIFIED` is reserved for a future genuinely configured and
+verified external provider; V32 ships none, contacts no external transparency
+service, cloud KMS, GitHub API, registry, staging system, or production
+endpoint, and never claims external anchoring. See
+[V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP
