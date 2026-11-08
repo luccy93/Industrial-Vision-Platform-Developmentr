@@ -107,6 +107,62 @@ db_errors_total = Counter(
     ["service", "operation"],
 )
 
+# V33 continuous integrity auditing (bounded labels only).
+integrity_audit_runs_total = Counter(
+    "ivp_integrity_audit_runs_total",
+    "Continuous integrity audit runs by trigger and terminal status.",
+    ["service", "trigger", "status"],
+)
+
+integrity_audit_duration_seconds = Histogram(
+    "ivp_integrity_audit_duration_seconds",
+    "Continuous integrity audit duration by trigger.",
+    ["service", "trigger"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0),
+)
+
+integrity_findings_total = Counter(
+    "ivp_integrity_findings_total",
+    "Sanitized integrity findings by severity.",
+    ["service", "severity"],
+)
+
+integrity_artifacts_checked_total = Counter(
+    "ivp_integrity_artifacts_checked_total",
+    "Protected artifacts checked by audit scope.",
+    ["service", "scope"],
+)
+
+integrity_scope_failures_total = Counter(
+    "ivp_integrity_scope_failures_total",
+    "Audit scopes that failed or were unavailable by scope.",
+    ["service", "scope"],
+)
+
+integrity_scheduler_runs_total = Counter(
+    "ivp_integrity_scheduler_runs_total",
+    "Integrity scheduler cycles by bounded outcome.",
+    ["service", "outcome"],
+)
+
+integrity_last_success_timestamp = Gauge(
+    "ivp_integrity_last_success_timestamp_seconds",
+    "Unix timestamp of the last PASS integrity audit.",
+    ["service"],
+)
+
+integrity_running_audits = Gauge(
+    "ivp_integrity_running_audits",
+    "Integrity audits currently running.",
+    ["service"],
+)
+
+integrity_external_anchor_configured = Gauge(
+    "ivp_integrity_external_anchor_configured",
+    "Whether an external transparency anchor is configured (V33 is always 0 offline).",
+    ["service"],
+)
+
 
 def status_class(code: int) -> str:
     if code < 400:
@@ -179,6 +235,51 @@ def record_redis_error(operation: str, service: str | None = None) -> None:
 
 def record_db_error(operation: str, service: str | None = None) -> None:
     db_errors_total.labels(service=_service(service), operation=str(operation)).inc()
+
+
+def record_integrity_audit(
+    *,
+    trigger: str,
+    status: str,
+    duration_seconds: float,
+    artifacts_by_scope: dict[str, int] | None = None,
+    findings_by_severity: dict[str, int] | None = None,
+    failed_scopes: dict[str, int] | None = None,
+    external_anchor_configured: bool = False,
+    service: str | None = None,
+) -> None:
+    """Record one terminal audit run using bounded labels only."""
+    resolved = _service(service)
+    integrity_audit_runs_total.labels(service=resolved, trigger=str(trigger), status=str(status)).inc()
+    integrity_audit_duration_seconds.labels(service=resolved, trigger=str(trigger)).observe(
+        max(0.0, float(duration_seconds))
+    )
+    for scope, count in (artifacts_by_scope or {}).items():
+        if int(count) > 0:
+            integrity_artifacts_checked_total.labels(service=resolved, scope=str(scope)).inc(int(count))
+    for severity, count in (findings_by_severity or {}).items():
+        if int(count) > 0:
+            integrity_findings_total.labels(service=resolved, severity=str(severity)).inc(int(count))
+    for scope, count in (failed_scopes or {}).items():
+        if int(count) > 0:
+            integrity_scope_failures_total.labels(service=resolved, scope=str(scope)).inc(int(count))
+    integrity_external_anchor_configured.labels(service=resolved).set(
+        1.0 if external_anchor_configured else 0.0
+    )
+    if str(status).upper() == "PASS":
+        integrity_last_success_timestamp.labels(service=resolved).set(time.time())
+
+
+def record_integrity_scheduler_run(outcome: str, service: str | None = None) -> None:
+    integrity_scheduler_runs_total.labels(service=_service(service), outcome=str(outcome)).inc()
+
+
+def set_integrity_running_audits(count: int, service: str | None = None) -> None:
+    integrity_running_audits.labels(service=_service(service)).set(max(0, int(count)))
+
+
+def set_integrity_external_anchor_configured(configured: bool, service: str | None = None) -> None:
+    integrity_external_anchor_configured.labels(service=_service(service)).set(1.0 if configured else 0.0)
 
 
 def metrics_payload() -> bytes:

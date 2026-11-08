@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -155,6 +156,46 @@ class Settings(BaseSettings):
     alerting_webhook_secret: str = Field(default="", repr=False)
     alerting_webhook_timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
     alerting_app_base_url: str = Field(default="http://localhost:3000")
+
+    # --- V33 continuous integrity auditing (offline/local by default) ---
+    # The auditor is read-only for V30-V32 artifacts. Only the isolated
+    # monitoring store is written. Empty INTEGRITY_MONITORING_DB_URL derives
+    # a sibling SQLite file next to a SQLite DATABASE_URL, or ./var otherwise.
+    integrity_monitoring_enabled: bool = Field(default=True)
+    integrity_monitoring_db_url: str = Field(default="", repr=False)
+    integrity_scheduler_enabled: bool = Field(default=False)
+    integrity_scheduler_interval_seconds: float = Field(default=300.0, ge=30.0, le=86400.0)
+    integrity_max_scopes: int = Field(default=8, ge=1, le=16)
+    integrity_batch_artifacts: int = Field(default=500, ge=1, le=10000)
+    integrity_max_concurrent_runs: int = Field(default=1, ge=1, le=4)
+    integrity_audit_timeout_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
+    integrity_max_retries: int = Field(default=1, ge=0, le=5)
+    integrity_max_findings: int = Field(default=1000, ge=1, le=10000)
+    integrity_api_page_size: int = Field(default=20, ge=1, le=100)
+    integrity_retention_days: int = Field(default=30, ge=1, le=3650)
+    integrity_stale_run_seconds: float = Field(default=900.0, ge=60.0, le=86400.0)
+    integrity_alerting_enabled: bool = Field(default=False)
+    integrity_alert_min_severity: str = Field(default="HIGH")
+    integrity_alert_cooldown_seconds: int = Field(default=3600, ge=0, le=86400)
+    # Protected V30-V32 input locations. Empty means "not configured" and the
+    # corresponding scope reports UNAVAILABLE, never PASS.
+    integrity_evidence_root: str = Field(default="")
+    integrity_evidence_manifest: str = Field(default="")
+    integrity_evidence_report: str = Field(default="")
+    integrity_evidence_integrity: str = Field(default="")
+    integrity_evidence_audit: str = Field(default="")
+    integrity_evidence_checkpoint: str = Field(default="")
+    integrity_evidence_trust_store: str = Field(default="")
+    integrity_evidence_trust_state: str = Field(default="")
+    integrity_evidence_trusted_fingerprint: str = Field(default="")
+    integrity_transparency_log: str = Field(default="")
+    integrity_tree_heads_dir: str = Field(default="")
+    integrity_inclusion_proofs_dir: str = Field(default="")
+    integrity_consistency_proofs_dir: str = Field(default="")
+    integrity_transparency_trust_store: str = Field(default="")
+    integrity_transparency_trust_state: str = Field(default="")
+    integrity_tree_head_trusted_fingerprint: str = Field(default="")
+    integrity_receipt: str = Field(default="")
 
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
@@ -432,6 +473,17 @@ class Settings(BaseSettings):
             raise ConfigurationError("AUTH_PASSWORD_MIN_LENGTH must not exceed AUTH_PASSWORD_MAX_LENGTH.")
         if self.auth_cookie_samesite not in ("Lax", "Strict"):
             raise ConfigurationError("AUTH_COOKIE_SAMESITE must be Lax or Strict.")
+        # V33: the monitoring store is an isolated SQLite file; never point it
+        # at the primary application database or a shared network service.
+        if self.integrity_scheduler_enabled and not self.integrity_monitoring_enabled:
+            raise ConfigurationError(
+                "INTEGRITY_SCHEDULER_ENABLED=true requires INTEGRITY_MONITORING_ENABLED=true."
+            )
+        configured_integrity_store = str(self.integrity_monitoring_db_url or "").strip()
+        if configured_integrity_store and not configured_integrity_store.startswith("sqlite:"):
+            raise ConfigurationError(
+                "INTEGRITY_MONITORING_DB_URL must be a sqlite:// URL for the isolated monitoring store."
+            )
         if self.app_env == AppEnv.production:
             if self.auth_cookie_secure is False:
                 raise ConfigurationError(
@@ -516,6 +568,21 @@ class Settings(BaseSettings):
             return len(self.alerting_webhook_allowlist) > 0
         except ConfigurationError:
             return False
+
+    @property
+    def integrity_store_url(self) -> str:
+        """Isolated monitoring-store URL (never the primary application DB)."""
+        configured = str(self.integrity_monitoring_db_url or "").strip()
+        if configured:
+            return configured
+        database = str(self.database_url or "").strip()
+        prefix = "sqlite:///"
+        if database.startswith(prefix):
+            raw_path = database[len(prefix) :]
+            if raw_path and raw_path != ":memory:":
+                path = Path(raw_path)
+                return "sqlite:///" + (path.parent / "integrity-monitoring.db").as_posix()
+        return "sqlite:///./var/integrity-monitoring.db"
 
     @field_validator("event_bus_mode")
     @classmethod
@@ -641,6 +708,15 @@ class Settings(BaseSettings):
         allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if normalized not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}")
+        return normalized
+
+    @field_validator("integrity_alert_min_severity")
+    @classmethod
+    def _normalize_integrity_alert_severity(cls, value: str) -> str:
+        normalized = str(value).strip().upper()
+        allowed = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if normalized not in allowed:
+            raise ValueError(f"INTEGRITY_ALERT_MIN_SEVERITY must be one of {sorted(allowed)}")
         return normalized
 
     @property
