@@ -360,3 +360,11 @@ adds transparency and append-only consistency evidence on top. See
 - Windows junction and reparse-point behavior varies by host and privilege.
   Run the symlink/junction tests on the target platform when those guarantees
   are part of an acceptance decision.
+
+## V33 continuous monitoring
+
+V33 reuses the V30 verifier as the `EVIDENCE` scope of a read-only, scheduled
+continuous audit. It never rewrites the sidecar, audit chain, checkpoint, or
+evidence, and it writes only to its isolated monitoring store. Missing or
+unreadable evidence is reported as `UNAVAILABLE`/`PARTIAL`, never `PASS`.
+See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).

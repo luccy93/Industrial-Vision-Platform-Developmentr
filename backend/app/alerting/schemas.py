@@ -18,7 +18,16 @@ from backend.app.domain.common import utcnow
 
 # Locked V09 domains that may source alerts. TRACKING/PERCEPTION/SYSTEM
 # are reserved and must never match (enforced in validation + matching).
-ALERTABLE_DOMAINS = frozenset({"SAFETY", "SPATIAL", "QUALITY", "AUTONOMOUS", "INTELLIGENCE", "INCIDENT"})
+# V33 adds INTEGRITY for continuous-audit findings.
+ALERTABLE_DOMAINS = frozenset(
+    {"SAFETY", "SPATIAL", "QUALITY", "AUTONOMOUS", "INTELLIGENCE", "INCIDENT", "INTEGRITY"}
+)
+
+#: Generic V33 integrity event types. Reason codes travel in the notification
+#: context rather than in rule filters, keeping the filter vocabulary bounded.
+INTEGRITY_EVENT_TYPES = frozenset(
+    {"INTEGRITY_FINDING", "INTEGRITY_AUDIT_FAILED", "INTEGRITY_AUDIT_UNAVAILABLE"}
+)
 
 # Incident lifecycle states a rule may subscribe to (entered-state match).
 ALERTABLE_INCIDENT_STATUSES = frozenset(
@@ -48,7 +57,7 @@ ALERTABLE_TRANSITION_TYPES = frozenset(
 def _alertable_event_types() -> frozenset[str]:
     from backend.app.intelligence.schemas import UnifiedEventType
 
-    return frozenset(t.value for t in UnifiedEventType) | ALERTABLE_TRANSITION_TYPES
+    return frozenset(t.value for t in UnifiedEventType) | ALERTABLE_TRANSITION_TYPES | INTEGRITY_EVENT_TYPES
 
 
 def validate_rule_filters(

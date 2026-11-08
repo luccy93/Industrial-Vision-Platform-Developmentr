@@ -598,3 +598,14 @@ guarantee matters.
   and diagnostics, not arbitrary retained files.
 - A V32 `PASS` is preparation evidence only. It does not authorize a deployment
   or replace V24 production qualification.
+
+## V33 continuous monitoring
+
+V33 reuses the V32 log, tree-head, inclusion-proof, consistency-proof, and
+trust-state verifiers as read-only audit scopes. It never appends to the log,
+creates or re-signs a tree head, creates a receipt, or advances the
+transparency trust state. Tree-head verification is always called with
+`update_trust_state=False`. Missing transparency material is `UNAVAILABLE`,
+never `PASS`; a local `SIMULATED` receipt is never reported as external
+anchoring.
+See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).

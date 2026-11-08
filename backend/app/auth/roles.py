@@ -12,6 +12,8 @@ Capability assignments (locked V16 decisions):
   confirmation + reason; audited; never treated as proof an area is safe).
 - ``notification_mute``: time-limited per-notification mute — ADMIN, OPERATOR.
   Detection continues; history stays visible.
+- ``integrity_audit_run``: start/cancel continuous integrity audits — ADMIN,
+  OPERATOR. Reads (status/history/findings) remain available to every role.
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -36,6 +38,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "incident_write": frozenset({Role.ADMIN, Role.OPERATOR}),
     "camera_control": frozenset({Role.ADMIN, Role.OPERATOR}),
     "notification_mute": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "integrity_audit_run": frozenset({Role.ADMIN, Role.OPERATOR}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

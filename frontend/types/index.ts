@@ -352,6 +352,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", note: "Shell — live views in later volumes" },
   { href: "/analytics", label: "Analytics", note: "V14 historical reporting" },
   { href: "/notifications", label: "Notifications", note: "V15 alerting" },
+  { href: "/integrity", label: "Integrity", note: "V33 continuous audit" },
   { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -943,4 +944,178 @@ export type AlertingStatus = {
   channels: Record<string, { available: boolean; destinations?: number }>;
   deliveries: Record<string, number>;
   security_note: string;
+};
+
+// --- V33 continuous integrity monitoring ---
+
+export type IntegrityScope =
+  | "EVIDENCE"
+  | "SIGNED_CHECKPOINTS"
+  | "TRANSPARENCY_LOG"
+  | "TREE_HEADS"
+  | "INCLUSION_PROOFS"
+  | "CONSISTENCY_PROOFS"
+  | "TRUST_STATE"
+  | "FULL";
+
+export type IntegrityAuditStatus = "PASS" | "FAIL" | "PARTIAL" | "UNAVAILABLE" | "NOT_RUN" | "RUNNING";
+
+export type IntegritySeverity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type IntegrityFinding = {
+  finding_id: string;
+  audit_run_id: string;
+  scope: IntegrityScope;
+  severity: IntegritySeverity;
+  reason_code: string;
+  artifact_id: string | null;
+  detected_at: string;
+  explanation: string;
+  verification_source: string;
+  recommended_action: string;
+};
+
+export type IntegrityScopeResult = {
+  audit_run_id: string;
+  scope: IntegrityScope;
+  status: Exclude<IntegrityAuditStatus, "RUNNING">;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  artifacts_checked: number;
+  checks_total: number;
+  checks_failed: number;
+  findings_count: number;
+  reason_codes: string[];
+  error_summary: string | null;
+  truncated: boolean;
+  details: Record<string, unknown>;
+};
+
+export type IntegrityAuditSummary = {
+  audit_run_id: string;
+  trigger: "MANUAL" | "SCHEDULED";
+  requested_scopes: IntegrityScope[];
+  completed_scopes: IntegrityScope[];
+  status: IntegrityAuditStatus;
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number;
+  cancelled: boolean;
+  timed_out: boolean;
+  retry_count: number;
+  artifacts_checked: number;
+  finding_counts: Record<string, number>;
+  reason_code_counts: Record<string, number>;
+  error_summary: string | null;
+  external_anchor_configured: boolean;
+  assurance: string;
+  requested_by: string | null;
+  created_at: string;
+  schedule_slot?: string | null;
+};
+
+export type IntegrityTrustOverview = {
+  trusted_key_count: number;
+  active_key_count: number;
+  expired_key_count: number;
+  revoked_key_count: number;
+  unknown_key_count: number;
+  evidence_trust_state: string;
+  transparency_trust_state: string;
+  latest_tree_head_size: number | null;
+  latest_tree_head_digest: string | null;
+  latest_tree_head_id: string | null;
+  external_anchor_status: string;
+  external_anchor_detail: string;
+  assurance: string;
+  limitations: string[];
+};
+
+export type IntegritySchedulerStatus = {
+  enabled: boolean;
+  state: string;
+  interval_seconds: number;
+  stale_run_seconds?: number;
+  last_heartbeat?: string | null;
+  last_cycle_at?: string | null;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  cycles?: number;
+  runs_started?: number;
+};
+
+export type IntegrityStatus = {
+  enabled: boolean;
+  store_status: string;
+  store_error: string | null;
+  latest_audit: IntegrityAuditSummary | null;
+  last_success: IntegrityAuditSummary | null;
+  last_failure: IntegrityAuditSummary | null;
+  running_audits: number;
+  total_audits: number;
+  total_audited_artifacts: number;
+  verified_evidence_count: number;
+  verified_checkpoint_count: number;
+  verified_tree_head_count: number;
+  open_findings: number;
+  findings_by_severity: Record<string, number>;
+  trust: IntegrityTrustOverview;
+  scheduler: IntegritySchedulerStatus;
+  external_anchor_configured: boolean;
+  assurance: string;
+  generated_at: string;
+};
+
+export type IntegritySummary = {
+  total_runs: number;
+  by_status: Record<string, number>;
+  by_trigger: Record<string, number>;
+  by_severity: Record<string, number>;
+  by_reason_code: Record<string, number>;
+  by_scope: Record<string, number>;
+  total_findings: number;
+  total_audited_artifacts: number;
+  verified: Record<string, number>;
+  last_success: IntegrityAuditSummary | null;
+  last_failure: IntegrityAuditSummary | null;
+  latest_audit: IntegrityAuditSummary | null;
+  running_audits: number;
+  open_findings: number;
+  scheduler: IntegritySchedulerStatus;
+  retention_days: number;
+  page_size_default: number;
+  page_size_max: number;
+  external_anchor_configured: boolean;
+  assurance: string;
+  generated_at: string;
+};
+
+export type IntegrityAuditListResponse = {
+  items: IntegrityAuditSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+};
+
+export type IntegrityFindingListResponse = {
+  items: IntegrityFinding[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+};
+
+export type IntegrityAuditDetail = {
+  audit: IntegrityAuditSummary;
+  scope_results: IntegrityScopeResult[];
+  findings: IntegrityFinding[];
+  findings_total: number;
+};
+
+export type IntegrityAuditRunResponse = IntegrityAuditSummary & {
+  scope_results?: IntegrityScopeResult[];
+  findings?: IntegrityFinding[];
+  findings_total?: number;
 };

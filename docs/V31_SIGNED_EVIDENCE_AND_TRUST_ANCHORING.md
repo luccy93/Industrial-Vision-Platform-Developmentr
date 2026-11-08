@@ -432,3 +432,12 @@ that supports POSIX modes when that guarantee matters.
   Serialize writers operationally.
 - A V31 `PASS` is preparation evidence only. It does not authorize a deployment
   or replace V24 production qualification.
+
+## V33 continuous monitoring
+
+V33 reuses the V31 signed-checkpoint and trust verifiers as the
+`SIGNED_CHECKPOINTS` and `TRUST_STATE` scopes of a read-only, scheduled
+continuous audit. It never signs, re-signs, advances, or repairs trust state;
+trust-store and trust-state paths are read-only inputs. Missing trust material
+is `UNAVAILABLE`, never `PASS`.
+See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).

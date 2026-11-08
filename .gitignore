@@ -51,6 +51,9 @@ frontend/dist/
 postgres-data/
 redis-data/
 
+# V33 isolated integrity monitoring store (default ./var)
+var/
+
 # V22 release workflow output (manifests, SBOMs, evidence); never committed
 release-artifacts/
 

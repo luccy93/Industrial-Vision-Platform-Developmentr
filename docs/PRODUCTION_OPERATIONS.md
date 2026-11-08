@@ -446,6 +446,46 @@ service, cloud KMS, GitHub API, registry, staging system, or production
 endpoint, and never claims external anchoring. See
 [V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
 
+### Continuous integrity monitoring (V33)
+
+V33 runs the V30–V32 verifiers continuously without modifying any protected
+artifact. It is offline/local by default and writes only its isolated SQLite
+monitoring store.
+
+```powershell
+# Point the auditor at read-only copies of the V30-V32 inputs.
+$env:INTEGRITY_EVIDENCE_REPORT="release-artifacts/staging-readiness.json"
+$env:INTEGRITY_EVIDENCE_INTEGRITY="release-artifacts/staging-readiness.integrity.json"
+$env:INTEGRITY_EVIDENCE_AUDIT="release-artifacts/staging-readiness.audit.jsonl"
+$env:INTEGRITY_EVIDENCE_CHECKPOINT="release-artifacts/staging-readiness.signed-checkpoint.json"
+$env:INTEGRITY_TRANSPARENCY_LOG="release-artifacts/transparency.jsonl"
+$env:INTEGRITY_TREE_HEADS_DIR="release-artifacts/tree-heads"
+$env:INTEGRITY_INCLUSION_PROOFS_DIR="release-artifacts/inclusion"
+$env:INTEGRITY_CONSISTENCY_PROOFS_DIR="release-artifacts/consistency"
+$env:INTEGRITY_TRANSPARENCY_TRUST_STORE="trust-store.json"
+$env:INTEGRITY_MONITORING_DB_URL="sqlite:///./var/integrity-monitoring.db"
+
+# Optional bounded scheduler (opt-in; default off).
+$env:INTEGRITY_SCHEDULER_ENABLED="true"
+$env:INTEGRITY_SCHEDULER_INTERVAL_SECONDS="300"
+```
+
+Manual runs use `POST /api/v1/integrity/audits` with explicit scopes or
+`FULL`. `GET /api/v1/integrity/status`, `/summary`, `/audits`,
+`/audits/{id}`, `/findings`, and `/history` are authenticated reads; starting
+or cancelling an audit requires `ADMIN` or `OPERATOR`
+(`integrity_audit_run`). The `/integrity` dashboard shows the same data.
+
+A confirmed failure is always `FAIL`; unconfigured or unavailable scopes
+produce `PARTIAL`/`UNAVAILABLE`, never `PASS`. Findings and notifications pass
+through V29 redaction. Alerting is opt-in and creates pending delivery rows; it
+never claims channel delivery success. No external transparency service, cloud
+KMS, GitHub, registry, staging, or production endpoint is contacted, and V33
+never claims external anchoring. Shared-store deployments must point every
+worker/API process at the same SQLite file for cross-process duplicate
+prevention. See
+[V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

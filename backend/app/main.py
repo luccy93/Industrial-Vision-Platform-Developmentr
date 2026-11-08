@@ -205,6 +205,26 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         except Exception as exc:
             return f"redis close skipped ({type(exc).__name__})"
 
+    def _stop_integrity_scheduler() -> str:
+        scheduler = getattr(state, "integrity_scheduler", None)
+        if scheduler is None:
+            return "no integrity scheduler"
+        try:
+            scheduler.stop(timeout=5.0)
+            return "integrity scheduler stopped"
+        except Exception as exc:
+            return f"integrity scheduler stop failed ({type(exc).__name__})"
+
+    def _close_integrity_store() -> str:
+        store = getattr(state, "integrity_store", None)
+        if store is None:
+            return "no integrity monitoring store"
+        try:
+            store.close()
+            return "integrity monitoring store closed"
+        except Exception as exc:
+            return f"integrity monitoring store close skipped ({type(exc).__name__})"
+
     for _phase, _message in (
         ("stop_perception_workers", "perception runs inline on inference workers"),
         ("stop_intelligence_worker", "intelligence runs inline on inference workers"),
@@ -214,7 +234,9 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
     ):
         runtime.register_phase(_phase, lambda m=_message: m, shutdown=True)
     runtime.register_phase("stop_event_bus", _stop_event_bus, shutdown=True)
+    runtime.register_phase("stop_integrity_scheduler", _stop_integrity_scheduler, shutdown=True)
     runtime.register_phase("close_redis", _close_redis, shutdown=True)
+    runtime.register_phase("close_integrity_store", _close_integrity_store, shutdown=True)
     runtime.register_phase("close_database", lambda: _dispose_engine(state), shutdown=True)
     runtime.register_phase("mark_stopped", lambda: "runtime STOPPED", shutdown=True)
 
@@ -294,6 +316,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 worker.start()
             except Exception:
                 logger.warning("%s start failed", key, exc_info=True)
+        # V33: scheduled audits are opt-in; the scheduler thread is bounded and
+        # only started when monitoring and scheduling are both enabled.
+        integrity_scheduler = getattr(app.state, "integrity_scheduler", None)
+        if integrity_scheduler is not None and bool(settings.integrity_scheduler_enabled):
+            try:
+                integrity_scheduler.start()
+            except Exception:
+                logger.warning("integrity scheduler start failed", exc_info=True)
         yield
     finally:
         # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
@@ -597,6 +627,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "redis", lambda: _redis_readiness(app), required=settings.redis_required
     )
 
+    # V33: continuous integrity monitoring. The auditor reads the configured
+    # V30-V32 artifacts and writes only its isolated monitoring store. The
+    # scheduler thread starts in lifespan so tests never leak threads.
+    from backend.app.integrity.alerting import IntegrityNotifier
+    from backend.app.integrity.runner import AuditRunner
+    from backend.app.integrity.scheduler import IntegrityScheduler
+    from backend.app.integrity.service import IntegrityService
+    from backend.app.integrity.store import MonitoringStore
+
+    integrity_store: MonitoringStore | None = None
+    integrity_runner: AuditRunner | None = None
+    integrity_scheduler: IntegrityScheduler | None = None
+    integrity_service: IntegrityService | None = None
+    if settings.integrity_monitoring_enabled:
+        try:
+            integrity_store = MonitoringStore(
+                settings.integrity_store_url,
+                retention_days=int(settings.integrity_retention_days),
+            )
+            integrity_store.initialize()
+            integrity_notifier = IntegrityNotifier(
+                session_factory=app.state.session_factory,
+                store=integrity_store,
+                enabled=bool(settings.integrity_alerting_enabled),
+                min_severity=settings.integrity_alert_min_severity,
+                cooldown_seconds=int(settings.integrity_alert_cooldown_seconds),
+                webhook_urls=settings.alerting_webhook_allowlist,
+            )
+            integrity_runner = AuditRunner(
+                settings=settings, store=integrity_store, notifier=integrity_notifier
+            )
+            integrity_scheduler = IntegrityScheduler(
+                settings=settings, store=integrity_store, runner=integrity_runner
+            )
+            integrity_service = IntegrityService(
+                settings=settings,
+                store=integrity_store,
+                runner=integrity_runner,
+                scheduler=integrity_scheduler,
+            )
+        except Exception:
+            get_logger("industrial-vision.integrity").warning(
+                "integrity monitoring initialization skipped", exc_info=True
+            )
+            integrity_store = None
+            integrity_runner = None
+            integrity_scheduler = None
+            integrity_service = None
+    app.state.integrity_store = integrity_store
+    app.state.integrity_runner = integrity_runner
+    app.state.integrity_scheduler = integrity_scheduler
+    app.state.integrity_service = integrity_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -825,6 +908,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.alerting import router as alerting_router
 
     app.include_router(alerting_router)
+    from backend.app.api.v1.integrity import router as integrity_router
+
+    app.include_router(integrity_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

@@ -212,6 +212,12 @@ def _require_notification_mute(request: Request) -> Principal:
     return principal
 
 
+def _require_integrity_audit(request: Request) -> Principal:
+    principal = resolve_request_principal(request)
+    check_capability(principal, "integrity_audit_run")
+    return principal
+
+
 def _require_admin_config(request: Request) -> Principal:
     principal = resolve_request_principal(request)
     check_capability(principal, "admin_config")
@@ -229,5 +235,6 @@ require_read = Depends(_require_read)
 require_incident_write = Depends(_require_incident_write)
 require_camera_control = Depends(_require_camera_control)
 require_notification_mute = Depends(_require_notification_mute)
+require_integrity_audit = Depends(_require_integrity_audit)
 require_admin_config = Depends(_require_admin_config)
 require_user_admin = Depends(_require_user_admin)

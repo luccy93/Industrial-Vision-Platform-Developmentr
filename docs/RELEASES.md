@@ -576,6 +576,54 @@ endpoint, and never claims external anchoring. Exit codes remain `0`/`1`/`2`/
 `3`/`4`, and all diagnostics pass through V29 redaction. See
 [V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md](V32_TRANSPARENCY_LOG_AND_INDEPENDENT_ANCHORING.md).
 
+## Continuous integrity monitoring (V33)
+
+V33 adds an offline continuous-audit subsystem on top of V30–V32. It reuses
+the existing evidence, signed-checkpoint/trust, and transparency verifiers; it
+does not duplicate cryptography and never writes, repairs, or re-signs
+protected artifacts. Only an isolated SQLite monitoring store is written.
+
+```powershell
+# Manual bounded audit (ADMIN/OPERATOR); returns the terminal run summary.
+$body = @{ scopes = @("FULL") } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/integrity/audits `
+  -ContentType application/json -Body $body -WebSession $session
+
+# Authenticated reads (all roles).
+Invoke-RestMethod http://localhost:8000/api/v1/integrity/status -WebSession $session
+Invoke-RestMethod http://localhost:8000/api/v1/integrity/findings -WebSession $session
+```
+
+Scopes are `EVIDENCE`, `SIGNED_CHECKPOINTS`, `TRANSPARENCY_LOG`, `TREE_HEADS`,
+`INCLUSION_PROOFS`, `CONSISTENCY_PROOFS`, `TRUST_STATE`, and `FULL`. Outcomes
+are `PASS`, `FAIL`, `PARTIAL`, `UNAVAILABLE`, and `NOT_RUN`; a confirmed
+signature/integrity failure can never be reported as `PASS`, and unconfigured
+inputs are never treated as passing. Findings carry stable IDs, severity,
+reason codes, safe artifact identifiers, UTC timestamps, sanitized
+explanations, verification sources, and recommended actions.
+
+The scheduler is opt-in (`INTEGRITY_SCHEDULER_ENABLED=true`), bounded by
+`INTEGRITY_SCHEDULER_INTERVAL_SECONDS`, and uses durable schedule slots plus
+stale-run recovery and retention pruning. Manual runs are bounded by scope
+count, batch artifacts, concurrent runs, timeout, retries, findings, API page
+size, and retention. Duplicate runs are prevented with a durable lease;
+idempotency keys replay the original run. Cross-process cancellation is not
+claimed.
+
+Alerting is opt-in and sanitized: per-finding dedup plus a correlated
+cooldown, with notifications created as `pending` for the existing delivery
+worker — never a false delivery-success claim. Metrics are bounded and include
+runs, duration, findings, artifacts, scope failures, scheduler outcomes, last
+success, running audits, and `external_anchor_configured` (always `0` offline).
+The `/integrity` dashboard shows overview, trust state, findings, history, and
+per-run detail with honest loading/empty/unavailable/error states.
+
+V33 contacts no external transparency service, cloud KMS, GitHub API,
+registry, staging system, or production endpoint and never claims external
+anchoring. The monitoring store is SQLite; every worker/API process that needs
+cross-process duplicate prevention must share the same file. See
+[V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
+
 ## Deploy by digest
 
 The release overlays remove every `build:` definition and require explicit
