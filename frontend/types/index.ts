@@ -353,6 +353,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/analytics", label: "Analytics", note: "V14 historical reporting" },
   { href: "/notifications", label: "Notifications", note: "V15 alerting" },
   { href: "/integrity", label: "Integrity", note: "V33 continuous audit" },
+  { href: "/forensics", label: "Forensics", note: "V34 incident response" },
   { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -1118,4 +1119,353 @@ export type IntegrityAuditRunResponse = IntegrityAuditSummary & {
   scope_results?: IntegrityScopeResult[];
   findings?: IntegrityFinding[];
   findings_total?: number;
+};
+// --- V34 integrity incident response & forensics ---
+
+export type ForensicCaseType =
+  | "EVIDENCE_TAMPERING"
+  | "CHECKPOINT_COMPROMISE"
+  | "SIGNATURE_FAILURE"
+  | "TRANSPARENCY_CONFLICT"
+  | "TRUST_KEY_COMPROMISE"
+  | "CHAIN_OF_CUSTODY_FAILURE"
+  | "FORENSIC_REVIEW"
+  | "OTHER";
+
+export type ForensicCaseStatus =
+  | "OPEN"
+  | "TRIAGED"
+  | "INVESTIGATING"
+  | "CONTAINMENT_RECOMMENDED"
+  | "AWAITING_REVIEW"
+  | "RESOLVED"
+  | "CLOSED";
+
+export type ForensicCaseSource = "MANUAL" | "CORRELATION" | "SYSTEM";
+
+export type ForensicVerificationOutcome = "PASS" | "FAIL" | "PARTIAL" | "UNAVAILABLE" | "NOT_RUN";
+
+export type ForensicFindingClassification =
+  | "CONFIRMED_FAILURE"
+  | "SUSPICIOUS"
+  | "UNAVAILABLE"
+  | "NOT_RUN"
+  | "SIMULATED"
+  | "OPERATIONAL";
+
+export type ForensicArtifactType =
+  | "V33_FINDING"
+  | "V33_AUDIT_RUN"
+  | "EVIDENCE_FILE"
+  | "EVIDENCE_SIDECAR"
+  | "EVIDENCE_AUDIT_CHAIN"
+  | "SIGNED_CHECKPOINT"
+  | "TRUST_STATE"
+  | "TRUST_STORE"
+  | "TRANSPARENCY_LOG"
+  | "TREE_HEAD"
+  | "INCLUSION_PROOF"
+  | "CONSISTENCY_PROOF"
+  | "RECEIPT"
+  | "INCIDENT"
+  | "OPERATIONAL_LOG"
+  | "OTHER";
+
+export type ForensicNoteType =
+  | "OBSERVATION"
+  | "ANALYSIS"
+  | "HYPOTHESIS"
+  | "ACTION"
+  | "CONCLUSION"
+  | "HANDOVER";
+
+export type ForensicCase = {
+  case_id: string;
+  case_number: string;
+  title: string;
+  description: string;
+  case_type: ForensicCaseType;
+  severity: IntegritySeverity;
+  status: ForensicCaseStatus;
+  priority: string;
+  source: ForensicCaseSource;
+  originating_incident_id: string | null;
+  originating_audit_run_id: string | null;
+  created_by: string | null;
+  assigned_to: string | null;
+  version: number;
+  resolution_summary: string | null;
+  correlation_key: string | null;
+  custody_event_count: number;
+  custody_head_hash: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+};
+
+export type ForensicCorrelation = {
+  correlation_id: string;
+  case_id: string;
+  correlation_key: string;
+  finding_id: string | null;
+  audit_run_id: string | null;
+  artifact_id: string | null;
+  evidence_identifier: string | null;
+  reason_code: string | null;
+  classification: ForensicFindingClassification;
+  severity: IntegritySeverity;
+  resolved: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ForensicIncidentLink = {
+  link_id: string;
+  case_id: string;
+  incident_id: string;
+  linked_by: string | null;
+  linked_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicEvidenceReference = {
+  reference_id: string;
+  case_id: string;
+  artifact_type: ForensicArtifactType;
+  artifact_id: string;
+  original_relative_path: string;
+  expected_sha256: string;
+  observed_sha256: string;
+  source_audit_run_id: string | null;
+  source_finding_id: string | null;
+  capture_timestamp: string | null;
+  verification_status: ForensicVerificationOutcome;
+  verification_outcome: ForensicVerificationOutcome;
+  verification_detail: string;
+  reference_created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicCustodyEvent = {
+  event_id: string;
+  case_id: string;
+  sequence: number;
+  event_type: string;
+  timestamp: string;
+  actor_id: string;
+  actor_role: string;
+  artifact_id: string | null;
+  previous_hash: string;
+  event_hash: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicCustodyVerification = {
+  outcome: ForensicVerificationOutcome;
+  event_count: number;
+  head_hash: string | null;
+  expected_head_hash: string | null;
+  checks: Array<{ name: string; outcome: ForensicVerificationOutcome; detail: string; reason_code?: string }>;
+  reason_codes: string[];
+  limitations: string[];
+  assurance: string;
+  external_anchor_claimed: false;
+  external_anchor_note: string;
+};
+
+export type ForensicNote = {
+  note_id: string;
+  case_id: string;
+  author_id: string;
+  note_type: ForensicNoteType;
+  content: string;
+  visibility: "INTERNAL" | "RESTRICTED";
+  related_evidence_ids: string[];
+  version: number;
+  edited_by: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ForensicNoteRevision = {
+  revision_id: string;
+  note_id: string;
+  case_id: string;
+  revision: number;
+  content: string;
+  editor_id: string;
+  edited_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicAction = {
+  action_id: string;
+  case_id: string;
+  actor_id: string;
+  action_type: string;
+  description: string;
+  related_finding_ids: string[];
+  action_timestamp: string;
+  result: string;
+  approval_reference: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicAssignment = {
+  assignment_id: string;
+  case_id: string;
+  assignee: string | null;
+  previous_assignee: string | null;
+  actor_id: string;
+  reason: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicExportRecord = {
+  export_id: string;
+  case_id: string;
+  filename: string;
+  storage_relative_path: string;
+  sha256: string;
+  size_bytes: number;
+  file_count: number;
+  schema_version: string;
+  policy_version: string;
+  created_by: string;
+  created_at: string;
+  verified_at: string | null;
+  verification_outcome: ForensicVerificationOutcome;
+  verification_detail: string;
+  manifest_digest: string;
+  root_digest: string;
+  evidence_bytes_included: boolean;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicVerificationRun = {
+  verification_id: string;
+  case_id: string;
+  actor_id: string;
+  outcome: ForensicVerificationOutcome;
+  report: ForensicVerificationReport;
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ForensicVerificationCheck = {
+  reference_id: string | null;
+  artifact_type: string | null;
+  artifact_id: string | null;
+  outcome: ForensicVerificationOutcome;
+  detail: string;
+  reason_code?: string;
+  observed_sha256?: string;
+  size_bytes?: number;
+};
+
+export type ForensicVerificationReport = {
+  outcome: ForensicVerificationOutcome;
+  checks: ForensicVerificationCheck[];
+  observations: Array<Record<string, unknown>>;
+  reason_codes: string[];
+  limitations: string[];
+  custody: ForensicCustodyVerification;
+  verified_at: string;
+  external_anchor_claimed: false;
+  external_anchor_note: string;
+  assurance: string;
+  counts: {
+    checks: number;
+    passed: number;
+    failed: number;
+    unavailable: number;
+    not_run: number;
+  };
+};
+
+export type ForensicCaseDetail = {
+  case: ForensicCase;
+  correlations: ForensicCorrelation[];
+  incident_links: ForensicIncidentLink[];
+  evidence_references: ForensicEvidenceReference[];
+  custody: { events: ForensicCustodyEvent[]; verification: ForensicCustodyVerification };
+  notes: ForensicNote[];
+  actions: ForensicAction[];
+  assignments: ForensicAssignment[];
+  exports: ForensicExportRecord[];
+  latest_verification: ForensicVerificationRun | null;
+  assurance: string;
+  external_anchor_claimed: false;
+  external_anchor_note: string;
+};
+
+export type ForensicCaseSummary = {
+  total: number;
+  open: number;
+  triaged: number;
+  investigating: number;
+  containment_recommended: number;
+  awaiting_review: number;
+  resolved: number;
+  closed: number;
+  critical: number;
+  by_status: Record<string, number>;
+  by_severity: Record<string, number>;
+  by_type: Record<string, number>;
+  recent: ForensicCase[];
+};
+
+export type ForensicStatus = {
+  enabled: boolean;
+  summary: ForensicCaseSummary;
+  v33_source: "AVAILABLE" | "UNAVAILABLE" | "DISABLED";
+  alerting_enabled: boolean;
+  export_evidence_bytes_enabled: boolean;
+  assurance: string;
+  external_anchor_claimed: false;
+  external_anchor_note: string;
+};
+
+export type ForensicCaseListResponse = {
+  items: ForensicCase[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+};
+
+export type ForensicFindingsResponse = {
+  items: IntegrityFinding[];
+  total: number;
+  available: boolean;
+  detail?: string;
+};
+
+export type ForensicCorrelationResponse = {
+  stats: {
+    examined: number;
+    confirmed: number;
+    suspicious: number;
+    skipped_unavailable: number;
+    skipped_not_run: number;
+    skipped_simulated: number;
+    skipped_operational: number;
+    duplicates: number;
+    conflicts: number;
+    cases_created: number;
+    cases_updated: number;
+    incidents_created: number;
+    incidents_linked: number;
+    failed: number;
+  };
+};
+
+export type ForensicExportListResponse = { items: ForensicExportRecord[] };
+
+export type ForensicExportVerifyResponse = {
+  export: ForensicExportRecord;
+  verification: ForensicVerificationReport;
 };

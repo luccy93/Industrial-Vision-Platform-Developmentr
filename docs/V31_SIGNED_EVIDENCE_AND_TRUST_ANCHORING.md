@@ -441,3 +441,11 @@ continuous audit. It never signs, re-signs, advances, or repairs trust state;
 trust-store and trust-state paths are read-only inputs. Missing trust material
 is `UNAVAILABLE`, never `PASS`.
 See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
+## V34 incident response and forensics
+
+V34 correlates confirmed V33 signature/trust findings into cases that reference
+V31 checkpoints, trust stores, and trust states by identifier and hash. It
+never signs, re-signs, advances, repairs, or rewrites trust material. A V34
+case is an investigation record, not a new trust anchor; its custody chain is
+local and is never reported as externally anchored. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).

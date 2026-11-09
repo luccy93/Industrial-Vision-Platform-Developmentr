@@ -368,3 +368,12 @@ continuous audit. It never rewrites the sidecar, audit chain, checkpoint, or
 evidence, and it writes only to its isolated monitoring store. Missing or
 unreadable evidence is reported as `UNAVAILABLE`/`PARTIAL`, never `PASS`.
 See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
+## V34 incident response and forensics
+
+V34 references V30 artifacts by identifier, relative path, and expected
+SHA-256; it never copies, moves, repairs, re-signs, or re-hashes the original
+evidence. Forensic verification re-hashes current bytes read-only and reports
+`PASS`/`FAIL`/`PARTIAL`/`UNAVAILABLE`/`NOT_RUN` honestly. A matching digest
+proves the bytes match the recorded reference, not that the artifact was
+authentic at capture time. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).

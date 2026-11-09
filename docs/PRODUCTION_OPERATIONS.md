@@ -486,6 +486,49 @@ worker/API process at the same SQLite file for cross-process duplicate
 prevention. See
 [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
 
+### Integrity incident response and forensics (V34)
+
+V34 adds durable forensic case management on top of V33 findings. Cases live in
+the primary application database (Alembic revision `011_create_forensics`),
+reference V29–V33 artifacts by identifier/hash, and never copy, move, repair,
+re-sign, or rewrite protected evidence. Run the migration during the normal
+release window:
+
+```powershell
+python -m alembic -c backend/alembic.ini upgrade head
+```
+
+Configuration:
+
+```powershell
+$env:FORENSIC_ENABLED="true"
+$env:FORENSIC_EVIDENCE_ROOT="D:\ivp\evidence-readonly"
+$env:FORENSIC_EXPORT_DIR="D:\ivp\forensic-exports"
+$env:FORENSIC_EXPORT_INCLUDE_EVIDENCE_BYTES="false"
+$env:FORENSIC_ALERTING_ENABLED="true"
+$env:FORENSIC_ALERT_MIN_SEVERITY="HIGH"
+```
+
+The export directory must not be inside the evidence root. References-only
+exports are the default; evidence-byte inclusion requires an explicit policy
+flag and still fails closed on a digest mismatch.
+
+Only confirmed V33 failures can create/update a confirmed V10 security
+incident. `UNAVAILABLE`, `NOT_RUN`, `SIMULATED`, and operational findings are
+review context only. Repeated findings are deduplicated by finding ID and
+stable correlation dimensions. Resolution/closure requires the ADMIN-only
+`forensic_case_close` capability; unresolved critical findings require explicit
+acknowledgement and a later PASS never closes a case automatically.
+`forensic_export` is separately ADMIN-only. The custody ledger is an
+append-only local hash chain; no external anchoring is claimed.
+
+Operational flow: triage in `/integrity`, correlate in `/forensics`, add notes
+and operator actions, run read-only verification, recommend containment,
+review, resolve/close with explicit acknowledgement, and generate a verified
+references-only export for handover. Never edit custody rows, the case head, or
+protected artifacts to force a pass. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

@@ -680,6 +680,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.integrity_scheduler = integrity_scheduler
     app.state.integrity_service = integrity_service
 
+    # V34: integrity incident response and forensic investigation. Cases live
+    # in the primary application database; protected V29-V33 artifacts remain
+    # read-only and are referenced by id/hash, never copied or modified.
+    from backend.app.forensics.alerting import ForensicNotifier
+    from backend.app.forensics.repository import ForensicRepository
+    from backend.app.forensics.service import ForensicService
+    from backend.app.incidents.repository import IncidentRepository
+
+    forensic_repository: ForensicRepository | None = None
+    forensic_service: ForensicService | None = None
+    if settings.forensic_enabled:
+        try:
+            forensic_repository = ForensicRepository(app.state.session_factory)
+            forensic_notifier = ForensicNotifier(
+                session_factory=app.state.session_factory,
+                alert_repository=alerting_repository,
+                enabled=bool(settings.forensic_alerting_enabled),
+                min_severity=settings.forensic_alert_min_severity,
+                cooldown_seconds=int(settings.forensic_alert_cooldown_seconds),
+                webhook_urls=settings.alerting_webhook_allowlist,
+            )
+            forensic_service = ForensicService(
+                settings=settings,
+                repository=forensic_repository,
+                store=integrity_store,
+                incidents=IncidentRepository(app.state.session_factory),
+                alert_repository=alerting_repository,
+                notifier=forensic_notifier,
+            )
+        except Exception:
+            get_logger("industrial-vision.forensics").warning(
+                "forensic investigation initialization skipped", exc_info=True
+            )
+            forensic_repository = None
+            forensic_service = None
+    app.state.forensic_repository = forensic_repository
+    app.state.forensic_service = forensic_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -911,6 +949,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.integrity import router as integrity_router
 
     app.include_router(integrity_router)
+    from backend.app.api.v1.forensics import router as forensics_router
+
+    app.include_router(forensics_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

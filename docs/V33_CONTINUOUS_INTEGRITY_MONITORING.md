@@ -277,3 +277,15 @@ The V33 tests cover scope execution, failure precedence, read-only input
 integrity, idempotency, duplicate-run prevention, pagination, retention,
 scheduler slot dedup, stale-run recovery, API/RBAC, page bounds, sanitized
 findings, alert dedup/cooldown, and bounded metrics.
+
+## V34 incident response and forensics
+
+V34 consumes V33 findings and audit runs as read-only inputs. Confirmed
+failures can be correlated into durable forensic cases; `UNAVAILABLE`,
+`NOT_RUN`, `SIMULATED`, and operational findings are never promoted to a
+confirmed security incident. Repeated findings are deduplicated by finding ID
+and stable correlation dimensions, so later audit runs update the existing case
+instead of creating duplicates. V34 never writes to the V33 monitoring store,
+never edits or deletes findings, and never treats a later PASS as resolving an
+older unresolved critical finding. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).

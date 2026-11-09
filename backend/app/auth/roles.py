@@ -14,6 +14,15 @@ Capability assignments (locked V16 decisions):
   Detection continues; history stays visible.
 - ``integrity_audit_run``: start/cancel continuous integrity audits — ADMIN,
   OPERATOR. Reads (status/history/findings) remain available to every role.
+- ``forensic_case_write``: create/update forensic cases, evidence references,
+  notes, actions, assignments, incident links, and finding correlation —
+  ADMIN, OPERATOR. Reads remain available to every role.
+- ``forensic_verify``: run read-only case/evidence verification — ADMIN,
+  OPERATOR.
+- ``forensic_case_close``: resolve, close, and reopen forensic cases — ADMIN
+  only. Separated from case writing so closure is an explicit second step.
+- ``forensic_export``: generate, download, and verify forensic export packages
+  — ADMIN only (dedicated capability; evidence-reference exports are sensitive).
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -39,6 +48,10 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "camera_control": frozenset({Role.ADMIN, Role.OPERATOR}),
     "notification_mute": frozenset({Role.ADMIN, Role.OPERATOR}),
     "integrity_audit_run": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "forensic_case_write": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "forensic_verify": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "forensic_case_close": frozenset({Role.ADMIN}),
+    "forensic_export": frozenset({Role.ADMIN}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

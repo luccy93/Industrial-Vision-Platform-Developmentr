@@ -970,3 +970,26 @@ No real GHCR push, GitHub attestation, or GitHub Release was performed.
   or encoded blobs, and binary, oversized, or non-UTF-8 evidence may not be
   detected. A stored hash proves the integrity of the stored bytes, not the
   absence of every possible secret.
+
+## V34 release impact
+
+V34 adds an additive Alembic revision, `011_create_forensics`, creating only
+forensic case-management tables after `010_add_notification_mute`. Existing
+V10–V33 tables and artifacts are untouched; `downgrade()` drops only the V34
+tables. No release tag, image publication, workflow dispatch, or deployment is
+part of V34.
+
+New runtime configuration is additive: `FORENSIC_ENABLED`,
+`FORENSIC_EVIDENCE_ROOT`, `FORENSIC_EXPORT_DIR`,
+`FORENSIC_EXPORT_INCLUDE_EVIDENCE_BYTES`, `FORENSIC_EXPORT_MAX_FILES`,
+`FORENSIC_EXPORT_MAX_BYTES`, `FORENSIC_MAX_CORRELATION_FINDINGS`, and the
+`FORENSIC_ALERT_*` settings. Deployments must run the migration before enabling
+the `/forensics` workspace. No credentials, private keys, evidence bytes, or
+generated forensic packages are committed to the repository.
+
+V34 is preparation and incident-response tooling, not production
+qualification. A clean forensic verification proves only that the configured
+read-only checks passed; it does not authorize a deployment and does not
+replace V24 production qualification. The custody chain is local, and no
+external transparency anchoring is claimed. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).

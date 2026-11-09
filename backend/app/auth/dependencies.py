@@ -218,6 +218,30 @@ def _require_integrity_audit(request: Request) -> Principal:
     return principal
 
 
+def _require_forensic_case_write(request: Request) -> Principal:
+    principal = resolve_request_principal(request)
+    check_capability(principal, "forensic_case_write")
+    return principal
+
+
+def _require_forensic_verify(request: Request) -> Principal:
+    principal = resolve_request_principal(request)
+    check_capability(principal, "forensic_verify")
+    return principal
+
+
+def _require_forensic_case_close(request: Request) -> Principal:
+    principal = resolve_request_principal(request)
+    check_capability(principal, "forensic_case_close")
+    return principal
+
+
+def _require_forensic_export(request: Request) -> Principal:
+    principal = resolve_request_principal(request)
+    check_capability(principal, "forensic_export")
+    return principal
+
+
 def _require_admin_config(request: Request) -> Principal:
     principal = resolve_request_principal(request)
     check_capability(principal, "admin_config")
@@ -236,5 +260,9 @@ require_incident_write = Depends(_require_incident_write)
 require_camera_control = Depends(_require_camera_control)
 require_notification_mute = Depends(_require_notification_mute)
 require_integrity_audit = Depends(_require_integrity_audit)
+require_forensic_case_write = Depends(_require_forensic_case_write)
+require_forensic_verify = Depends(_require_forensic_verify)
+require_forensic_case_close = Depends(_require_forensic_case_close)
+require_forensic_export = Depends(_require_forensic_export)
 require_admin_config = Depends(_require_admin_config)
 require_user_admin = Depends(_require_user_admin)

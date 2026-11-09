@@ -609,3 +609,13 @@ transparency trust state. Tree-head verification is always called with
 never `PASS`; a local `SIMULATED` receipt is never reported as external
 anchoring.
 See [V33_CONTINUOUS_INTEGRITY_MONITORING.md](V33_CONTINUOUS_INTEGRITY_MONITORING.md).
+## V34 incident response and forensics
+
+V34 correlates confirmed V33 transparency findings (tree heads, inclusion and
+consistency proofs, log integrity, receipts) into forensic cases that reference
+the original V32 artifacts by identifier and hash. It never appends to the log,
+creates or re-signs a tree head, creates a receipt, or advances transparency
+trust state. V34 export manifests and custody chains are local evidence
+packages, not external transparency receipts; `external_anchor_claimed` remains
+`false`. See
+[V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).
