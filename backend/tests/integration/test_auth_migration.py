@@ -49,7 +49,15 @@ def test_auth_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> No
     assert "uq_ws_ticket_digest" in ticket_uniques
     assert "muted_until" in _columns(url, "notifications")  # 010
 
-    # V16 (010) reverses first: mute column goes, 009 tables stay.
+    # V34 (011) reverses first: forensic tables go, mute column stays.
+    command.downgrade(config, "010_add_notification_mute")
+    remaining = _tables(url)
+    assert "forensic_cases" not in remaining
+    assert "forensic_custody_events" not in remaining
+    assert "muted_until" in _columns(url, "notifications")
+    assert _AUTH_TABLES <= remaining
+
+    # V16 (010) reverses next: mute column goes, 009 tables stay.
     command.downgrade(config, "-1")
     assert "muted_until" not in _columns(url, "notifications")
     assert _AUTH_TABLES <= _tables(url)
@@ -64,3 +72,4 @@ def test_auth_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -> No
     command.upgrade(config, "head")
     assert _AUTH_TABLES <= _tables(url)
     assert "muted_until" in _columns(url, "notifications")
+    assert "forensic_cases" in _tables(url)

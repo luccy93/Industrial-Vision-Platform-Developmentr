@@ -33,9 +33,15 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.OPERATOR, "camera_control")
     assert can(Role.OPERATOR, "notification_mute")
     assert can(Role.OPERATOR, "integrity_audit_run")
+    assert can(Role.OPERATOR, "forensic_case_write")
+    assert can(Role.OPERATOR, "forensic_verify")
+    assert not can(Role.OPERATOR, "forensic_case_close")
+    assert not can(Role.OPERATOR, "forensic_export")
     assert not can(Role.VIEWER, "incident_write")
     assert not can(Role.VIEWER, "camera_control")
     assert not can(Role.VIEWER, "integrity_audit_run")
+    assert not can(Role.VIEWER, "forensic_case_write")
+    assert not can(Role.VIEWER, "forensic_verify")
     assert can(Role.VIEWER, "read")
     assert can("operator", "incident_write")
     assert capabilities_for(Role.ADMIN) == frozenset(
@@ -45,6 +51,10 @@ def test_role_matrix_least_privilege() -> None:
             "camera_control",
             "notification_mute",
             "integrity_audit_run",
+            "forensic_case_write",
+            "forensic_verify",
+            "forensic_case_close",
+            "forensic_export",
             "admin_config",
             "user_admin",
         }

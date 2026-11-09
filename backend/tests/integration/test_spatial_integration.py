@@ -47,7 +47,7 @@ def _spatial(client: Any) -> SpatialEngine:
 def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     tmp_path, monkeypatch
 ) -> None:
-    """The migration chain applies and reverses cleanly (002-010)."""
+    """The migration chain applies and reverses cleanly (002-011)."""
     url = f"sqlite:///{tmp_path}/migrate.db"
     # alembic/env.py resolves the URL from the environment (same as real runs).
     monkeypatch.setenv("DATABASE_URL", url)
@@ -90,7 +90,15 @@ def test_migration_upgrade_and_downgrade_cycle(  # type: ignore[no-untyped-def]
     } <= _indexes(url, "incidents")
     assert "ix_operational_events_first_seen" in _indexes(url, "operational_events")
 
-    # V16 (010) reverses first: mute column goes, auth tables stay.
+    # V34 (011) reverses first: forensic tables go, mute column stays.
+    command.downgrade(config, "010_add_notification_mute")
+    remaining = _tables(url)
+    assert "forensic_cases" not in remaining
+    assert "forensic_custody_events" not in remaining
+    assert "muted_until" in {str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")}
+    assert "users" in remaining
+
+    # V16 (010) reverses next: mute column goes, auth tables stay.
     command.downgrade(config, "-1")
     assert "muted_until" not in {
         str(c["name"]) for c in inspect(create_engine(url)).get_columns("notifications")
