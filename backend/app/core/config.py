@@ -212,6 +212,20 @@ class Settings(BaseSettings):
     forensic_alert_min_severity: str = Field(default="HIGH")
     forensic_alert_cooldown_seconds: int = Field(default=3600, ge=0, le=86400)
 
+    # --- V35 forensic governance, retention, and compliance readiness ---
+    # No retention or review duration is configured by default: V35 never
+    # invents a regulatory period. Evaluation is manual and bounded; there is
+    # no background retention scheduler.
+    governance_enabled: bool = Field(default=True)
+    governance_retention_batch_limit: int = Field(default=100, ge=1, le=500)
+    governance_page_size: int = Field(default=20, ge=1, le=100)
+    governance_audit_page_size: int = Field(default=50, ge=1, le=200)
+    governance_legal_hold_requires_approval: bool = Field(default=True)
+    governance_report_upcoming_days: int = Field(default=30, ge=1, le=365)
+    governance_report_max_rows: int = Field(default=500, ge=1, le=5000)
+    governance_alerting_enabled: bool = Field(default=False)
+    governance_alert_cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")
