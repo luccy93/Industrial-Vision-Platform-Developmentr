@@ -18,15 +18,38 @@ from backend.app.domain.common import utcnow
 
 # Locked V09 domains that may source alerts. TRACKING/PERCEPTION/SYSTEM
 # are reserved and must never match (enforced in validation + matching).
-# V33 adds INTEGRITY for continuous-audit findings.
+# V33 adds INTEGRITY for continuous-audit findings; V34 adds FORENSIC for
+# forensic-case lifecycle and custody/export failures.
 ALERTABLE_DOMAINS = frozenset(
-    {"SAFETY", "SPATIAL", "QUALITY", "AUTONOMOUS", "INTELLIGENCE", "INCIDENT", "INTEGRITY"}
+    {
+        "SAFETY",
+        "SPATIAL",
+        "QUALITY",
+        "AUTONOMOUS",
+        "INTELLIGENCE",
+        "INCIDENT",
+        "INTEGRITY",
+        "FORENSIC",
+    }
 )
 
 #: Generic V33 integrity event types. Reason codes travel in the notification
 #: context rather than in rule filters, keeping the filter vocabulary bounded.
 INTEGRITY_EVENT_TYPES = frozenset(
     {"INTEGRITY_FINDING", "INTEGRITY_AUDIT_FAILED", "INTEGRITY_AUDIT_UNAVAILABLE"}
+)
+
+#: V34 forensic case event types. Case identifiers, statuses, and reason codes
+#: travel in the notification context rather than in rule filters.
+FORENSIC_EVENT_TYPES = frozenset(
+    {
+        "FORENSIC_CASE_OPENED",
+        "FORENSIC_CASE_ESCALATED",
+        "FORENSIC_CASE_RESOLVED",
+        "FORENSIC_CASE_CLOSED",
+        "FORENSIC_CUSTODY_FAILURE",
+        "FORENSIC_EXPORT_FAILURE",
+    }
 )
 
 # Incident lifecycle states a rule may subscribe to (entered-state match).
@@ -57,7 +80,12 @@ ALERTABLE_TRANSITION_TYPES = frozenset(
 def _alertable_event_types() -> frozenset[str]:
     from backend.app.intelligence.schemas import UnifiedEventType
 
-    return frozenset(t.value for t in UnifiedEventType) | ALERTABLE_TRANSITION_TYPES | INTEGRITY_EVENT_TYPES
+    return (
+        frozenset(t.value for t in UnifiedEventType)
+        | ALERTABLE_TRANSITION_TYPES
+        | INTEGRITY_EVENT_TYPES
+        | FORENSIC_EVENT_TYPES
+    )
 
 
 def validate_rule_filters(
@@ -257,6 +285,7 @@ __all__ = [
     "DeliveryStatus",
     "EvaluationOutcome",
     "EvaluationRecord",
+    "FORENSIC_EVENT_TYPES",
     "Notification",
     "RuleCreate",
     "RuleUpdate",

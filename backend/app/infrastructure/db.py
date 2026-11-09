@@ -19,6 +19,7 @@ from backend.app.models import (
     alerting_orm,  # noqa: F401 (registers the alerting tables)
     auth_orm,  # noqa: F401 (registers the auth tables)
     autonomous_orm,  # noqa: F401 (registers the autonomous profiles table)
+    forensic_orm,  # noqa: F401 (registers the V34 forensic tables)
     incident_orm,  # noqa: F401 (registers the incident tables)
     operational_orm,  # noqa: F401 (registers operational history + outbox)
     quality_orm,  # noqa: F401 (registers the quality tables)

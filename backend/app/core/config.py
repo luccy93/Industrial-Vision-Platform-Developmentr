@@ -197,6 +197,21 @@ class Settings(BaseSettings):
     integrity_tree_head_trusted_fingerprint: str = Field(default="")
     integrity_receipt: str = Field(default="")
 
+    # --- V34 integrity incident response and forensic investigation ---
+    # Cases persist in the primary application database. Protected evidence is
+    # referenced read-only by relative path/hash; original bytes are excluded
+    # from exports unless an operator explicitly enables and authorizes it.
+    forensic_enabled: bool = Field(default=True)
+    forensic_evidence_root: str = Field(default="")
+    forensic_export_dir: str = Field(default="")
+    forensic_export_include_evidence_bytes: bool = Field(default=False)
+    forensic_export_max_files: int = Field(default=64, ge=1, le=1024)
+    forensic_export_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1024, le=1024 * 1024 * 1024)
+    forensic_max_correlation_findings: int = Field(default=500, ge=1, le=10000)
+    forensic_alerting_enabled: bool = Field(default=False)
+    forensic_alert_min_severity: str = Field(default="HIGH")
+    forensic_alert_cooldown_seconds: int = Field(default=3600, ge=0, le=86400)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")
@@ -484,6 +499,22 @@ class Settings(BaseSettings):
             raise ConfigurationError(
                 "INTEGRITY_MONITORING_DB_URL must be a sqlite:// URL for the isolated monitoring store."
             )
+        # V34: exports are written to their own directory and never into the
+        # read-only protected evidence tree. Including original bytes requires
+        # a configured evidence root and an explicit policy flag.
+        if self.forensic_export_include_evidence_bytes and not self.forensic_evidence_base:
+            raise ConfigurationError(
+                "FORENSIC_EXPORT_INCLUDE_EVIDENCE_BYTES=true requires "
+                "FORENSIC_EVIDENCE_ROOT or INTEGRITY_EVIDENCE_ROOT."
+            )
+        evidence_base = str(self.forensic_evidence_base or "").strip()
+        if evidence_base:
+            evidence_root = Path(evidence_base).expanduser().resolve(strict=False)
+            export_root = self.forensic_export_path.expanduser().resolve(strict=False)
+            if export_root == evidence_root or evidence_root in export_root.parents:
+                raise ConfigurationError(
+                    "FORENSIC_EXPORT_DIR must not be inside the protected evidence root."
+                )
         if self.app_env == AppEnv.production:
             if self.auth_cookie_secure is False:
                 raise ConfigurationError(
@@ -718,6 +749,26 @@ class Settings(BaseSettings):
         if normalized not in allowed:
             raise ValueError(f"INTEGRITY_ALERT_MIN_SEVERITY must be one of {sorted(allowed)}")
         return normalized
+
+    @field_validator("forensic_alert_min_severity")
+    @classmethod
+    def _normalize_forensic_alert_severity(cls, value: str) -> str:
+        normalized = str(value).strip().upper()
+        allowed = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if normalized not in allowed:
+            raise ValueError(f"FORENSIC_ALERT_MIN_SEVERITY must be one of {sorted(allowed)}")
+        return normalized
+
+    @property
+    def forensic_evidence_base(self) -> str:
+        """Read-only root for referenced protected evidence (V30-V33)."""
+        return str(self.forensic_evidence_root or self.integrity_evidence_root or "").strip()
+
+    @property
+    def forensic_export_path(self) -> Path:
+        """Local export directory; never inside a protected evidence root."""
+        configured = str(self.forensic_export_dir or "").strip()
+        return Path(configured).expanduser() if configured else Path("./var/forensic-exports")
 
     @property
     def is_testing(self) -> bool:

@@ -653,6 +653,13 @@ class MonitoringStore:
             ).all()
             return [_finding_from_row(row) for row in rows], total
 
+    def get_finding(self, finding_id: str) -> Finding | None:
+        """Read one persisted finding by its stable id (read-only)."""
+        self.initialize()
+        with self._connection() as connection:
+            row = connection.execute(select(findings).where(findings.c.finding_id == str(finding_id))).first()
+            return _finding_from_row(row) if row is not None else None
+
     # ------------------------------------------------------------------
     # Scope results
     # ------------------------------------------------------------------
