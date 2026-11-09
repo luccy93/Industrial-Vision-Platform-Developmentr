@@ -19,7 +19,8 @@ from backend.app.domain.common import utcnow
 # Locked V09 domains that may source alerts. TRACKING/PERCEPTION/SYSTEM
 # are reserved and must never match (enforced in validation + matching).
 # V33 adds INTEGRITY for continuous-audit findings; V34 adds FORENSIC for
-# forensic-case lifecycle and custody/export failures.
+# forensic-case lifecycle and custody/export failures; V35 adds GOVERNANCE for
+# legal-hold, disposition, and export-review events.
 ALERTABLE_DOMAINS = frozenset(
     {
         "SAFETY",
@@ -30,6 +31,7 @@ ALERTABLE_DOMAINS = frozenset(
         "INCIDENT",
         "INTEGRITY",
         "FORENSIC",
+        "GOVERNANCE",
     }
 )
 
@@ -49,6 +51,20 @@ FORENSIC_EVENT_TYPES = frozenset(
         "FORENSIC_CASE_CLOSED",
         "FORENSIC_CUSTODY_FAILURE",
         "FORENSIC_EXPORT_FAILURE",
+    }
+)
+
+#: V35 governance event types. Hold/disposition/export identifiers and reason
+#: codes travel in the notification context rather than in rule filters.
+GOVERNANCE_EVENT_TYPES = frozenset(
+    {
+        "GOVERNANCE_LEGAL_HOLD_CREATED",
+        "GOVERNANCE_LEGAL_HOLD_APPROVED",
+        "GOVERNANCE_LEGAL_HOLD_RELEASED",
+        "GOVERNANCE_DISPOSITION_APPROVED",
+        "GOVERNANCE_EXPORT_APPROVED",
+        "GOVERNANCE_EXPORT_GENERATION_FAILED",
+        "GOVERNANCE_EXPORT_VERIFICATION_FAILED",
     }
 )
 
@@ -85,6 +101,7 @@ def _alertable_event_types() -> frozenset[str]:
         | ALERTABLE_TRANSITION_TYPES
         | INTEGRITY_EVENT_TYPES
         | FORENSIC_EVENT_TYPES
+        | GOVERNANCE_EVENT_TYPES
     )
 
 

@@ -529,6 +529,50 @@ references-only export for handover. Never edit custody rows, the case head, or
 protected artifacts to force a pass. See
 [V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).
 
+### Forensic governance, retention and compliance readiness (V35)
+
+V35 adds the `/governance` workspace and `/api/v1/governance/...` APIs above
+V34 forensics. Alembic revision `012_create_governance` is additive and creates
+only V35-owned governance tables. Run it in the same release window:
+
+```powershell
+python -m alembic -c backend/alembic.ini upgrade head
+```
+
+Configuration:
+
+```powershell
+$env:GOVERNANCE_ENABLED="true"
+$env:GOVERNANCE_RETENTION_BATCH_LIMIT="100"
+$env:GOVERNANCE_PAGE_SIZE="20"
+$env:GOVERNANCE_AUDIT_PAGE_SIZE="50"
+$env:GOVERNANCE_LEGAL_HOLD_REQUIRES_APPROVAL="true"
+$env:GOVERNANCE_REPORT_UPCOMING_DAYS="30"
+$env:GOVERNANCE_REPORT_MAX_ROWS="500"
+$env:GOVERNANCE_ALERTING_ENABLED="false"
+$env:GOVERNANCE_ALERT_COOLDOWN_SECONDS="300"
+```
+
+The seeded `POL-DEFAULT` policy intentionally has no retention or review
+duration. Configure organization-defined values with a recorded reason; V35
+does not invent regulatory durations. Retention evaluation is manual and
+bounded, with no background scheduler.
+
+Governance has strict separation of duties: operators request holds,
+dispositions, and export approvals; only an independent ADMIN approves/rejects/
+releases them. Generation, verification, and download still require the V34
+ADMIN-only `forensic_export` capability. Access audit and DETAIL reports are
+ADMIN-only. All read routes allow authenticated ADMIN/OPERATOR/VIEWER under the
+existing global-read semantics.
+
+V35 never deletes, overwrites, moves, cascades, or schedules destruction of
+evidence, cases, custody records, checkpoints, or audit history. A disposition
+approval authorizes only a future, separately scoped process. Legal holds never
+expire or release automatically. Export approval does not prove delivery.
+Governance audit is `LOCAL_SELF_DIGEST_ONLY`; no regulatory certification,
+external immutable storage, or external trust anchor is claimed. See
+[V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md](V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

@@ -718,6 +718,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.forensic_repository = forensic_repository
     app.state.forensic_service = forensic_service
 
+    # V35: forensic governance, retention, legal holds, disposition review,
+    # export approval, access audit, and compliance readiness. The governance
+    # layer never deletes or mutates V34 evidence, cases, custody records, or
+    # audit history; it only records review and authorization state.
+    from backend.app.governance.alerting import GovernanceNotifier
+    from backend.app.governance.repository import GovernanceRepository
+    from backend.app.governance.service import GovernanceService
+
+    governance_repository: GovernanceRepository | None = None
+    governance_service: GovernanceService | None = None
+    if settings.governance_enabled and forensic_repository is not None:
+        try:
+            governance_repository = GovernanceRepository(app.state.session_factory)
+            governance_notifier = GovernanceNotifier(
+                session_factory=app.state.session_factory,
+                alert_repository=alerting_repository,
+                enabled=bool(settings.governance_alerting_enabled),
+                min_severity=settings.forensic_alert_min_severity,
+                cooldown_seconds=int(settings.governance_alert_cooldown_seconds),
+                webhook_urls=settings.alerting_webhook_allowlist,
+            )
+            governance_service = GovernanceService(
+                settings=settings,
+                repository=governance_repository,
+                forensic_repository=forensic_repository,
+                forensic_service=forensic_service,
+                alert_repository=alerting_repository,
+                notifier=governance_notifier,
+            )
+            governance_service.ensure_default_policy()
+            if forensic_service is not None:
+                forensic_service.set_governance(governance_service)
+        except Exception:
+            get_logger("industrial-vision.governance").warning(
+                "forensic governance initialization skipped", exc_info=True
+            )
+            governance_repository = None
+            governance_service = None
+    app.state.governance_repository = governance_repository
+    app.state.governance_service = governance_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -952,6 +993,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.forensics import router as forensics_router
 
     app.include_router(forensics_router)
+    from backend.app.api.v1.governance import router as governance_router
+
+    app.include_router(governance_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

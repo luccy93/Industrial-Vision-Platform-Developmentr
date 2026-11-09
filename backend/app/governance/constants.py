@@ -92,6 +92,20 @@ HOLD_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {LegalHoldStatus.REJECTED.value, LegalHoldStatus.RELEASED.value, LegalHoldStatus.WITHDRAWN.value}
 )
 
+HOLD_TRANSITIONS: dict[str, frozenset[str]] = {
+    LegalHoldStatus.PENDING_APPROVAL.value: frozenset(
+        {
+            LegalHoldStatus.ACTIVE.value,
+            LegalHoldStatus.REJECTED.value,
+            LegalHoldStatus.WITHDRAWN.value,
+        }
+    ),
+    LegalHoldStatus.ACTIVE.value: frozenset({LegalHoldStatus.RELEASED.value}),
+    LegalHoldStatus.REJECTED.value: frozenset(),
+    LegalHoldStatus.RELEASED.value: frozenset(),
+    LegalHoldStatus.WITHDRAWN.value: frozenset(),
+}
+
 
 class LegalHoldEventType(str, Enum):
     CREATED = "CREATED"
@@ -120,6 +134,27 @@ DISPOSITION_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {DispositionStatus.APPROVED.value, DispositionStatus.BLOCKED.value, DispositionStatus.WITHDRAWN.value}
 )
 
+DISPOSITION_TRANSITIONS: dict[str, frozenset[str]] = {
+    DispositionStatus.REVIEW_REQUIRED.value: frozenset(
+        {
+            DispositionStatus.APPROVAL_PENDING.value,
+            DispositionStatus.APPROVED.value,
+            DispositionStatus.BLOCKED.value,
+            DispositionStatus.WITHDRAWN.value,
+        }
+    ),
+    DispositionStatus.APPROVAL_PENDING.value: frozenset(
+        {
+            DispositionStatus.APPROVED.value,
+            DispositionStatus.BLOCKED.value,
+            DispositionStatus.WITHDRAWN.value,
+        }
+    ),
+    DispositionStatus.APPROVED.value: frozenset(),
+    DispositionStatus.BLOCKED.value: frozenset(),
+    DispositionStatus.WITHDRAWN.value: frozenset(),
+}
+
 
 class DispositionDecision(str, Enum):
     APPROVE = "APPROVE"
@@ -133,6 +168,7 @@ class DispositionDecision(str, Enum):
 # ---------------------------------------------------------------------------
 class ExportApprovalStatus(str, Enum):
     PENDING_APPROVAL = "PENDING_APPROVAL"
+    POLICY_AUTO_APPROVED = "POLICY_AUTO_APPROVED"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     GENERATED = "GENERATED"
@@ -146,6 +182,7 @@ class ExportApprovalStatus(str, Enum):
 EXPORT_OPEN_STATUSES: frozenset[str] = frozenset(
     {
         ExportApprovalStatus.PENDING_APPROVAL.value,
+        ExportApprovalStatus.POLICY_AUTO_APPROVED.value,
         ExportApprovalStatus.APPROVED.value,
         ExportApprovalStatus.GENERATED.value,
         ExportApprovalStatus.VERIFICATION_FAILED.value,
@@ -153,7 +190,11 @@ EXPORT_OPEN_STATUSES: frozenset[str] = frozenset(
 )
 
 EXPORT_GENERATION_READY_STATUSES: frozenset[str] = frozenset(
-    {ExportApprovalStatus.APPROVED.value, ExportApprovalStatus.GENERATION_FAILED.value}
+    {
+        ExportApprovalStatus.POLICY_AUTO_APPROVED.value,
+        ExportApprovalStatus.APPROVED.value,
+        ExportApprovalStatus.GENERATION_FAILED.value,
+    }
 )
 
 EXPORT_TERMINAL_STATUSES: frozenset[str] = frozenset(
@@ -164,6 +205,57 @@ EXPORT_TERMINAL_STATUSES: frozenset[str] = frozenset(
         ExportApprovalStatus.WITHDRAWN.value,
     }
 )
+
+EXPORT_TRANSITIONS: dict[str, frozenset[str]] = {
+    ExportApprovalStatus.PENDING_APPROVAL.value: frozenset(
+        {
+            ExportApprovalStatus.APPROVED.value,
+            ExportApprovalStatus.REJECTED.value,
+            ExportApprovalStatus.EXPIRED.value,
+            ExportApprovalStatus.WITHDRAWN.value,
+        }
+    ),
+    ExportApprovalStatus.POLICY_AUTO_APPROVED.value: frozenset(
+        {
+            ExportApprovalStatus.GENERATED.value,
+            ExportApprovalStatus.GENERATION_FAILED.value,
+            ExportApprovalStatus.EXPIRED.value,
+            ExportApprovalStatus.WITHDRAWN.value,
+        }
+    ),
+    ExportApprovalStatus.APPROVED.value: frozenset(
+        {
+            ExportApprovalStatus.GENERATED.value,
+            ExportApprovalStatus.GENERATION_FAILED.value,
+            ExportApprovalStatus.EXPIRED.value,
+            ExportApprovalStatus.WITHDRAWN.value,
+        }
+    ),
+    ExportApprovalStatus.GENERATION_FAILED.value: frozenset(
+        {
+            ExportApprovalStatus.GENERATED.value,
+            ExportApprovalStatus.GENERATION_FAILED.value,
+            ExportApprovalStatus.EXPIRED.value,
+            ExportApprovalStatus.WITHDRAWN.value,
+        }
+    ),
+    ExportApprovalStatus.GENERATED.value: frozenset(
+        {
+            ExportApprovalStatus.VERIFIED.value,
+            ExportApprovalStatus.VERIFICATION_FAILED.value,
+        }
+    ),
+    ExportApprovalStatus.VERIFICATION_FAILED.value: frozenset(
+        {
+            ExportApprovalStatus.VERIFIED.value,
+            ExportApprovalStatus.VERIFICATION_FAILED.value,
+        }
+    ),
+    ExportApprovalStatus.REJECTED.value: frozenset(),
+    ExportApprovalStatus.VERIFIED.value: frozenset(),
+    ExportApprovalStatus.EXPIRED.value: frozenset(),
+    ExportApprovalStatus.WITHDRAWN.value: frozenset(),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +324,7 @@ class SectionStatus(str, Enum):
 # ---------------------------------------------------------------------------
 RETENTION_START_UNAVAILABLE = "RETENTION_START_UNAVAILABLE"
 RETENTION_POLICY_UNAVAILABLE = "RETENTION_POLICY_UNAVAILABLE"
+RETENTION_EVALUATION_MISSING = "RETENTION_EVALUATION_MISSING"
 RETENTION_DURATION_UNCONFIGURED = "RETENTION_DURATION_UNCONFIGURED"
 REVIEW_INTERVAL_UNCONFIGURED = "REVIEW_INTERVAL_UNCONFIGURED"
 RETENTION_DEADLINE_REACHED = "RETENTION_DEADLINE_REACHED"

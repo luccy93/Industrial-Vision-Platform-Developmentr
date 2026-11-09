@@ -993,3 +993,31 @@ read-only checks passed; it does not authorize a deployment and does not
 replace V24 production qualification. The custody chain is local, and no
 external transparency anchoring is claimed. See
 [V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md](V34_INTEGRITY_INCIDENT_RESPONSE_AND_FORENSICS.md).
+
+## V35 release impact
+
+V35 adds an additive Alembic revision, `012_create_governance`, creating only
+governance policy, retention evaluation, legal-hold, disposition, export
+approval, and access-audit tables after `011_create_forensics`. Existing
+V01–V34 tables, evidence references, custody records, export IDs, paths,
+hashes, and semantics are untouched; `downgrade()` drops only the V35 tables.
+No release tag, image publication, workflow dispatch, or deployment is part of
+V35.
+
+New runtime configuration is additive: `GOVERNANCE_ENABLED`,
+`GOVERNANCE_RETENTION_BATCH_LIMIT`, `GOVERNANCE_PAGE_SIZE`,
+`GOVERNANCE_AUDIT_PAGE_SIZE`, `GOVERNANCE_LEGAL_HOLD_REQUIRES_APPROVAL`,
+`GOVERNANCE_REPORT_UPCOMING_DAYS`, `GOVERNANCE_REPORT_MAX_ROWS`,
+`GOVERNANCE_ALERTING_ENABLED`, and `GOVERNANCE_ALERT_COOLDOWN_SECONDS`.
+Deployments must run the migration before enabling `/governance`.
+
+V35 establishes governance and compliance readiness, not legal compliance or
+regulatory certification. The default policy has no invented retention
+duration; organizations must configure and document their own values.
+Retention evaluation is manual and bounded. No automatic physical evidence
+deletion, automatic legal-hold release, or automatic disposition approval
+exists. A disposition approval authorizes only a future, separately scoped
+process. Export approval does not prove external delivery or recipient
+validation. Governance audit is local and self-digested; no external immutable
+storage or trust anchor is claimed. See
+[V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md](V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md).

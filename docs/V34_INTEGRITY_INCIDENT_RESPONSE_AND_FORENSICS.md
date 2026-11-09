@@ -346,6 +346,28 @@ configured and refuses an export directory inside the protected evidence root.
 Never edit the V34 database, custody rows, or protected artifacts to force a
 pass. Never treat a local custody chain as externally anchored.
 
+## V35 governance integration
+
+V35 adds governance on top of V34 without changing case IDs, case types, status
+transitions, custody records, evidence references, export IDs, paths, hashes,
+or export semantics. Retention evaluations read V34 case and verification
+metadata; legal holds and disposition reviews reference V34 cases/evidence
+references by identifier; governance exports wrap the existing deterministic
+V34 export service.
+
+When governance is initialized, direct V34 ADMIN exports remain available but
+are policy/hold-guarded and recorded in the governance access audit with
+`approval_id=null`. Approval-controlled exports use `/api/v1/governance/exports`
+and keep request, approval, generation, verification, and delivery as separate
+states. The V34 evidence-byte configuration check still runs first, preserving
+the existing `"evidence-byte export is disabled"` error.
+
+Governance never deletes or rewrites V34 records. An integrity failure blocks
+disposition approval and is never a reason to discard evidence. Local
+governance audit records are `LOCAL_SELF_DIGEST_ONLY`; they do not upgrade the
+V34 custody chain to an external hash chain or trust anchor. See
+[V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md](V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md).
+
 ## Limitations
 
 - The custody chain is local and tamper-evident only relative to the

@@ -70,6 +70,40 @@ def _actor(principal: Principal) -> tuple[str | None, str]:
     return actor_id, str(getattr(role, "value", role or "SYSTEM")).upper()
 
 
+def _audit_access(
+    request: Request,
+    event_type: str,
+    principal: Principal,
+    *,
+    target_type: str,
+    target_id: str,
+    case_id: str | None = None,
+    outcome: str = "SUCCESS",
+    reason: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort V35 access audit hook for V34 reads and downloads."""
+    governance = getattr(request.app.state, "governance_service", None)
+    if governance is None:
+        return
+    actor_id, actor_role = _actor(principal)
+    try:
+        governance.record_access(
+            event_type=event_type,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_type=target_type,
+            target_id=target_id,
+            case_id=case_id,
+            outcome=outcome,
+            reason=reason,
+            request_id=getattr(request.state, "request_id", None),
+            metadata=metadata,
+        )
+    except Exception:
+        pass
+
+
 def _handle_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (ForensicCaseNotFoundError, ForensicExportNotFoundError, ForensicNoteNotFoundError)):
         return HTTPException(status_code=404, detail=str(exc))
@@ -246,45 +280,91 @@ def create_case(
 @router.get("/cases/{case_id}", summary="Get forensic case detail")
 def get_case(
     case_id: str,
+    request: Request,
+    principal: Principal = require_read,
     service: ForensicService = Depends(get_forensic_service),
 ) -> dict[str, Any]:
     try:
-        return service.get_case(case_id)
+        detail = service.get_case(case_id)
     except Exception as exc:
         raise _handle_error(exc) from None
+    _audit_access(
+        request,
+        "CASE_VIEWED",
+        principal,
+        target_type="FORENSIC_CASE",
+        target_id=case_id,
+        case_id=case_id,
+    )
+    return detail
 
 
 @router.get("/cases/{case_id}/custody", summary="Read the custody ledger")
 def get_custody(
     case_id: str,
+    request: Request,
+    principal: Principal = require_read,
     service: ForensicService = Depends(get_forensic_service),
 ) -> dict[str, Any]:
     try:
-        return service.custody(case_id)
+        payload = service.custody(case_id)
     except Exception as exc:
         raise _handle_error(exc) from None
+    _audit_access(
+        request,
+        "CUSTODY_HISTORY_VIEWED",
+        principal,
+        target_type="FORENSIC_CASE",
+        target_id=case_id,
+        case_id=case_id,
+    )
+    return payload
 
 
 @router.get("/cases/{case_id}/timeline", summary="Read the case timeline")
 def get_timeline(
     case_id: str,
+    request: Request,
+    principal: Principal = require_read,
     service: ForensicService = Depends(get_forensic_service),
 ) -> dict[str, Any]:
     try:
-        return service.timeline(case_id)
+        payload = service.timeline(case_id)
     except Exception as exc:
         raise _handle_error(exc) from None
+    _audit_access(
+        request,
+        "CASE_VIEWED",
+        principal,
+        target_type="FORENSIC_CASE",
+        target_id=case_id,
+        case_id=case_id,
+        metadata={"view": "timeline"},
+    )
+    return payload
 
 
 @router.get("/cases/{case_id}/exports", summary="List forensic exports")
 def list_exports(
     case_id: str,
+    request: Request,
+    principal: Principal = require_read,
     service: ForensicService = Depends(get_forensic_service),
 ) -> dict[str, Any]:
     try:
-        return service.list_exports(case_id)
+        payload = service.list_exports(case_id)
     except Exception as exc:
         raise _handle_error(exc) from None
+    _audit_access(
+        request,
+        "EVIDENCE_METADATA_VIEWED",
+        principal,
+        target_type="FORENSIC_CASE",
+        target_id=case_id,
+        case_id=case_id,
+        metadata={"view": "exports"},
+    )
+    return payload
 
 
 @router.post("/correlate", summary="Correlate V33 findings into cases")
@@ -534,13 +614,22 @@ def create_export(
 @router.get("/exports/{export_id}", summary="Download a forensic export")
 def download_export(
     export_id: str,
-    _principal: Principal = Depends(require_capability_dep("forensic_export")),
+    request: Request,
+    principal: Principal = Depends(require_capability_dep("forensic_export")),
     service: ForensicService = Depends(get_forensic_service),
 ) -> FileResponse:
     try:
         path, filename = service.export_path(export_id)
     except Exception as exc:
         raise _handle_error(exc) from None
+    _audit_access(
+        request,
+        "EXPORT_DOWNLOAD_SERVED",
+        principal,
+        target_type="FORENSIC_EXPORT",
+        target_id=export_id,
+        metadata={"delivery_claimed": False, "approval_id": None},
+    )
     return FileResponse(
         path,
         filename=filename,

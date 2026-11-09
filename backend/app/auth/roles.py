@@ -23,6 +23,22 @@ Capability assignments (locked V16 decisions):
   only. Separated from case writing so closure is an explicit second step.
 - ``forensic_export``: generate, download, and verify forensic export packages
   — ADMIN only (dedicated capability; evidence-reference exports are sensitive).
+- ``governance_read``: governance status, policies, retention queue, holds,
+  dispositions, export approvals, and SUMMARY readiness reports — all roles.
+- ``governance_policy_write``: create/version/enable/disable/archive policies —
+  ADMIN only.
+- ``retention_evaluate``: run bounded, non-destructive retention evaluations and
+  complete reviews — ADMIN, OPERATOR.
+- ``legal_hold_write``: request/withdraw legal holds — ADMIN, OPERATOR.
+- ``legal_hold_approve``: approve, reject, or release legal holds — ADMIN only.
+- ``disposition_request``: request/withdraw disposition review — ADMIN, OPERATOR.
+- ``disposition_review``: approve or reject disposition review — ADMIN only.
+- ``forensic_export_request``: request/withdraw governance export approval —
+  ADMIN, OPERATOR.
+- ``forensic_export_approve``: approve or reject governance export requests —
+  ADMIN only. Generation and download still require ``forensic_export``.
+- ``governance_audit_read``: read append-only governance access audit — ADMIN.
+- ``governance_report_generate``: generate DETAIL readiness reports — ADMIN.
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -52,6 +68,17 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "forensic_verify": frozenset({Role.ADMIN, Role.OPERATOR}),
     "forensic_case_close": frozenset({Role.ADMIN}),
     "forensic_export": frozenset({Role.ADMIN}),
+    "governance_read": frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER}),
+    "governance_policy_write": frozenset({Role.ADMIN}),
+    "retention_evaluate": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "legal_hold_write": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "legal_hold_approve": frozenset({Role.ADMIN}),
+    "disposition_request": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "disposition_review": frozenset({Role.ADMIN}),
+    "forensic_export_request": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "forensic_export_approve": frozenset({Role.ADMIN}),
+    "governance_audit_read": frozenset({Role.ADMIN}),
+    "governance_report_generate": frozenset({Role.ADMIN}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

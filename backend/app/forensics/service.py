@@ -86,6 +86,41 @@ class ForensicService:
         self._incidents = incidents
         self._alert_repository = alert_repository
         self._notifier = notifier
+        self._governance: Any | None = None
+
+    def set_governance(self, governance: Any | None) -> None:
+        """Attach the optional V35 governance layer (additive, never required)."""
+        self._governance = governance
+
+    def _governance_audit(
+        self,
+        event_type: str,
+        *,
+        actor_id: str | None,
+        actor_role: str,
+        target_type: str,
+        target_id: str,
+        case_id: str | None = None,
+        outcome: str = "SUCCESS",
+        reason: str = "",
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        if self._governance is None:
+            return
+        try:
+            self._governance.record_access(
+                event_type=event_type,
+                actor_id=actor_id,
+                actor_role=actor_role,
+                target_type=target_type,
+                target_id=target_id,
+                case_id=case_id,
+                outcome=outcome,
+                reason=reason,
+                metadata=metadata,
+            )
+        except Exception as exc:  # audit must never break a forensic operation
+            logger.warning("governance audit hook failed: %s", type(exc).__name__)
 
     # ------------------------------------------------------------------
     # Status and reads
@@ -848,6 +883,24 @@ class ForensicService:
                     detail="Custody ledger verification failed.",
                     reason_codes=tuple(report.get("custody", {}).get("reason_codes") or []),
                 )
+        self._governance_audit(
+            "EVIDENCE_VERIFICATION_REQUESTED",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_type="FORENSIC_CASE",
+            target_id=case_id,
+            case_id=case_id,
+            outcome=(
+                "SUCCESS"
+                if report.get("custody", {}).get("outcome") == VerificationOutcome.PASS.value
+                else "FAILURE"
+            ),
+            metadata={
+                "custody_outcome": report.get("custody", {}).get("outcome"),
+                "reason_codes": list(report.get("custody", {}).get("reason_codes") or []),
+                "approval_id": None,
+            },
+        )
         return report
 
     def _export_root(self) -> Path:
@@ -868,6 +921,7 @@ class ForensicService:
         include_evidence_bytes: bool = False,
         actor_id: str | None,
         actor_role: str,
+        export_id: str | None = None,
     ) -> dict[str, Any]:
         detail = self.get_case(case_id)
         allowed_bytes = bool(getattr(self._settings, "forensic_export_include_evidence_bytes", False))
@@ -875,6 +929,27 @@ class ForensicService:
             raise ForensicError(
                 "evidence-byte export is disabled by policy; only references and hashes are exported"
             )
+        if self._governance is not None:
+            try:
+                self._governance.guard_direct_export(
+                    case_id,
+                    include_evidence_bytes=include_evidence_bytes,
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                )
+            except Exception as exc:
+                self._governance_audit(
+                    "EXPORT_GENERATION_FAILED",
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                    target_type="FORENSIC_EXPORT",
+                    target_id=case_id,
+                    case_id=case_id,
+                    outcome="FAILURE",
+                    reason=str(exc)[:512],
+                    metadata={"approval_id": None, "direct_export": True},
+                )
+                raise
         evidence_base = str(getattr(self._settings, "forensic_evidence_base", "") or "").strip()
         package: ExportPackage = build_export_package(
             case_detail=detail,
@@ -883,6 +958,7 @@ class ForensicService:
             evidence_base=Path(evidence_base).expanduser() if evidence_base else None,
             max_files=int(getattr(self._settings, "forensic_export_max_files", 64)),
             max_bytes=int(getattr(self._settings, "forensic_export_max_bytes", 50 * 1024 * 1024)),
+            export_id=export_id,
         )
         try:
             record = self._repository.create_export_record(
@@ -905,6 +981,23 @@ class ForensicService:
             target = self._export_root() / package.storage_relative_path
             target.unlink(missing_ok=True)
             raise
+        self._governance_audit(
+            "EXPORT_GENERATED",
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_type="FORENSIC_EXPORT",
+            target_id=str(record.get("export_id") or package.export_id),
+            case_id=case_id,
+            metadata={
+                "approval_id": None,
+                "direct_export": True,
+                "export_sha256": record.get("sha256"),
+                "manifest_digest": record.get("manifest_digest"),
+                "root_digest": record.get("root_digest"),
+                "include_evidence_bytes": include_evidence_bytes,
+                "delivery_claimed": False,
+            },
+        )
         return record
 
     def get_export(self, export_id: str) -> dict[str, Any]:
@@ -957,6 +1050,21 @@ class ForensicService:
                     detail="Forensic export verification failed.",
                     reason_codes=tuple(result.reason_codes),
                 )
+        self._governance_audit(
+            (
+                "EXPORT_VERIFIED"
+                if result.outcome == VerificationOutcome.PASS.value
+                else "EXPORT_VERIFICATION_FAILED"
+            ),
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_type="FORENSIC_EXPORT",
+            target_id=export_id,
+            case_id=str(record.get("case_id") or ""),
+            outcome="SUCCESS" if result.outcome == VerificationOutcome.PASS.value else "FAILURE",
+            reason=str(result.detail or "")[:512],
+            metadata={"approval_id": None, "outcome": result.outcome},
+        )
         return {"export": updated, "verification": result.to_dict()}
 
 

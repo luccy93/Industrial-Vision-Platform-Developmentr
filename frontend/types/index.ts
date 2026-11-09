@@ -354,6 +354,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/notifications", label: "Notifications", note: "V15 alerting" },
   { href: "/integrity", label: "Integrity", note: "V33 continuous audit" },
   { href: "/forensics", label: "Forensics", note: "V34 incident response" },
+  { href: "/governance", label: "Governance", note: "V35 retention & compliance" },
   { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -1468,4 +1469,387 @@ export type ForensicExportListResponse = { items: ForensicExportRecord[] };
 export type ForensicExportVerifyResponse = {
   export: ForensicExportRecord;
   verification: ForensicVerificationReport;
+};
+
+// --- V35 forensic governance, retention & compliance readiness ---
+
+export type GovernancePolicyState = "DRAFT" | "ENABLED" | "DISABLED" | "ARCHIVED";
+
+export type GovernancePolicy = {
+  policy_id: string;
+  version: number;
+  name: string;
+  state: GovernancePolicyState;
+  case_type: string | null;
+  evidence_category: string | null;
+  retention_days: number | null;
+  review_interval_days: number | null;
+  required_approval_level: "SINGLE_REVIEWER" | "DUAL_REVIEWER";
+  export_allowed: boolean;
+  export_requires_approval: boolean;
+  allow_evidence_bytes: boolean;
+  export_expiry_days: number | null;
+  export_review_days: number | null;
+  legal_hold_eligible: boolean;
+  disposition_review_required: boolean;
+  actor_id: string;
+  actor_role: string;
+  reason: string;
+  idempotency_key: string | null;
+  created_at: string | null;
+  is_default: boolean;
+};
+
+export type GovernancePolicyListResponse = {
+  items: GovernancePolicy[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type GovernancePolicyVersionsResponse = GovernancePolicyListResponse;
+
+export type GovernanceRetentionState =
+  | "ACTIVE"
+  | "REVIEW_DUE"
+  | "LEGAL_HOLD"
+  | "DISPOSITION_REVIEW_REQUIRED"
+  | "DISPOSITION_APPROVED"
+  | "DISPOSITION_BLOCKED"
+  | "NOT_EVALUATED";
+
+export type GovernanceDataStatus = "OK" | "INCOMPLETE" | "UNAVAILABLE";
+
+export type GovernanceRetentionEvaluation = {
+  evaluation_id: string;
+  case_id: string;
+  evaluation_kind: "EVALUATION" | "REVIEW";
+  evaluation_version: number;
+  policy_id: string | null;
+  policy_version: number | null;
+  policy_snapshot: Record<string, unknown>;
+  as_of: string | null;
+  evaluated_at: string | null;
+  retention_start: string | null;
+  retention_deadline: string | null;
+  next_review_at: string | null;
+  governance_state: GovernanceRetentionState;
+  data_status: GovernanceDataStatus;
+  disposition_eligible: boolean;
+  integrity_status: string;
+  verification_id: string | null;
+  legal_hold_ids: string[];
+  reasons: string[];
+  reviewed_by: string | null;
+  review_reason: string | null;
+  created_by: string | null;
+  request_id: string | null;
+  idempotency_key: string | null;
+  created_at: string | null;
+  deletion_authorized: false;
+  deletion_note: string;
+};
+
+export type GovernanceRetentionQueueResponse = {
+  items: GovernanceRetentionEvaluation[];
+  total: number;
+  page: number;
+  page_size: number;
+  as_of: string;
+  non_claims: string[];
+};
+
+export type GovernanceRetentionCaseResponse = {
+  case: Record<string, unknown>;
+  evaluation: GovernanceRetentionEvaluation | null;
+  state: GovernanceRetentionState;
+  non_claims: string[];
+};
+
+export type GovernanceLegalHoldStatus =
+  | "PENDING_APPROVAL"
+  | "ACTIVE"
+  | "REJECTED"
+  | "RELEASED"
+  | "WITHDRAWN";
+
+export type GovernanceLegalHold = {
+  hold_id: string;
+  hold_number: string;
+  case_id: string;
+  evidence_reference_id: string | null;
+  status: GovernanceLegalHoldStatus;
+  scope: string;
+  reason: string;
+  requested_by: string;
+  requested_role: string;
+  requested_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  approval_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  released_by: string | null;
+  released_at: string | null;
+  release_reason: string | null;
+  withdrawn_by: string | null;
+  withdrawn_at: string | null;
+  withdrawal_reason: string | null;
+  version: number;
+  idempotency_key: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type GovernanceLegalHoldEvent = {
+  event_id: string;
+  hold_id: string;
+  event_type: string;
+  actor_id: string;
+  actor_role: string;
+  reason: string;
+  from_status: string | null;
+  to_status: string | null;
+  occurred_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceLegalHoldListResponse = {
+  items: GovernanceLegalHold[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type GovernanceLegalHoldDetail = {
+  hold: GovernanceLegalHold;
+  events: GovernanceLegalHoldEvent[];
+  non_claims: string[];
+};
+
+export type GovernanceDispositionStatus =
+  | "REVIEW_REQUIRED"
+  | "APPROVAL_PENDING"
+  | "APPROVED"
+  | "BLOCKED"
+  | "WITHDRAWN";
+
+export type GovernanceDisposition = {
+  disposition_id: string;
+  request_number: string;
+  case_id: string;
+  evaluation_id: string | null;
+  status: GovernanceDispositionStatus;
+  justification: string;
+  requested_by: string;
+  requested_role: string;
+  requested_at: string | null;
+  policy_id: string | null;
+  policy_version: number | null;
+  required_approval_level: "SINGLE_REVIEWER" | "DUAL_REVIEWER";
+  approval_count: number;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  decision_reason: string | null;
+  blocked_reason_codes: string[];
+  version: number;
+  idempotency_key: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  metadata: Record<string, unknown>;
+  physical_deletion_performed: false;
+  authorizes_future_process: boolean;
+  disposition_approval_note: string;
+};
+
+export type GovernanceDispositionDecisionRecord = {
+  decision_id: string;
+  disposition_id: string;
+  decision: string;
+  actor_id: string;
+  actor_role: string;
+  reason: string;
+  from_status: string;
+  to_status: string;
+  occurred_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceDispositionListResponse = {
+  items: GovernanceDisposition[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type GovernanceDispositionDetail = {
+  disposition: GovernanceDisposition;
+  decisions: GovernanceDispositionDecisionRecord[];
+  non_claims: string[];
+};
+
+export type GovernanceExportApprovalStatus =
+  | "PENDING_APPROVAL"
+  | "POLICY_AUTO_APPROVED"
+  | "APPROVED"
+  | "REJECTED"
+  | "WITHDRAWN"
+  | "GENERATED"
+  | "VERIFIED"
+  | "FAILED";
+
+export type GovernanceExportApproval = {
+  approval_id: string;
+  request_number: string;
+  case_id: string;
+  status: GovernanceExportApprovalStatus;
+  reason: string;
+  requested_by: string;
+  requested_role: string;
+  requested_at: string | null;
+  policy_id: string | null;
+  policy_version: number | null;
+  include_evidence_bytes: boolean;
+  required_approval_level: "SINGLE_REVIEWER" | "DUAL_REVIEWER";
+  approved_by: string | null;
+  approved_at: string | null;
+  approval_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  withdrawn_by: string | null;
+  withdrawn_at: string | null;
+  withdrawal_reason: string | null;
+  export_id: string | null;
+  export_sha256: string | null;
+  manifest_digest: string | null;
+  root_digest: string | null;
+  filename: string | null;
+  size_bytes: number | null;
+  file_count: number | null;
+  generated_by: string | null;
+  generated_at: string | null;
+  generation_error: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  verification_outcome: string;
+  verification_detail: string;
+  expires_at: string | null;
+  review_at: string | null;
+  version: number;
+  idempotency_key: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  metadata: Record<string, unknown>;
+  delivery_claimed: false;
+  external_recipient_validated: false;
+};
+
+export type GovernanceExportApprovalListResponse = {
+  items: GovernanceExportApproval[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type GovernanceAuditEvent = {
+  event_id: string;
+  event_type: string;
+  actor_id: string;
+  actor_role: string;
+  target_type: string;
+  target_id: string;
+  case_id: string | null;
+  outcome: string;
+  reason: string;
+  request_id: string | null;
+  occurred_at: string;
+  event_key: string;
+  event_hash: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceAuditListResponse = {
+  items: GovernanceAuditEvent[];
+  total: number;
+  page: number;
+  page_size: number;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceReportSection = {
+  status: string;
+  [key: string]: unknown;
+};
+
+export type GovernanceReportDetailRow = {
+  case_id: string;
+  case_number: string | null;
+  case_status: string | null;
+  case_type: string | null;
+  governance_state: GovernanceRetentionState;
+  data_status: GovernanceDataStatus;
+  policy_id: string | null;
+  policy_version: number | null;
+  retention_deadline: string | null;
+  next_review_at: string | null;
+  integrity_status: string;
+  disposition_eligible: boolean;
+  reasons: string[];
+  legal_hold_ids: string[];
+  deletion_authorized: false;
+};
+
+export type GovernanceComplianceReport = {
+  generated_at: string;
+  generated_by: string | null;
+  as_of: string;
+  scope: "SUMMARY" | "DETAIL";
+  case_id: string | null;
+  format: string;
+  assurance: string;
+  audit_assurance: string;
+  overall_status: string;
+  sections: Record<string, GovernanceReportSection>;
+  detail: GovernanceReportDetailRow[] | null;
+  regulatory_certification_claimed: false;
+  external_immutable_storage_claimed: false;
+  external_anchor_claimed: false;
+  automatic_deletion: false;
+  automatic_hold_release: false;
+  automatic_disposition_approval: false;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceStatus = {
+  enabled: boolean;
+  assurance: string;
+  policy_count: number;
+  evaluation_states: Record<string, number>;
+  hold_states: Record<string, number>;
+  disposition_states: Record<string, number>;
+  export_states: Record<string, number>;
+  audit_event_count: number;
+  audit_integrity: {
+    checked: number;
+    verified: number;
+    outcome: string;
+    assurance: string;
+  };
+  retention_scheduler: "DISABLED";
+  automatic_deletion: false;
+  automatic_hold_release: false;
+  automatic_disposition_approval: false;
+  regulatory_certification_claimed: false;
+  external_immutable_storage_claimed: false;
+  external_anchor_claimed: false;
+  non_claims: string[];
+  limitations: string[];
 };
