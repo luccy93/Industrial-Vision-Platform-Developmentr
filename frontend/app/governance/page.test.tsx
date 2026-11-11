@@ -345,4 +345,125 @@ describe("GovernancePage", () => {
     await userEvent.type(screen.getByLabelText("Release hold reason"), "Synthetic release.");
     expect(confirm).toBeEnabled();
   });
+
+  it("isolates a failing queue so other sections keep showing fresh data", async () => {
+    mockFetch((url) => {
+      if (url.includes("/api/v1/governance/holds")) {
+        return new Error("hold store unavailable");
+      }
+      return handler(url);
+    });
+    render(<GovernancePage />);
+
+    expect(await screen.findByText(/hold store unavailable/)).toBeInTheDocument();
+    // Neighbouring sections still render their own successful payloads.
+    expect(await screen.findByText(/Default governance policy/)).toBeInTheDocument();
+    expect(screen.getByText("REVIEW_DUE")).toBeInTheDocument();
+    expect(screen.getByText("DISP-20260101-00000001")).toBeInTheDocument();
+    // The failed queue shows an explicit error instead of stale hold rows.
+    expect(screen.queryByText("HOLD-2026-000001")).not.toBeInTheDocument();
+  });
+
+  it("gates DETAIL reports to administrators with an explicit case ID", async () => {
+    mockFetch(handler);
+    render(<GovernancePage />);
+    await screen.findByText("Governance & Compliance Readiness");
+
+    const generate = screen.getByRole("button", { name: "Generate report" });
+    expect(generate).toBeEnabled();
+    const scopeInputs = screen.getAllByLabelText("Scope");
+    await userEvent.selectOptions(scopeInputs[scopeInputs.length - 1], "DETAIL");
+    expect(generate).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeDisabled();
+
+    // The last "Case ID" input belongs to the report card; operator action
+    // forms are also visible for administrators.
+    const caseInputs = screen.getAllByLabelText("Case ID");
+    await userEvent.type(caseInputs[caseInputs.length - 1], "case-1");
+    expect(generate).toBeEnabled();
+    await userEvent.click(generate);
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      expect(
+        calls.some(
+          ([url]) =>
+            String(url).includes("scope=DETAIL") && String(url).includes("case_id=case-1")
+        )
+      ).toBe(true);
+    });
+  });
+
+  it("keeps DETAIL report generation disabled for viewers even with a case ID", async () => {
+    currentRole = "VIEWER";
+    mockFetch(handler);
+    render(<GovernancePage />);
+    await screen.findByText("Governance & Compliance Readiness");
+
+    await userEvent.selectOptions(screen.getByLabelText("Scope"), "DETAIL");
+    await userEvent.type(screen.getByLabelText("Case ID"), "case-1");
+    expect(screen.getByRole("button", { name: "Generate report" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeDisabled();
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("scope=DETAIL"))).toBe(false);
+  });
+
+  it("shows no download link before an export has been generated", async () => {
+    mockFetch(handler);
+    render(<GovernancePage />);
+
+    expect(await screen.findByText("EXPORT-20260101-00000001")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Download export" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Verify export" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate export" })).not.toBeInTheDocument();
+  });
+
+  it("separates generated export download from verification", async () => {
+    const generated = {
+      ...EXPORT,
+      status: "GENERATED",
+      version: 3,
+      export_id: "export-1",
+      export_sha256: "b".repeat(64),
+      filename: "forensic-export.zip",
+      size_bytes: 1024,
+      file_count: 2,
+      generated_by: "admin@example.com",
+      generated_at: "2026-01-01T00:00:02Z",
+      verification_outcome: "NOT_RUN",
+    };
+    mockFetch((url) => {
+      if (url.includes("/api/v1/governance/exports")) {
+        return { items: [generated], total: 1, page: 1, page_size: 50 };
+      }
+      return handler(url);
+    });
+    render(<GovernancePage />);
+
+    const download = await screen.findByRole("link", { name: "Download export" });
+    expect(download.getAttribute("href")).toContain(
+      "/api/v1/governance/exports/approval-1/download"
+    );
+    expect(screen.getByRole("button", { name: "Verify export" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate export" })).not.toBeInTheDocument();
+    expect(screen.getByText(/verification: NOT_RUN/)).toBeInTheDocument();
+    expect(screen.getByText(/delivery claimed: no/)).toBeInTheDocument();
+  });
+
+  it("keeps the non-claim and limitation language visible", async () => {
+    mockFetch(handler);
+    render(<GovernancePage />);
+
+    expect(await screen.findByText(/No automatic physical evidence deletion/)).toBeInTheDocument();
+    expect(screen.getByText("Retention evaluation is manual.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Not a regulatory certification or legal compliance attestation/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Local audit records do not establish immutable storage/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/No automatic deletion, no automatic hold release, and no automatic disposition approval/)
+    ).toBeInTheDocument();
+  });
 });

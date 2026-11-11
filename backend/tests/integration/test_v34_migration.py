@@ -104,8 +104,9 @@ def test_forensic_migration_upgrade_and_downgrade_cycle(tmp_path, monkeypatch) -
     export_indexes = _indexes(url, "forensic_exports")
     assert export_indexes["ix_forensic_exports_storage_relative_path"].get("unique")
 
-    # V34 reverses alone: only forensic tables disappear.
-    command.downgrade(config, "-1")
+    # V34 reverses alone: only forensic tables disappear. V35 is the current
+    # head, so downgrade explicitly to the V16 head (010) rather than "-1".
+    command.downgrade(config, "010_add_notification_mute")
     remaining = _tables(url)
     assert _FORENSIC_TABLES.isdisjoint(remaining)
     assert _PRIOR_TABLES <= remaining

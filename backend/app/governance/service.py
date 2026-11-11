@@ -71,6 +71,8 @@ from backend.app.governance.errors import (
     GovernanceDisabledError,
     GovernanceError,
     GovernanceReportError,
+    IdempotencyConflictError,
+    LegalHoldNotFoundError,
     PolicyNotFoundError,
     PolicyValidationError,
     SeparationOfDutiesError,
@@ -405,6 +407,7 @@ class GovernanceService:
         as_of: datetime | date | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_enabled()
         return self._evaluate(
             case_id,
             actor_id=actor_id,
@@ -423,6 +426,7 @@ class GovernanceService:
         as_of: datetime | date | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_enabled()
         limit = min(
             MAX_BATCH_SIZE,
             max(1, int(getattr(self._settings, "governance_retention_batch_limit", 100))),
@@ -457,6 +461,7 @@ class GovernanceService:
         as_of: datetime | date | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_enabled()
         if not str(reason or "").strip():
             raise PolicyValidationError("a review reason is required")
         latest = self._repository.latest_evaluation(case_id)
@@ -794,7 +799,7 @@ class GovernanceService:
             raise PolicyValidationError("a legal-hold action reason is required")
         hold = self._repository.get_hold(hold_id)
         if hold is None:
-            raise GovernanceError(f"legal hold not found: {hold_id}")
+            raise LegalHoldNotFoundError(hold_id)
         actor = actor_id or "SYSTEM"
         if target_status in {LegalHoldStatus.ACTIVE.value, LegalHoldStatus.REJECTED.value}:
             if actor == str(hold.get("requested_by")):
@@ -945,7 +950,7 @@ class GovernanceService:
     def get_legal_hold(self, hold_id: str) -> dict[str, Any]:
         hold = self._repository.get_hold(hold_id)
         if hold is None:
-            raise GovernanceError(f"legal hold not found: {hold_id}")
+            raise LegalHoldNotFoundError(hold_id)
         return {
             "hold": hold,
             "events": self._repository.list_hold_events(hold_id),
@@ -1143,6 +1148,20 @@ class GovernanceService:
         row = self._repository.get_disposition(disposition_id)
         if row is None:
             raise DispositionNotFoundError(disposition_id)
+        if idempotency_key:
+            stored_decision = self._repository.find_disposition_decision_by_key(idempotency_key)
+            if stored_decision is not None:
+                if str(stored_decision.get("disposition_id") or "") != str(row.get("disposition_id") or ""):
+                    raise IdempotencyConflictError(
+                        "idempotency key was already used for a different disposition decision"
+                    )
+                return {
+                    "disposition": row,
+                    "decisions": self._repository.list_disposition_decisions(disposition_id),
+                    "replayed": True,
+                    "non_claims": list(GOVERNANCE_NON_CLAIMS),
+                    "physical_deletion_performed": False,
+                }
         current = str(row.get("status") or "").upper()
         if current not in OPEN_DISPOSITION_STATUSES:
             raise DispositionStateError(f"disposition request is already {current}")
@@ -1586,6 +1605,17 @@ class GovernanceService:
             check_blockers=False,
         )
 
+    def _existing_export(self, row: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return an already-generated package for idempotent generation replay."""
+        export_id = str(row.get("export_id") or row.get("approval_id") or "")
+        if not export_id:
+            return None
+        try:
+            export = self._forensic_service.get_export(export_id)
+        except Exception:
+            return None
+        return export if isinstance(export, dict) else None
+
     def generate_export(
         self,
         approval_id: str,
@@ -1600,6 +1630,21 @@ class GovernanceService:
             raise ExportApprovalNotFoundError(approval_id)
         status = str(row.get("status") or "").upper()
         if status not in EXPORT_GENERATION_READY_STATUSES:
+            if status in {
+                ExportApprovalStatus.GENERATED.value,
+                ExportApprovalStatus.VERIFIED.value,
+                ExportApprovalStatus.VERIFICATION_FAILED.value,
+            }:
+                existing = self._existing_export(row)
+                if existing is not None:
+                    return {
+                        "approval": row,
+                        "export": existing,
+                        "replayed": True,
+                        "delivery_claimed": False,
+                        "external_recipient_validated": False,
+                        "non_claims": list(GOVERNANCE_NON_CLAIMS),
+                    }
             raise ExportApprovalStateError(f"export approval is not generation-ready: {status}")
         codes = self._export_blockers(row)
         if codes:

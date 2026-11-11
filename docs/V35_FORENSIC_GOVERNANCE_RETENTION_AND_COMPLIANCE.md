@@ -147,7 +147,9 @@ Transitions are explicit:
 Approval/rejection/release require the ADMIN-only `legal_hold_approve`
 capability and a reason. The requester cannot approve their own hold. Rejected,
 released, and withdrawn holds remain queryable with their event history. There
-is no expiry, automatic release, or silent removal.
+is no expiry, automatic release, or silent removal. Hold actions accept an
+optional idempotency key: replaying the same action returns the stored hold and
+`replayed=true`; reusing a key for another hold is a `409` conflict.
 
 ## Disposition review
 
@@ -174,7 +176,10 @@ policies require two distinct reviewers. Approval is blocked when:
 All decisions and reasons are appended. Approval sets
 `physical_deletion_performed=false` and
 `authorizes_future_process=true`. No physical deletion is performed or
-scheduled.
+scheduled. A decision request carrying an idempotency key is replay-safe even
+after the disposition reaches a terminal status: the stored decision is
+returned with `replayed=true`, while the same key used for a different
+disposition is a `409` conflict.
 
 ## Export approvals
 
@@ -197,6 +202,11 @@ governance policy checks, preserving the existing
 
 `delivery_claimed=false` and `external_recipient_validated=false` are always
 reported. A download link or generation record is not evidence of delivery.
+Generation is idempotent for an already generated, verified, or
+verification-failed approval: repeating generation returns the existing V34
+package with `replayed=true` instead of creating a second package or failing
+with a state conflict. A new or active hold still blocks new generation, but it
+does not hide an already generated package.
 
 ## Governance access audit
 
@@ -359,7 +369,9 @@ default and reuses existing notification/delivery rows with deterministic dedup.
 ```powershell
 python -m pytest backend/tests/unit/test_v35_governance.py `
   backend/tests/unit/test_v35_retention.py `
-  backend/tests/integration/test_v35_governance_api.py -q
+  backend/tests/integration/test_v35_governance_api.py `
+  backend/tests/integration/test_v35_governance_hardening.py `
+  backend/tests/integration/test_v35_migration.py -q
 python -m pytest backend/tests/unit/test_v34_forensics.py `
   backend/tests/integration/test_v34_forensics_api.py -q
 python -m ruff check backend
@@ -376,4 +388,15 @@ The focused tests cover policy versioning, deterministic retention evaluation,
 missing metadata, hold overlap and separation of duties, disposition blocking,
 export approval/generation/verification separation, audit digest verification,
 report aggregation, CSV output, RBAC, pagination, idempotency, and migration
-upgrade/downgrade/re-upgrade.
+upgrade/downgrade/re-upgrade. The hardening suite adds: no DELETE route or
+OpenAPI surface, the full 401/403 capability matrix, cross-case evidence and
+idempotency isolation, replay after terminal disposition and export states,
+hold-blocked new generation with existing-package replay, integrity-failure
+blocking, default-policy protection, bounded retention batches, audit tamper
+detection with report degradation, secret redaction across every governance
+surface, governance-disabled/not-initialized `503` behavior, V34 read/export
+audit hooks, and a no-deletion check over case, custody, and evidence records.
+The migration test exercises the SQLite upgrade/downgrade/re-upgrade cycle,
+seeded default policy, all 13 SQLite triggers, append-only UPDATE/DELETE
+enforcement, mutable-row DELETE enforcement, and offline PostgreSQL SQL with
+eight triggers and no cascade actions.

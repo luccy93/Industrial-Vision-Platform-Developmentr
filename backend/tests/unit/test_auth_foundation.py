@@ -44,6 +44,29 @@ def test_role_matrix_least_privilege() -> None:
     assert not can(Role.VIEWER, "forensic_verify")
     assert can(Role.VIEWER, "read")
     assert can("operator", "incident_write")
+    assert can(Role.ADMIN, "governance_read")
+    assert can(Role.ADMIN, "governance_policy_write")
+    assert can(Role.ADMIN, "legal_hold_approve")
+    assert can(Role.ADMIN, "disposition_review")
+    assert can(Role.ADMIN, "forensic_export_approve")
+    assert can(Role.ADMIN, "governance_audit_read")
+    assert can(Role.ADMIN, "governance_report_generate")
+    assert can(Role.OPERATOR, "governance_read")
+    assert can(Role.OPERATOR, "retention_evaluate")
+    assert can(Role.OPERATOR, "legal_hold_write")
+    assert can(Role.OPERATOR, "disposition_request")
+    assert can(Role.OPERATOR, "forensic_export_request")
+    assert not can(Role.OPERATOR, "governance_policy_write")
+    assert not can(Role.OPERATOR, "legal_hold_approve")
+    assert not can(Role.OPERATOR, "disposition_review")
+    assert not can(Role.OPERATOR, "forensic_export_approve")
+    assert not can(Role.OPERATOR, "governance_audit_read")
+    assert not can(Role.OPERATOR, "governance_report_generate")
+    assert can(Role.VIEWER, "governance_read")
+    assert not can(Role.VIEWER, "retention_evaluate")
+    assert not can(Role.VIEWER, "legal_hold_write")
+    assert not can(Role.VIEWER, "disposition_request")
+    assert not can(Role.VIEWER, "forensic_export_request")
     assert capabilities_for(Role.ADMIN) == frozenset(
         {
             "read",
@@ -55,6 +78,17 @@ def test_role_matrix_least_privilege() -> None:
             "forensic_verify",
             "forensic_case_close",
             "forensic_export",
+            "governance_read",
+            "governance_policy_write",
+            "retention_evaluate",
+            "legal_hold_write",
+            "legal_hold_approve",
+            "disposition_request",
+            "disposition_review",
+            "forensic_export_request",
+            "forensic_export_approve",
+            "governance_audit_read",
+            "governance_report_generate",
             "admin_config",
             "user_admin",
         }

@@ -780,6 +780,20 @@ class GovernanceRepository:
             )
             return [_disposition_decision_to_dict(row) for row in rows]
 
+    def find_disposition_decision_by_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Return the stored decision for an idempotency key, if any.
+
+        This lookup lets the service replay a completed decision even after the
+        disposition has reached a terminal status.
+        """
+        with self._session_factory() as session:
+            row = (
+                session.query(GovernanceDispositionDecisionORM)
+                .filter_by(idempotency_key=str(idempotency_key))
+                .one_or_none()
+            )
+            return _disposition_decision_to_dict(row) if row is not None else None
+
     def get_export_approval(self, approval_id: str) -> dict[str, Any] | None:
         with self._session_factory() as session:
             row = session.query(GovernanceExportApprovalORM).filter_by(id=str(approval_id)).one_or_none()
