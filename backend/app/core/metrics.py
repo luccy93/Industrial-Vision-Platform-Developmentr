@@ -344,6 +344,7 @@ _AUTOMATION_REMINDER_OUTCOMES = frozenset(
         "NO_RULE",
         "DISABLED",
         "MUTED",
+        "NOOP",
         "ERROR",
     }
 )

@@ -10,22 +10,31 @@ generates forensic exports.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from backend.app.core.logging import get_logger
 from backend.app.core.metrics import (
     record_governance_automation_job,
     record_governance_automation_recovery,
+    record_governance_automation_reminder,
+    record_governance_automation_snapshot,
 )
 from backend.app.core.redaction import redact_text
 from backend.app.domain.common import utcnow
 from backend.app.governance.automation.constants import (
     AUTOMATION_NON_CLAIMS,
+    DISPOSITION_REVIEW_DUE_EVENT,
+    EXPORT_APPROVAL_REVIEW_DUE_EVENT,
+    LEGAL_HOLD_PENDING_APPROVAL_EVENT,
+    LEGAL_HOLD_REVIEW_DUE_EVENT,
     MAX_ERROR_LENGTH,
     MAX_RESULT_BYTES,
+    REMINDER_CATEGORY_BY_JOB_TYPE,
+    RETENTION_REVIEW_DUE_EVENT,
+    SNAPSHOT_TYPE_COMPLIANCE_SUMMARY,
     JobStatus,
     JobType,
     normalize_utc,
@@ -42,6 +51,16 @@ from backend.app.governance.automation.repository import GovernanceAutomationRep
 from backend.app.governance.service import GovernanceService
 
 logger = get_logger(__name__)
+
+_REMINDER_OUTCOMES = (
+    "QUEUED",
+    "DEDUPLICATED",
+    "COOLDOWN",
+    "NO_RULE",
+    "DISABLED",
+    "NOOP",
+    "ERROR",
+)
 
 
 def _slot_as_of(job: Mapping[str, Any], clock: Callable[[], datetime]) -> datetime:
@@ -60,6 +79,25 @@ def _slot_as_of(job: Mapping[str, Any], clock: Callable[[], datetime]) -> dateti
         except ValueError:
             pass
     return normalize_utc(clock())
+
+
+def _parse_moment(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return normalize_utc(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return normalize_utc(datetime.fromisoformat(value.strip().replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None
+
+
+def _reminder_window(context: JobContext) -> str:
+    """Stable per-window reminder identity for dedup (slot or run timestamp)."""
+    slot = str(context.job.get("schedule_slot") or "").strip()
+    if slot:
+        return slot
+    return normalize_utc(context.as_of).strftime("%Y%m%dT%H%M%SZ")
 
 
 @dataclass
@@ -110,6 +148,7 @@ class GovernanceJobExecutor:
         governance_service: GovernanceService,
         forensic_repository: Any,
         integrity_service: Any | None = None,
+        notifier: Any | None = None,
         clock: Callable[[], datetime] | None = None,
         lease_seconds: float = 120.0,
         timeout_seconds: float = 300.0,
@@ -118,11 +157,17 @@ class GovernanceJobExecutor:
         self._governance = governance_service
         self._forensics = forensic_repository
         self._integrity = integrity_service
+        self._notifier = notifier
         self._clock = clock or utcnow
         self._lease_seconds = max(1.0, float(lease_seconds))
         self._timeout_seconds = max(1.0, float(timeout_seconds))
         self._handlers: dict[str, Callable[[JobContext], dict[str, Any]]] = {
             JobType.RETENTION_EVALUATION.value: self._run_retention_evaluation,
+            JobType.RETENTION_REVIEW_REMINDERS.value: self._run_retention_review_reminders,
+            JobType.LEGAL_HOLD_REMINDERS.value: self._run_legal_hold_reminders,
+            JobType.DISPOSITION_REVIEW_REMINDERS.value: self._run_disposition_review_reminders,
+            JobType.EXPORT_APPROVAL_REMINDERS.value: self._run_export_approval_reminders,
+            JobType.COMPLIANCE_SNAPSHOT.value: self._run_compliance_snapshot,
             JobType.GOVERNANCE_HEALTH_CHECK.value: self._run_health_check,
         }
 
@@ -141,6 +186,10 @@ class GovernanceJobExecutor:
     @property
     def timeout_seconds(self) -> float:
         return self._timeout_seconds
+
+    @property
+    def notifier_enabled(self) -> bool:
+        return bool(self._notifier is not None and getattr(self._notifier, "enabled", False))
 
     def supported_job_types(self) -> frozenset[str]:
         return frozenset(self._handlers)
@@ -359,6 +408,405 @@ class GovernanceJobExecutor:
             "governance_states": states,
             "integrity_states": integrity_states,
             "destructive": False,
+            "non_claims": list(AUTOMATION_NON_CLAIMS),
+        }
+
+    # ------------------------------------------------------------------
+    # Reminder handlers (V15 notification pipeline; reminder-only)
+    # ------------------------------------------------------------------
+    def _case_payload(self, case_id: str) -> dict[str, Any]:
+        """Minimal case context for a notification (never evidence bytes)."""
+        payload: dict[str, Any] = {"case_id": case_id}
+        try:
+            case = self._forensics.get_case(case_id)
+        except Exception:  # noqa: BLE001 - reminders must not fail on enrichment
+            case = None
+        if isinstance(case, Mapping):
+            payload.update(
+                {
+                    "case_number": case.get("case_number"),
+                    "status": case.get("status"),
+                    "priority": case.get("priority"),
+                    "originating_incident_id": case.get("originating_incident_id"),
+                    "version": case.get("version"),
+                }
+            )
+        return payload
+
+    def _reminder_once(
+        self,
+        context: JobContext,
+        *,
+        category: str,
+        event_type: str,
+        target_type: str,
+        target_id: str,
+        detail: str,
+        case_id: str | None = None,
+        reason_codes: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Queue at most one deduplicated reminder for one target/window."""
+        if not self.notifier_enabled:
+            record_governance_automation_reminder(category, "DISABLED")
+            return {
+                "target_type": target_type,
+                "target_id": target_id,
+                "event_type": event_type,
+                "outcome": "DISABLED",
+                "queued": 0,
+                "duplicate": 0,
+                "suppressed": 0,
+                "no_rule": 0,
+                "failed": 0,
+            }
+        case = self._case_payload(case_id) if case_id else None
+        try:
+            stats = self._notifier.notify_event(
+                event_type=event_type,
+                case=case,
+                target_type=target_type,
+                target_id=target_id,
+                severity="HIGH",
+                detail=detail,
+                reason_codes=reason_codes,
+                dedup_version=_reminder_window(context),
+            )
+        except Exception as exc:  # noqa: BLE001 - one reminder never stops the job
+            record_governance_automation_reminder(category, "ERROR")
+            logger.warning(
+                "governance reminder failed category=%s error=%s",
+                category,
+                type(exc).__name__,
+            )
+            return {
+                "target_type": target_type,
+                "target_id": target_id,
+                "event_type": event_type,
+                "outcome": "ERROR",
+                "queued": 0,
+                "duplicate": 0,
+                "suppressed": 0,
+                "no_rule": 0,
+                "failed": 1,
+            }
+        if stats.get("failed", 0):
+            outcome = "ERROR"
+        elif stats.get("queued", 0):
+            outcome = "QUEUED"
+        elif stats.get("duplicate", 0):
+            outcome = "DEDUPLICATED"
+        elif stats.get("suppressed", 0):
+            outcome = "COOLDOWN"
+        elif stats.get("no_rule", 0):
+            outcome = "NO_RULE"
+        else:
+            outcome = "NOOP"
+        record_governance_automation_reminder(category, outcome)
+        return {
+            "target_type": target_type,
+            "target_id": target_id,
+            "event_type": event_type,
+            "outcome": outcome,
+            "queued": int(stats.get("queued", 0)),
+            "duplicate": int(stats.get("duplicate", 0)),
+            "suppressed": int(stats.get("suppressed", 0)),
+            "no_rule": int(stats.get("no_rule", 0)),
+            "failed": int(stats.get("failed", 0)),
+        }
+
+    def _reminder_summary(
+        self,
+        context: JobContext,
+        *,
+        category: str,
+        candidates: int,
+        results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        counts = {outcome: 0 for outcome in _REMINDER_OUTCOMES}
+        queued = duplicate = suppressed = no_rule = failed = 0
+        for item in results:
+            outcome = str(item.get("outcome") or "NOOP")
+            counts[outcome] = counts.get(outcome, 0) + 1
+            queued += int(item.get("queued", 0))
+            duplicate += int(item.get("duplicate", 0))
+            suppressed += int(item.get("suppressed", 0))
+            no_rule += int(item.get("no_rule", 0))
+            failed += int(item.get("failed", 0))
+        return {
+            "job_type": context.job_type,
+            "category": category,
+            "as_of": context.as_of.isoformat(),
+            "reminder_window": _reminder_window(context),
+            "candidates": int(candidates),
+            "evaluated": len(results),
+            "queued": queued,
+            "deduplicated": duplicate,
+            "cooldown": suppressed,
+            "no_rule": no_rule,
+            "failed": failed,
+            "notifier_enabled": self.notifier_enabled,
+            "outcomes": counts,
+            "items": results[:20],
+            "truncated": len(results) > 20,
+            "automatic_hold_release": False,
+            "automatic_disposition_approval": False,
+            "automatic_export_generation": False,
+            "non_claims": list(AUTOMATION_NON_CLAIMS),
+        }
+
+    def _run_retention_review_reminders(self, context: JobContext) -> dict[str, Any]:
+        """Remind reviewers about retention reviews that are due or upcoming."""
+        category = REMINDER_CATEGORY_BY_JOB_TYPE[JobType.RETENTION_REVIEW_REMINDERS.value]
+        max_items = int(context.config.get("max_items", 100))
+        upcoming_days = int(context.config.get("upcoming_days", 30))
+        horizon = context.as_of + timedelta(days=upcoming_days)
+        queue = self._governance.retention_queue(page=1, page_size=max_items, as_of=context.as_of)
+        candidates: list[tuple[datetime, dict[str, Any]]] = []
+        for item in queue.get("items") or []:
+            next_review = _parse_moment(item.get("next_review_at"))
+            deadline = _parse_moment(item.get("retention_deadline"))
+            state = str(item.get("governance_state") or "")
+            due_at = next_review or deadline
+            if (
+                state == "REVIEW_DUE"
+                or (next_review is not None and next_review <= horizon)
+                or (deadline is not None and deadline <= context.as_of)
+            ):
+                candidates.append((due_at or context.as_of, item))
+        candidates.sort(key=lambda pair: (pair[0], str(pair[1].get("evaluation_id") or "")))
+        results: list[dict[str, Any]] = []
+        for due_at, item in candidates[:max_items]:
+            context.checkpoint()
+            evaluation_id = str(item.get("evaluation_id") or "")
+            case_id = str(item.get("case_id") or "")
+            state = str(item.get("governance_state") or "UNKNOWN")
+            results.append(
+                self._reminder_once(
+                    context,
+                    category=category,
+                    event_type=RETENTION_REVIEW_DUE_EVENT,
+                    target_type="RETENTION_EVALUATION",
+                    target_id=evaluation_id or case_id,
+                    case_id=case_id or None,
+                    detail=(
+                        f"Retention review is due by {due_at.isoformat()}; "
+                        f"governance state is {state}. Review the retention queue; "
+                        "this reminder never deletes evidence."
+                    ),
+                    reason_codes=["RETENTION_REVIEW_DUE"],
+                )
+            )
+        return self._reminder_summary(
+            context,
+            category=category,
+            candidates=len(candidates),
+            results=results,
+        )
+
+    def _run_legal_hold_reminders(self, context: JobContext) -> dict[str, Any]:
+        """Remind reviewers about pending approvals and aging active holds."""
+        category = REMINDER_CATEGORY_BY_JOB_TYPE[JobType.LEGAL_HOLD_REMINDERS.value]
+        max_items = int(context.config.get("max_items", 100))
+        age_days = int(context.config.get("active_hold_age_days", 30))
+        include_pending = bool(context.config.get("include_pending_approval", True))
+        include_active = bool(context.config.get("include_active_holds", True))
+        candidates: list[tuple[datetime, str, dict[str, Any]]] = []
+        if include_pending:
+            pending = self._governance.list_legal_holds(
+                statuses=["PENDING_APPROVAL"], page=1, page_size=max_items
+            )
+            for item in pending.get("items") or []:
+                requested = _parse_moment(item.get("requested_at")) or context.as_of
+                candidates.append((requested, LEGAL_HOLD_PENDING_APPROVAL_EVENT, item))
+        if include_active:
+            active = self._governance.list_legal_holds(statuses=["ACTIVE"], page=1, page_size=max_items)
+            threshold = context.as_of - timedelta(days=age_days)
+            for item in active.get("items") or []:
+                approved = (
+                    _parse_moment(item.get("approved_at"))
+                    or _parse_moment(item.get("requested_at"))
+                    or context.as_of
+                )
+                if age_days > 0 and approved > threshold:
+                    continue
+                candidates.append((approved, LEGAL_HOLD_REVIEW_DUE_EVENT, item))
+        candidates.sort(key=lambda pair: (pair[0], str(pair[2].get("hold_id") or "")))
+        results: list[dict[str, Any]] = []
+        for since, event_type, item in candidates[:max_items]:
+            context.checkpoint()
+            hold_id = str(item.get("hold_id") or "")
+            status = str(item.get("status") or "UNKNOWN")
+            results.append(
+                self._reminder_once(
+                    context,
+                    category=category,
+                    event_type=event_type,
+                    target_type="LEGAL_HOLD",
+                    target_id=hold_id,
+                    case_id=str(item.get("case_id") or "") or None,
+                    detail=(
+                        f"Legal hold {item.get('hold_number') or hold_id} is {status} "
+                        f"since {since.isoformat()}. Review the hold workspace; "
+                        "this reminder never approves, rejects, or releases a hold."
+                    ),
+                    reason_codes=[event_type],
+                )
+            )
+        return self._reminder_summary(
+            context,
+            category=category,
+            candidates=len(candidates),
+            results=results,
+        )
+
+    def _run_disposition_review_reminders(self, context: JobContext) -> dict[str, Any]:
+        """Remind reviewers about open disposition reviews."""
+        category = REMINDER_CATEGORY_BY_JOB_TYPE[JobType.DISPOSITION_REVIEW_REMINDERS.value]
+        max_items = int(context.config.get("max_items", 100))
+        min_age_days = int(context.config.get("min_age_days", 1))
+        threshold = context.as_of - timedelta(days=min_age_days)
+        listing = self._governance.list_dispositions(
+            statuses=["REVIEW_REQUIRED", "APPROVAL_PENDING"],
+            page=1,
+            page_size=max_items,
+        )
+        candidates: list[tuple[datetime, dict[str, Any]]] = []
+        for item in listing.get("items") or []:
+            requested = _parse_moment(item.get("requested_at")) or context.as_of
+            if min_age_days > 0 and requested > threshold:
+                continue
+            candidates.append((requested, item))
+        candidates.sort(key=lambda pair: (pair[0], str(pair[1].get("disposition_id") or "")))
+        results: list[dict[str, Any]] = []
+        for requested, item in candidates[:max_items]:
+            context.checkpoint()
+            disposition_id = str(item.get("disposition_id") or "")
+            status = str(item.get("status") or "UNKNOWN")
+            results.append(
+                self._reminder_once(
+                    context,
+                    category=category,
+                    event_type=DISPOSITION_REVIEW_DUE_EVENT,
+                    target_type="DISPOSITION",
+                    target_id=disposition_id,
+                    case_id=str(item.get("case_id") or "") or None,
+                    detail=(
+                        f"Disposition {item.get('request_number') or disposition_id} "
+                        f"is {status} since {requested.isoformat()}. Review the "
+                        "disposition queue; this reminder never approves or rejects "
+                        "a disposition and never deletes evidence."
+                    ),
+                    reason_codes=[DISPOSITION_REVIEW_DUE_EVENT],
+                )
+            )
+        return self._reminder_summary(
+            context,
+            category=category,
+            candidates=len(candidates),
+            results=results,
+        )
+
+    def _run_export_approval_reminders(self, context: JobContext) -> dict[str, Any]:
+        """Remind reviewers about export approvals that are still pending."""
+        category = REMINDER_CATEGORY_BY_JOB_TYPE[JobType.EXPORT_APPROVAL_REMINDERS.value]
+        max_items = int(context.config.get("max_items", 100))
+        upcoming_days = int(context.config.get("upcoming_days", 14))
+        horizon = context.as_of + timedelta(days=upcoming_days)
+        listing = self._governance.list_export_approvals(
+            statuses=["PENDING_APPROVAL"], page=1, page_size=max_items
+        )
+        candidates: list[tuple[datetime, dict[str, Any]]] = []
+        for item in listing.get("items") or []:
+            requested = _parse_moment(item.get("requested_at")) or context.as_of
+            expires = _parse_moment(item.get("expires_at"))
+            if expires is not None and expires > horizon:
+                continue
+            candidates.append((requested, item))
+        candidates.sort(key=lambda pair: (pair[0], str(pair[1].get("approval_id") or "")))
+        results: list[dict[str, Any]] = []
+        for requested, item in candidates[:max_items]:
+            context.checkpoint()
+            approval_id = str(item.get("approval_id") or "")
+            results.append(
+                self._reminder_once(
+                    context,
+                    category=category,
+                    event_type=EXPORT_APPROVAL_REVIEW_DUE_EVENT,
+                    target_type="EXPORT_APPROVAL",
+                    target_id=approval_id,
+                    case_id=str(item.get("case_id") or "") or None,
+                    detail=(
+                        f"Export approval {item.get('request_number') or approval_id} "
+                        f"has been pending since {requested.isoformat()}. Review the "
+                        "approval queue; this reminder never generates an export, and "
+                        "generation/download still require the forensic_export capability."
+                    ),
+                    reason_codes=[EXPORT_APPROVAL_REVIEW_DUE_EVENT],
+                )
+            )
+        return self._reminder_summary(
+            context,
+            category=category,
+            candidates=len(candidates),
+            results=results,
+        )
+
+    # ------------------------------------------------------------------
+    # Compliance snapshot handler
+    # ------------------------------------------------------------------
+    def _run_compliance_snapshot(self, context: JobContext) -> dict[str, Any]:
+        """Persist a SUMMARY compliance snapshot with a local self-digest."""
+        context.checkpoint()
+        window = _reminder_window(context)
+        dedup_key = (f"snapshot:{SNAPSHOT_TYPE_COMPLIANCE_SUMMARY}:{context.trigger.lower()}:{window}")[:200]
+        existing = self._repository.find_snapshot_by_dedup_key(dedup_key)
+        if existing is not None:
+            record_governance_automation_snapshot(context.trigger, "REPLAYED")
+            return {
+                "job_type": JobType.COMPLIANCE_SNAPSHOT.value,
+                "snapshot_id": existing["snapshot_id"],
+                "snapshot_type": existing["snapshot_type"],
+                "payload_digest": existing["payload_digest"],
+                "digest_valid": existing["digest_valid"],
+                "row_count": existing["row_count"],
+                "as_of": existing["as_of"],
+                "replayed": True,
+                "non_claims": list(AUTOMATION_NON_CLAIMS),
+            }
+        report = self._governance.compliance_report(
+            scope="SUMMARY",
+            format="JSON",
+            actor_id="governance-automation",
+            actor_role="SYSTEM",
+            as_of=context.as_of,
+            request_id=f"job:{context.job_id}",
+        )
+        payload = dict(report or {})
+        sections = payload.get("sections")
+        retention = sections.get("retention") if isinstance(sections, Mapping) else None
+        row_count = int(retention.get("evaluated_cases", 0) or 0) if isinstance(retention, Mapping) else 0
+        snapshot, created = self._repository.create_snapshot(
+            snapshot_type=SNAPSHOT_TYPE_COMPLIANCE_SUMMARY,
+            as_of=context.as_of,
+            generated_by="governance-automation",
+            dedup_key=dedup_key,
+            payload=payload,
+            row_count=row_count,
+            job_id=context.job_id,
+            trigger=context.trigger,
+            now=self._clock(),
+        )
+        record_governance_automation_snapshot(context.trigger, "CREATED" if created else "REPLAYED")
+        return {
+            "job_type": JobType.COMPLIANCE_SNAPSHOT.value,
+            "snapshot_id": snapshot["snapshot_id"],
+            "snapshot_type": snapshot["snapshot_type"],
+            "payload_digest": snapshot["payload_digest"],
+            "digest_valid": snapshot["digest_valid"],
+            "row_count": snapshot["row_count"],
+            "as_of": snapshot["as_of"],
+            "overall_status": payload.get("overall_status"),
+            "replayed": not created,
             "non_claims": list(AUTOMATION_NON_CLAIMS),
         }
 

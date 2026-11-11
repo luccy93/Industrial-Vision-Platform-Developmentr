@@ -1853,3 +1853,221 @@ export type GovernanceStatus = {
   non_claims: string[];
   limitations: string[];
 };
+
+// ---------------------------------------------------------------------------
+// V36 governance automation
+// ---------------------------------------------------------------------------
+export type GovernanceAutomationJobType =
+  | "RETENTION_EVALUATION"
+  | "RETENTION_REVIEW_REMINDERS"
+  | "LEGAL_HOLD_REMINDERS"
+  | "DISPOSITION_REVIEW_REMINDERS"
+  | "EXPORT_APPROVAL_REMINDERS"
+  | "COMPLIANCE_SNAPSHOT"
+  | "GOVERNANCE_HEALTH_CHECK";
+
+export type GovernanceAutomationJobStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELLED"
+  | "UNAVAILABLE";
+
+export type GovernanceAutomationTrigger = "SCHEDULE" | "MANUAL" | "RETRY" | "RECOVERY";
+
+export type GovernanceAutomationSchedule = {
+  schedule_id: string;
+  job_type: GovernanceAutomationJobType;
+  enabled: boolean;
+  interval_minutes: number;
+  config: Record<string, unknown>;
+  config_version: number;
+  last_slot: string | null;
+  last_idempotency_key: string | null;
+  updated_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type GovernanceAutomationJob = {
+  job_id: string;
+  job_type: GovernanceAutomationJobType;
+  status: GovernanceAutomationJobStatus;
+  trigger: GovernanceAutomationTrigger;
+  schedule_slot: string | null;
+  dedup_key: string;
+  retry_of_job_id: string | null;
+  attempt: number;
+  max_attempts: number;
+  config_version: number | null;
+  config_snapshot: Record<string, unknown>;
+  requested_by: string | null;
+  requested_role: string | null;
+  request_id: string | null;
+  created_at: string | null;
+  available_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  heartbeat_at: string | null;
+  cancel_requested_at: string | null;
+  cancel_requested_by: string | null;
+  cancel_requested: boolean;
+  result: Record<string, unknown>;
+  error_code: string | null;
+  error_message: string | null;
+};
+
+export type GovernanceAutomationJobEvent = {
+  event_id: string;
+  job_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  actor_id: string | null;
+  actor_role: string | null;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceAutomationStatus = {
+  enabled: boolean;
+  assurance: string;
+  scheduler: {
+    enabled: boolean;
+    state: string;
+    running: boolean;
+    name?: string;
+    queue?: Record<string, number>;
+    stale_jobs?: number;
+    cycles?: number;
+    enqueued?: number;
+    executed?: number;
+    failed?: number;
+    recovered?: number;
+    last_cycle_at?: string | null;
+    last_success_at?: string | null;
+  };
+  schedule_count: number;
+  enabled_schedule_count: number;
+  schedules: GovernanceAutomationSchedule[];
+  queue: Record<string, number>;
+  job_count: number;
+  snapshot_count: number;
+  last_jobs: Record<string, GovernanceAutomationJob>;
+  stale_jobs: number;
+  supported_job_types: string[];
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceAutomationHealth = {
+  enabled: boolean;
+  overall_status: "OK" | "DEGRADED" | "FAILED";
+  scheduler: {
+    enabled: boolean;
+    state: string;
+    running: boolean;
+    queue?: Record<string, number>;
+    stale_jobs?: number;
+  };
+  governance_audit: {
+    outcome: string;
+    checked?: number;
+    verified?: number;
+    assurance?: string;
+    error?: string;
+  };
+  integrity: {
+    status: string;
+    latest_audit_status?: string;
+    store_status?: string;
+    open_findings?: number;
+    error?: string;
+  };
+  queue: Record<string, number>;
+  stale_jobs: number;
+  generated_at: string | null;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceAutomationScheduleListResponse = {
+  items: GovernanceAutomationSchedule[];
+  automation_enabled: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceAutomationJobListResponse = {
+  items: GovernanceAutomationJob[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type GovernanceAutomationJobDetail = {
+  job: GovernanceAutomationJob;
+  events: GovernanceAutomationJobEvent[];
+  non_claims: string[];
+};
+
+export type GovernanceReminderItem = {
+  notification_id: string;
+  event_type: string;
+  target_type: string | null;
+  target_id: string | null;
+  case_id: string | null;
+  reminder_window: string | null;
+  severity: string;
+  created_at: string | null;
+  muted: boolean;
+  muted_until: string | null;
+  delivery_state: "PENDING" | "DELIVERED" | "FAILED" | "PARTIAL";
+  delivery_claimed: false;
+  channels: string[];
+};
+
+export type GovernanceReminderActivity = {
+  items: GovernanceReminderItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary_limit: number;
+  by_event_type: Record<string, number>;
+  delivery_states: Record<string, number>;
+  muted: number;
+  notifier_enabled: boolean;
+  delivery_claimed: false;
+  non_claims: string[];
+};
+
+export type GovernanceSnapshot = {
+  snapshot_id: string;
+  snapshot_type: string;
+  as_of: string | null;
+  generated_at: string | null;
+  generated_by: string | null;
+  job_id: string | null;
+  trigger: string;
+  dedup_key: string;
+  payload_digest: string;
+  digest_valid: boolean;
+  row_count: number;
+  schema_version: number;
+  payload: Record<string, unknown>;
+};
+
+export type GovernanceSnapshotListResponse = {
+  items: GovernanceSnapshot[];
+  total: number;
+  page: number;
+  page_size: number;
+  non_claims: string[];
+};
+
+export type GovernanceSnapshotDetail = {
+  snapshot: GovernanceSnapshot;
+  non_claims: string[];
+};

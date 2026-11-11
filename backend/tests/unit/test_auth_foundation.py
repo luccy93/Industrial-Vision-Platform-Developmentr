@@ -51,18 +51,36 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.ADMIN, "forensic_export_approve")
     assert can(Role.ADMIN, "governance_audit_read")
     assert can(Role.ADMIN, "governance_report_generate")
+    assert can(Role.ADMIN, "governance_automation_read")
+    assert can(Role.ADMIN, "governance_automation_configure")
+    assert can(Role.ADMIN, "governance_automation_retry")
+    assert can(Role.ADMIN, "governance_automation_cancel")
+    assert can(Role.ADMIN, "governance_snapshot_read")
+    assert can(Role.ADMIN, "governance_snapshot_generate")
     assert can(Role.OPERATOR, "governance_read")
     assert can(Role.OPERATOR, "retention_evaluate")
     assert can(Role.OPERATOR, "legal_hold_write")
     assert can(Role.OPERATOR, "disposition_request")
     assert can(Role.OPERATOR, "forensic_export_request")
+    assert can(Role.OPERATOR, "governance_automation_read")
+    assert can(Role.OPERATOR, "governance_automation_retry")
+    assert can(Role.OPERATOR, "governance_automation_cancel")
+    assert can(Role.OPERATOR, "governance_snapshot_read")
+    assert can(Role.OPERATOR, "governance_snapshot_generate")
     assert not can(Role.OPERATOR, "governance_policy_write")
+    assert not can(Role.OPERATOR, "governance_automation_configure")
     assert not can(Role.OPERATOR, "legal_hold_approve")
     assert not can(Role.OPERATOR, "disposition_review")
     assert not can(Role.OPERATOR, "forensic_export_approve")
     assert not can(Role.OPERATOR, "governance_audit_read")
     assert not can(Role.OPERATOR, "governance_report_generate")
     assert can(Role.VIEWER, "governance_read")
+    assert can(Role.VIEWER, "governance_automation_read")
+    assert can(Role.VIEWER, "governance_snapshot_read")
+    assert not can(Role.VIEWER, "governance_automation_configure")
+    assert not can(Role.VIEWER, "governance_automation_retry")
+    assert not can(Role.VIEWER, "governance_automation_cancel")
+    assert not can(Role.VIEWER, "governance_snapshot_generate")
     assert not can(Role.VIEWER, "retention_evaluate")
     assert not can(Role.VIEWER, "legal_hold_write")
     assert not can(Role.VIEWER, "disposition_request")
@@ -89,6 +107,12 @@ def test_role_matrix_least_privilege() -> None:
             "forensic_export_approve",
             "governance_audit_read",
             "governance_report_generate",
+            "governance_automation_read",
+            "governance_automation_configure",
+            "governance_automation_retry",
+            "governance_automation_cancel",
+            "governance_snapshot_read",
+            "governance_snapshot_generate",
             "admin_config",
             "user_admin",
         }

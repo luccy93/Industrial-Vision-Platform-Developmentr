@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -111,7 +112,37 @@ class ExportApprovalActionRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=128)
 
 
+# ---------------------------------------------------------------------------
+# V36 governance automation
+# ---------------------------------------------------------------------------
+class AutomationScheduleUpdateRequest(BaseModel):
+    enabled: bool = False
+    interval_minutes: int = Field(default=1440, ge=5, le=10080)
+    config: dict[str, Any] = Field(default_factory=dict)
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2048)
+
+
+class AutomationRunRequest(BaseModel):
+    job_type: str = Field(min_length=1, max_length=64)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2048)
+
+
+class AutomationActionRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=2048)
+
+
+class AutomationSnapshotGenerateRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2048)
+
+
 __all__ = [
+    "AutomationActionRequest",
+    "AutomationRunRequest",
+    "AutomationScheduleUpdateRequest",
+    "AutomationSnapshotGenerateRequest",
     "DispositionCreateRequest",
     "DispositionDecisionRequest",
     "DispositionWithdrawRequest",

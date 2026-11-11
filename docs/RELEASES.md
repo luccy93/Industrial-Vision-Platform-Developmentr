@@ -1021,3 +1021,33 @@ process. Export approval does not prove external delivery or recipient
 validation. Governance audit is local and self-digested; no external immutable
 storage or trust anchor is claimed. See
 [V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md](V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md).
+
+## V36 release impact
+
+V36 adds an additive Alembic revision, `013_create_governance_automation`,
+creating only governance schedule, job, job-event, and snapshot tables after
+`012_create_governance`. Existing V01–V35 tables, evidence references, custody
+records, export IDs, paths, hashes, and semantics are untouched; `downgrade()`
+drops only the V36 tables. No release tag, image publication, workflow
+dispatch, or deployment is part of V36.
+
+New runtime configuration is additive: `GOVERNANCE_AUTOMATION_ENABLED`,
+`GOVERNANCE_AUTOMATION_POLL_SECONDS`,
+`GOVERNANCE_AUTOMATION_LEASE_SECONDS`,
+`GOVERNANCE_AUTOMATION_MAX_ATTEMPTS`,
+`GOVERNANCE_AUTOMATION_RETRY_BASE_SECONDS`,
+`GOVERNANCE_AUTOMATION_RETRY_MAX_SECONDS`,
+`GOVERNANCE_AUTOMATION_JOB_TIMEOUT_SECONDS`,
+`GOVERNANCE_AUTOMATION_MAX_PENDING_JOBS`, and
+`GOVERNANCE_AUTOMATION_MAX_JOBS_PER_TICK`. Deployments must run the migration
+before enabling automation.
+
+V36 is opt-in and disabled by default. It schedules non-destructive retention
+evaluation, deduplicated review reminders, local compliance snapshots, and
+health checks. It never deletes evidence, automatically releases a legal hold,
+automatically approves or rejects a disposition, or generates a forensic
+export. Reminder delivery depends on existing V15 GOVERNANCE alert rules and
+is reported as local queue state, not an external delivery guarantee.
+Compliance snapshots are local self-digested SUMMARY records, not regulatory
+certification, immutable storage, or external trust anchors. See
+[V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).

@@ -39,6 +39,18 @@ Capability assignments (locked V16 decisions):
   ADMIN only. Generation and download still require ``forensic_export``.
 - ``governance_audit_read``: read append-only governance access audit — ADMIN.
 - ``governance_report_generate``: generate DETAIL readiness reports — ADMIN.
+- ``governance_automation_read``: read automation status, health, schedules,
+  jobs, and reminder activity — all roles.
+- ``governance_automation_configure``: enable/disable schedules and edit bounded
+  interval/config values — ADMIN only.
+- ``governance_automation_retry``: manually run a job or retry a terminal job —
+  ADMIN, OPERATOR.
+- ``governance_automation_cancel``: cancel a pending job or request cooperative
+  cancellation of a running job — ADMIN, OPERATOR.
+- ``governance_snapshot_read``: read compliance snapshot history and CSV — all
+  roles.
+- ``governance_snapshot_generate``: generate a compliance snapshot on demand —
+  ADMIN, OPERATOR.
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -79,6 +91,12 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "forensic_export_approve": frozenset({Role.ADMIN}),
     "governance_audit_read": frozenset({Role.ADMIN}),
     "governance_report_generate": frozenset({Role.ADMIN}),
+    "governance_automation_read": frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER}),
+    "governance_automation_configure": frozenset({Role.ADMIN}),
+    "governance_automation_retry": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_automation_cancel": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_snapshot_read": frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER}),
+    "governance_snapshot_generate": frozenset({Role.ADMIN, Role.OPERATOR}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

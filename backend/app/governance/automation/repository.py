@@ -27,6 +27,7 @@ from backend.app.governance.automation.constants import (
     JOB_TYPE_VALUES,
     MAX_DEDUP_KEY_LENGTH,
     MAX_ERROR_LENGTH,
+    REMINDER_EVENT_TYPES,
     SNAPSHOT_SCHEMA_VERSION,
     JobEventType,
     JobStatus,
@@ -41,6 +42,7 @@ from backend.app.governance.automation.errors import (
     ScheduleVersionConflictError,
     SnapshotNotFoundError,
 )
+from backend.app.models.alerting_orm import DeliveryAttemptORM, NotificationORM
 from backend.app.models.governance_automation_orm import (
     GovernanceJobEventORM,
     GovernanceJobORM,
@@ -826,6 +828,118 @@ class GovernanceAutomationRepository:
     def count_jobs(self) -> int:
         with self._session_factory() as session:
             return int(session.query(GovernanceJobORM).count())
+
+    # ------------------------------------------------------------------
+    # Reminder activity (V15 notification queue state; never a delivery claim)
+    # ------------------------------------------------------------------
+    def reminder_activity(
+        self,
+        *,
+        event_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Summarize reminder notifications and their local delivery rows.
+
+        ``PENDING`` means queued locally without a successful delivery attempt;
+        it is not evidence that an external channel received the message.
+        Summary counters cover the most recent 1000 matching reminders.
+        """
+        page = max(1, int(page))
+        page_size = min(100, max(1, int(page_size)))
+        moment = normalize_utc(now or utcnow())
+        with self._session_factory() as session:
+            base = session.query(NotificationORM).filter(
+                NotificationORM.source_domain == "GOVERNANCE",
+                NotificationORM.event_type.in_(sorted(REMINDER_EVENT_TYPES)),
+            )
+            if event_type:
+                base = base.filter(NotificationORM.event_type == str(event_type).upper())
+            total = int(base.count())
+            rows = (
+                base.order_by(NotificationORM.created_at.desc(), NotificationORM.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            summary_rows = (
+                base.with_entities(
+                    NotificationORM.id,
+                    NotificationORM.event_type,
+                    NotificationORM.muted_until,
+                )
+                .order_by(NotificationORM.created_at.desc())
+                .limit(1000)
+                .all()
+            )
+            summary_ids = [str(row.id) for row in summary_rows]
+            status_map: dict[str, list[str]] = {job_id: [] for job_id in summary_ids}
+            page_ids = [str(row.id) for row in rows]
+            lookup_ids = list(dict.fromkeys([*summary_ids, *page_ids]))
+            if lookup_ids:
+                for notification_id, status in (
+                    session.query(DeliveryAttemptORM.notification_id, DeliveryAttemptORM.status)
+                    .filter(DeliveryAttemptORM.notification_id.in_(lookup_ids))
+                    .all()
+                ):
+                    status_map.setdefault(str(notification_id), []).append(str(status or "").lower())
+
+            def _delivery_state(states: list[str]) -> str:
+                unique = set(states)
+                if not unique:
+                    return "PENDING"
+                if unique == {"sent"}:
+                    return "DELIVERED"
+                if unique == {"failed"}:
+                    return "FAILED"
+                if unique & {"sent", "failed"}:
+                    return "PARTIAL"
+                return "PENDING"
+
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                context = _safe_dict(row.context)
+                deliveries = status_map.get(str(row.id), [])
+                muted_until = row.muted_until
+                items.append(
+                    {
+                        "notification_id": row.id,
+                        "event_type": row.event_type,
+                        "target_type": context.get("target_type"),
+                        "target_id": context.get("target_id"),
+                        "case_id": context.get("case_id"),
+                        "reminder_window": context.get("reminder_window"),
+                        "severity": row.severity,
+                        "created_at": _iso(row.created_at),
+                        "muted": bool(muted_until is not None and normalize_utc(muted_until) > moment),
+                        "muted_until": _iso(muted_until),
+                        "delivery_state": _delivery_state(deliveries),
+                        "delivery_claimed": False,
+                        "channels": sorted(set(deliveries)),
+                    }
+                )
+
+            by_event_type: dict[str, int] = {}
+            delivery_states = {"PENDING": 0, "DELIVERED": 0, "FAILED": 0, "PARTIAL": 0}
+            muted_total = 0
+            for row in summary_rows:
+                key = str(row.event_type)
+                by_event_type[key] = by_event_type.get(key, 0) + 1
+                delivery_states[_delivery_state(status_map.get(str(row.id), []))] += 1
+                if row.muted_until is not None and normalize_utc(row.muted_until) > moment:
+                    muted_total += 1
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "summary_limit": 1000,
+                "by_event_type": by_event_type,
+                "delivery_states": delivery_states,
+                "muted": muted_total,
+                "delivery_claimed": False,
+            }
 
     # ------------------------------------------------------------------
     # Snapshots

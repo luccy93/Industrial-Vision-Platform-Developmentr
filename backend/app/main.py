@@ -751,6 +751,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     governance_repository: GovernanceRepository | None = None
     governance_service: GovernanceService | None = None
+    governance_notifier: GovernanceNotifier | None = None
     if settings.governance_enabled and forensic_repository is not None:
         try:
             governance_repository = GovernanceRepository(app.state.session_factory)
@@ -781,6 +782,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             governance_service = None
     app.state.governance_repository = governance_repository
     app.state.governance_service = governance_service
+    app.state.governance_notifier = governance_notifier
 
     # V36: opt-in governance automation. Schedules are seeded disabled and the
     # scheduler thread starts only in lifespan when the global flag is on.
@@ -806,6 +808,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 governance_service=governance_service,
                 forensic_repository=forensic_repository,
                 integrity_service=integrity_service,
+                notifier=governance_notifier,
                 lease_seconds=float(settings.governance_automation_lease_seconds),
                 timeout_seconds=float(settings.governance_automation_job_timeout_seconds),
             )
@@ -1090,6 +1093,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.governance import router as governance_router
 
     app.include_router(governance_router)
+    from backend.app.api.v1.governance_automation import router as governance_automation_router
+
+    app.include_router(governance_automation_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

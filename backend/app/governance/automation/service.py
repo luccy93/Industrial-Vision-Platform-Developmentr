@@ -266,6 +266,25 @@ class GovernanceAutomationService:
             "non_claims": list(AUTOMATION_NON_CLAIMS),
         }
 
+    def reminder_activity(
+        self,
+        *,
+        event_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """Read local reminder queue state; pending is not a delivery claim."""
+        payload = self._repository.reminder_activity(
+            event_type=event_type,
+            page=page,
+            page_size=page_size,
+            now=self._clock(),
+        )
+        payload["notifier_enabled"] = bool(self._executor.notifier_enabled)
+        payload["delivery_claimed"] = False
+        payload["non_claims"] = list(AUTOMATION_NON_CLAIMS)
+        return payload
+
     def run_now(
         self,
         *,
@@ -501,11 +520,9 @@ class GovernanceAutomationService:
             request_id=request_id,
         )
         payload = dict(report.get("report") or report)
-        row_count = int(
-            (payload.get("summary") or {}).get("evaluation_count", 0)
-            if isinstance(payload.get("summary"), Mapping)
-            else 0
-        )
+        sections = payload.get("sections")
+        retention = sections.get("retention") if isinstance(sections, Mapping) else None
+        row_count = int(retention.get("evaluated_cases", 0) or 0) if isinstance(retention, Mapping) else 0
         snapshot, created = self._repository.create_snapshot(
             snapshot_type=SNAPSHOT_TYPE_COMPLIANCE_SUMMARY,
             as_of=as_of,

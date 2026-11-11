@@ -257,7 +257,147 @@ const REPORT = {
   limitations: ["Retention evaluation is manual."],
 };
 
+const AUTOMATION_STATUS = {
+  enabled: false,
+  assurance: "LOCAL_GOVERNANCE_AUTOMATION_ONLY",
+  scheduler: {
+    enabled: false,
+    state: "DISABLED",
+    running: false,
+    queue: { PENDING: 0, RUNNING: 0 },
+    stale_jobs: 0,
+  },
+  schedule_count: 7,
+  enabled_schedule_count: 0,
+  schedules: [],
+  queue: { PENDING: 0, RUNNING: 0, SUCCEEDED: 1 },
+  job_count: 1,
+  snapshot_count: 1,
+  last_jobs: {},
+  stale_jobs: 0,
+  supported_job_types: [
+    "RETENTION_EVALUATION",
+    "RETENTION_REVIEW_REMINDERS",
+    "LEGAL_HOLD_REMINDERS",
+    "DISPOSITION_REVIEW_REMINDERS",
+    "EXPORT_APPROVAL_REMINDERS",
+    "COMPLIANCE_SNAPSHOT",
+    "GOVERNANCE_HEALTH_CHECK",
+  ],
+  non_claims: ["No automatic physical evidence deletion is performed."],
+  limitations: ["Scheduled retention evaluation is non-destructive."],
+};
+
+const AUTOMATION_SCHEDULE = {
+  schedule_id: "sched-retention",
+  job_type: "RETENTION_EVALUATION",
+  enabled: false,
+  interval_minutes: 1440,
+  config: {},
+  config_version: 1,
+  last_slot: null,
+  last_idempotency_key: null,
+  updated_by: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
+const AUTOMATION_JOB = {
+  job_id: "job-1",
+  job_type: "GOVERNANCE_HEALTH_CHECK",
+  status: "SUCCEEDED",
+  trigger: "MANUAL",
+  schedule_slot: null,
+  dedup_key: "manual:health:1",
+  retry_of_job_id: null,
+  attempt: 1,
+  max_attempts: 3,
+  config_version: null,
+  config_snapshot: {},
+  requested_by: "operator@example.com",
+  requested_role: "OPERATOR",
+  request_id: "req-1",
+  created_at: "2026-01-01T00:00:00Z",
+  available_at: "2026-01-01T00:00:00Z",
+  started_at: "2026-01-01T00:00:01Z",
+  finished_at: "2026-01-01T00:00:02Z",
+  lease_owner: null,
+  lease_expires_at: null,
+  heartbeat_at: null,
+  cancel_requested_at: null,
+  cancel_requested_by: null,
+  cancel_requested: false,
+  result: { status: "OK" },
+  error_code: null,
+  error_message: null,
+};
+
+const AUTOMATION_SNAPSHOT = {
+  snapshot_id: "snapshot-1",
+  snapshot_type: "COMPLIANCE_SUMMARY",
+  as_of: "2026-01-01",
+  generated_at: "2026-01-01T00:00:00Z",
+  generated_by: "operator@example.com",
+  job_id: "job-1",
+  trigger: "MANUAL",
+  dedup_key: "snapshot:1",
+  payload_digest: "c".repeat(64),
+  digest_valid: true,
+  row_count: 1,
+  schema_version: 1,
+  payload: {},
+};
+
+const AUTOMATION_REMINDERS = {
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: 20,
+  summary_limit: 1000,
+  by_event_type: {},
+  delivery_states: { PENDING: 0, DELIVERED: 0, FAILED: 0, PARTIAL: 0 },
+  muted: 0,
+  notifier_enabled: false,
+  delivery_claimed: false,
+  non_claims: [],
+};
+
+const AUTOMATION_HEALTH = {
+  enabled: false,
+  overall_status: "OK",
+  scheduler: { enabled: false, state: "DISABLED", running: false },
+  governance_audit: { outcome: "OK", checked: 1, verified: 1 },
+  integrity: { status: "OK", latest_audit_status: "PASS" },
+  queue: { PENDING: 0, RUNNING: 0 },
+  stale_jobs: 0,
+  generated_at: "2026-01-01T00:00:00Z",
+  assurance: "LOCAL_GOVERNANCE_AUTOMATION_ONLY",
+  non_claims: ["No automatic physical evidence deletion is performed."],
+};
+
 function handler(url: string): unknown {
+  if (url.includes("/api/v1/governance/automation/status")) return AUTOMATION_STATUS;
+  if (url.includes("/api/v1/governance/automation/health")) return AUTOMATION_HEALTH;
+  if (url.includes("/api/v1/governance/automation/schedules")) {
+    return {
+      items: [AUTOMATION_SCHEDULE],
+      automation_enabled: false,
+      non_claims: [],
+    };
+  }
+  if (url.includes("/api/v1/governance/automation/jobs")) {
+    return { items: [AUTOMATION_JOB], total: 1, page: 1, page_size: 10 };
+  }
+  if (url.includes("/api/v1/governance/automation/snapshots")) {
+    return {
+      items: [AUTOMATION_SNAPSHOT],
+      total: 1,
+      page: 1,
+      page_size: 10,
+      non_claims: [],
+    };
+  }
+  if (url.includes("/api/v1/governance/automation/reminders")) return AUTOMATION_REMINDERS;
   if (url.includes("/api/v1/governance/status")) return STATUS;
   if (url.includes("/api/v1/governance/policies")) {
     return { items: [POLICY], total: 1, page: 1, page_size: 50 };
@@ -315,7 +455,7 @@ describe("GovernancePage", () => {
     expect(screen.getByText("EXPORT-20260101-00000001")).toBeInTheDocument();
     expect(screen.getByText("EXPORT_REQUESTED")).toBeInTheDocument();
     expect(screen.getAllByText("REVIEW_REQUIRED").length).toBeGreaterThan(0);
-    expect(screen.getByText(/No automatic physical evidence deletion/)).toBeInTheDocument();
+    expect(screen.getAllByText(/No automatic physical evidence deletion/).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Create policy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Release hold" })).toBeInTheDocument();
   });
@@ -454,7 +594,7 @@ describe("GovernancePage", () => {
     mockFetch(handler);
     render(<GovernancePage />);
 
-    expect(await screen.findByText(/No automatic physical evidence deletion/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/No automatic physical evidence deletion/)).length).toBeGreaterThan(0);
     expect(screen.getByText("Retention evaluation is manual.")).toBeInTheDocument();
     expect(
       screen.getByText(/Not a regulatory certification or legal compliance attestation/)

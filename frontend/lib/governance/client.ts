@@ -3,6 +3,13 @@ import { dispatchUnauthorized } from "../auth/session";
 import { apiFetch } from "../operations/client";
 import type {
   GovernanceAuditListResponse,
+  GovernanceAutomationHealth,
+  GovernanceAutomationJobDetail,
+  GovernanceAutomationJobListResponse,
+  GovernanceAutomationJobType,
+  GovernanceAutomationSchedule,
+  GovernanceAutomationScheduleListResponse,
+  GovernanceAutomationStatus,
   GovernanceComplianceReport,
   GovernanceDispositionDetail,
   GovernanceDispositionListResponse,
@@ -13,8 +20,12 @@ import type {
   GovernancePolicy,
   GovernancePolicyListResponse,
   GovernancePolicyVersionsResponse,
+  GovernanceReminderActivity,
   GovernanceRetentionCaseResponse,
   GovernanceRetentionQueueResponse,
+  GovernanceSnapshot,
+  GovernanceSnapshotDetail,
+  GovernanceSnapshotListResponse,
   GovernanceStatus,
 } from "../../types";
 
@@ -370,4 +381,156 @@ export async function downloadGovernanceComplianceCsv(
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+// ---------------------------------------------------------------------------
+// V36 governance automation
+// ---------------------------------------------------------------------------
+export function fetchGovernanceAutomationStatus(
+  signal?: AbortSignal
+): Promise<GovernanceAutomationStatus> {
+  return apiFetch<GovernanceAutomationStatus>("/api/v1/governance/automation/status", {
+    signal,
+  });
+}
+
+export function fetchGovernanceAutomationHealth(
+  signal?: AbortSignal
+): Promise<GovernanceAutomationHealth> {
+  return apiFetch<GovernanceAutomationHealth>("/api/v1/governance/automation/health", {
+    signal,
+  });
+}
+
+export function fetchGovernanceAutomationSchedules(
+  signal?: AbortSignal
+): Promise<GovernanceAutomationScheduleListResponse> {
+  return apiFetch<GovernanceAutomationScheduleListResponse>(
+    "/api/v1/governance/automation/schedules",
+    { signal }
+  );
+}
+
+export function updateGovernanceAutomationSchedule(
+  jobType: GovernanceAutomationJobType | string,
+  input: {
+    enabled: boolean;
+    interval_minutes: number;
+    config: Record<string, unknown>;
+    expected_version: number;
+    reason: string;
+  }
+): Promise<{ schedule: GovernanceAutomationSchedule; non_claims: string[] }> {
+  return apiFetch(
+    `/api/v1/governance/automation/schedules/${encodeURIComponent(jobType)}`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceAutomationJobs(
+  params: {
+    job_type?: string;
+    status?: string;
+    trigger?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceAutomationJobListResponse> {
+  return apiFetch<GovernanceAutomationJobListResponse>(
+    `/api/v1/governance/automation/jobs${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceAutomationJob(
+  jobId: string,
+  signal?: AbortSignal
+): Promise<GovernanceAutomationJobDetail> {
+  return apiFetch<GovernanceAutomationJobDetail>(
+    `/api/v1/governance/automation/jobs/${encodeURIComponent(jobId)}`,
+    { signal }
+  );
+}
+
+export function runGovernanceAutomationJob(input: {
+  job_type: GovernanceAutomationJobType | string;
+  idempotency_key: string;
+  reason: string;
+}): Promise<{ job: Record<string, unknown>; replayed: boolean; executed: boolean }> {
+  return apiFetch("/api/v1/governance/automation/jobs/run", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function retryGovernanceAutomationJob(
+  jobId: string,
+  input: { reason: string }
+): Promise<{ job: Record<string, unknown>; replayed: boolean; executed: boolean }> {
+  return apiFetch(
+    `/api/v1/governance/automation/jobs/${encodeURIComponent(jobId)}/retry`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function cancelGovernanceAutomationJob(
+  jobId: string,
+  input: { reason: string }
+): Promise<{
+  job: Record<string, unknown>;
+  cancelled: boolean;
+  cancel_requested: boolean;
+  non_claims: string[];
+}> {
+  return apiFetch(
+    `/api/v1/governance/automation/jobs/${encodeURIComponent(jobId)}/cancel`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceSnapshots(
+  params: { snapshot_type?: string; page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceSnapshotListResponse> {
+  return apiFetch<GovernanceSnapshotListResponse>(
+    `/api/v1/governance/automation/snapshots${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceSnapshot(
+  snapshotId: string,
+  signal?: AbortSignal
+): Promise<GovernanceSnapshotDetail> {
+  return apiFetch<GovernanceSnapshotDetail>(
+    `/api/v1/governance/automation/snapshots/${encodeURIComponent(snapshotId)}`,
+    { signal }
+  );
+}
+
+export function generateGovernanceSnapshot(input: {
+  idempotency_key: string;
+  reason: string;
+}): Promise<{ snapshot: GovernanceSnapshot; replayed: boolean; non_claims: string[] }> {
+  return apiFetch("/api/v1/governance/automation/snapshots", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function governanceSnapshotCsvUrl(snapshotId: string): string {
+  return `${appConfig.apiUrl}/api/v1/governance/automation/snapshots/${encodeURIComponent(
+    snapshotId
+  )}/csv`;
+}
+
+export function fetchGovernanceReminderActivity(
+  params: { event_type?: string; page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceReminderActivity> {
+  return apiFetch<GovernanceReminderActivity>(
+    `/api/v1/governance/automation/reminders${queryString(params)}`,
+    { signal }
+  );
 }

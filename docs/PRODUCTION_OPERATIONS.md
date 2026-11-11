@@ -555,8 +555,8 @@ $env:GOVERNANCE_ALERT_COOLDOWN_SECONDS="300"
 
 The seeded `POL-DEFAULT` policy intentionally has no retention or review
 duration. Configure organization-defined values with a recorded reason; V35
-does not invent regulatory durations. Retention evaluation is manual and
-bounded, with no background scheduler.
+does not invent regulatory durations. Retention evaluation is manual unless V36
+automation is explicitly enabled.
 
 Governance has strict separation of duties: operators request holds,
 dispositions, and export approvals; only an independent ADMIN approves/rejects/
@@ -572,6 +572,54 @@ expire or release automatically. Export approval does not prove delivery.
 Governance audit is `LOCAL_SELF_DIGEST_ONLY`; no regulatory certification,
 external immutable storage, or external trust anchor is claimed. See
 [V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md](V35_FORENSIC_GOVERNANCE_RETENTION_AND_COMPLIANCE.md).
+
+### Governance automation and compliance operations (V36)
+
+V36 adds opt-in automation to the existing `/governance` workspace and V35
+APIs. Alembic revision `013_create_governance_automation` follows
+`012_create_governance` and creates only V36-owned schedule, job, job-event,
+and snapshot tables. Foreign keys are non-cascading and `downgrade()` drops
+only the V36 tables.
+
+```powershell
+$env:GOVERNANCE_AUTOMATION_ENABLED="false"
+$env:GOVERNANCE_AUTOMATION_POLL_SECONDS="30"
+$env:GOVERNANCE_AUTOMATION_LEASE_SECONDS="120"
+$env:GOVERNANCE_AUTOMATION_MAX_ATTEMPTS="3"
+$env:GOVERNANCE_AUTOMATION_RETRY_BASE_SECONDS="30"
+$env:GOVERNANCE_AUTOMATION_RETRY_MAX_SECONDS="900"
+$env:GOVERNANCE_AUTOMATION_JOB_TIMEOUT_SECONDS="300"
+$env:GOVERNANCE_AUTOMATION_MAX_PENDING_JOBS="100"
+$env:GOVERNANCE_AUTOMATION_MAX_JOBS_PER_TICK="5"
+```
+
+Automation is disabled by default and requires both the global flag and
+explicit per-schedule enablement. All seven schedules are seeded disabled.
+Schedules are UTC epoch-aligned; one slot creates at most one job and missed
+slots are not replayed. Schedule configuration is ADMIN-only and versioned.
+Manual runs/retries and cancellation require ADMIN or OPERATOR.
+
+Scheduled retention evaluation is non-destructive. Reminders flow through the
+existing V15 notification and delivery pipeline under the `GOVERNANCE` domain;
+they never approve or release a hold, decide a disposition, or generate an
+export. A `PENDING` reminder means queued locally, not externally delivered.
+Snapshots are local SUMMARY records with a self-digest and are not regulatory
+certification or external anchors. No job, event, snapshot, evidence, hold, or
+audit record is deleted by V36.
+
+Operational sequence:
+
+1. Run the Alembic upgrade before enabling automation.
+2. Keep the global flag off until schedules and V15 alert rules are reviewed.
+3. Enable one schedule at a time with a recorded reason.
+4. Check `/api/v1/governance/automation/health`; `DEGRADED`/`FAILED` is not a
+   pass. Integrity is `OK` only when the latest V33 audit status is `PASS`.
+5. Recover stale leases to `UNAVAILABLE`, inspect job events, then retry with a
+   reason. Cancellation is cooperative for running jobs.
+6. Plan capacity for retained automation history; V36 performs no pruning.
+
+See
+[V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).
 
 ## Frontend security headers
 

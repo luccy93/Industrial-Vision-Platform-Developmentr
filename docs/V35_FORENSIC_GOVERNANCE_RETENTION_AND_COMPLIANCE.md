@@ -400,3 +400,18 @@ The migration test exercises the SQLite upgrade/downgrade/re-upgrade cycle,
 seeded default policy, all 13 SQLite triggers, append-only UPDATE/DELETE
 enforcement, mutable-row DELETE enforcement, and offline PostgreSQL SQL with
 eight triggers and no cascade actions.
+
+## Relationship to V36 governance automation
+
+V36 adds opt-in automation above this V35 layer without changing V35 evidence,
+case, custody, export, hold, disposition, policy, report, or audit semantics.
+V36 reuses the V35 governance service and V15 notification pipeline, adds the
+additive revision `013_create_governance_automation`, and seeds every schedule
+disabled. When `GOVERNANCE_AUTOMATION_ENABLED=false` (the default), retention
+evaluation remains manual exactly as described in this document.
+
+V36 scheduled retention evaluation is non-destructive. V36 reminders are review
+prompts and never approve or release a hold, approve or reject a disposition, or
+generate an export. V36 snapshots are local self-digested SUMMARY records and
+are not a regulatory certification or external trust anchor. See
+[V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).

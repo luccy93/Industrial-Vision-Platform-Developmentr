@@ -61,6 +61,11 @@ class GovernanceNotifier:
         self._cooldown_seconds = max(0, int(cooldown_seconds))
         self._webhook_urls = [str(url) for url in webhook_urls if str(url).strip()][:5]
 
+    @property
+    def enabled(self) -> bool:
+        """Whether governance notifications are queued in this deployment."""
+        return self._enabled
+
     def notify_event(
         self,
         *,
@@ -71,6 +76,7 @@ class GovernanceNotifier:
         severity: str = "MEDIUM",
         detail: str = "",
         reason_codes: Sequence[str] = (),
+        dedup_version: str | int | None = None,
     ) -> dict[str, int]:
         stats = {
             "considered": 0,
@@ -121,6 +127,7 @@ class GovernanceNotifier:
                     target_id=target_id,
                     detail=detail,
                     reason_codes=reason_codes,
+                    dedup_version=dedup_version,
                 )
             except Exception as exc:
                 logger.warning("governance notification failed: %s", type(exc).__name__)
@@ -138,6 +145,7 @@ class GovernanceNotifier:
         target_id: str,
         detail: str,
         reason_codes: Sequence[str],
+        dedup_version: str | int | None = None,
     ) -> None:
         now = utcnow()
         event_type = str(candidate["event_type"])
@@ -145,7 +153,8 @@ class GovernanceNotifier:
         case_number = str(case.get("case_number") or "")
         version = int(case.get("version") or 1)
         safe_target = redact_text(str(target_id or ""))[:128]
-        dedup_key = (f"governance:{rule.id}:{event_type}:{target_type}:{safe_target}:{version}")[:256]
+        window = "" if dedup_version in (None, "") else f":{redact_text(str(dedup_version))[:48]}"
+        dedup_key = (f"governance:{rule.id}:{event_type}:{target_type}:{safe_target}:{version}{window}")[:256]
         cooldown_key = f"governance:{target_type}:{safe_target}:{event_type}"[:128]
         with self._session_factory() as session:
             if (
@@ -183,6 +192,7 @@ class GovernanceNotifier:
             "priority": candidate["priority"],
             "reason_codes": [str(code)[:64] for code in list(reason_codes)[:20]],
             "case_version": version,
+            "reminder_window": window.lstrip(":") or None,
             "delivery_status": "pending",
             "delivery_claimed": False,
             "automatic_deletion": False,

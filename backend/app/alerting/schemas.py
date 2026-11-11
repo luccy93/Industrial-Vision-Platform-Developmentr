@@ -94,6 +94,7 @@ ALERTABLE_TRANSITION_TYPES = frozenset(
 
 
 def _alertable_event_types() -> frozenset[str]:
+    from backend.app.governance.automation.constants import REMINDER_EVENT_TYPES
     from backend.app.intelligence.schemas import UnifiedEventType
 
     return (
@@ -102,6 +103,7 @@ def _alertable_event_types() -> frozenset[str]:
         | INTEGRITY_EVENT_TYPES
         | FORENSIC_EVENT_TYPES
         | GOVERNANCE_EVENT_TYPES
+        | REMINDER_EVENT_TYPES
     )
 
 
