@@ -226,6 +226,20 @@ class Settings(BaseSettings):
     governance_alerting_enabled: bool = Field(default=False)
     governance_alert_cooldown_seconds: int = Field(default=300, ge=0, le=86400)
 
+    # --- V36 opt-in governance automation ---
+    # Disabled by default: schedules cannot be enabled and the scheduler thread
+    # is not started. Manual runs and snapshots remain available when governance
+    # itself is enabled. All bounds are hard limits.
+    governance_automation_enabled: bool = Field(default=False)
+    governance_automation_poll_seconds: int = Field(default=30, ge=1, le=3600)
+    governance_automation_lease_seconds: int = Field(default=120, ge=5, le=3600)
+    governance_automation_max_attempts: int = Field(default=3, ge=1, le=5)
+    governance_automation_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
+    governance_automation_retry_max_seconds: int = Field(default=900, ge=1, le=86400)
+    governance_automation_job_timeout_seconds: int = Field(default=300, ge=5, le=3600)
+    governance_automation_max_pending_jobs: int = Field(default=100, ge=1, le=1000)
+    governance_automation_max_jobs_per_tick: int = Field(default=5, ge=1, le=50)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")

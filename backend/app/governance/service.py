@@ -166,6 +166,7 @@ class GovernanceService:
         self._alert_repository = alert_repository
         self._notifier = notifier
         self._integrity = integrity_service
+        self._automation_status_provider: Callable[[], dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------
     # Status
@@ -177,6 +178,13 @@ class GovernanceService:
     def status(self) -> dict[str, Any]:
         audit_events = self._repository.audit_events(limit=500)
         verified = sum(1 for event in audit_events if verify_audit_event(event))
+        automation = (
+            self._automation_status_provider() if self._automation_status_provider is not None else None
+        )
+        scheduler_state = "DISABLED"
+        if automation is not None and bool(automation.get("enabled")):
+            scheduler = automation.get("scheduler") or {}
+            scheduler_state = str(scheduler.get("state") or "ENABLED")
         return {
             "enabled": bool(getattr(self._settings, "governance_enabled", True)),
             "assurance": GOVERNANCE_ASSURANCE,
@@ -192,7 +200,8 @@ class GovernanceService:
                 "outcome": "OK" if verified == len(audit_events) else "FAILED",
                 "assurance": AUDIT_ASSURANCE,
             },
-            "retention_scheduler": "DISABLED",
+            "retention_scheduler": scheduler_state,
+            "automation": automation,
             "automatic_deletion": False,
             "automatic_hold_release": False,
             "automatic_disposition_approval": False,
@@ -576,6 +585,38 @@ class GovernanceService:
             target_type=target_type,
             target_id=target_id,
             case_id=case_id,
+            outcome=outcome,
+            reason=reason,
+            request_id=request_id,
+            event_key=event_key,
+            metadata=metadata,
+        )
+
+    def set_automation_status_provider(self, provider: Callable[[], dict[str, Any]] | None) -> None:
+        """Attach the V36 automation status provider (read-only reporting)."""
+        self._automation_status_provider = provider
+
+    def record_automation_audit(
+        self,
+        *,
+        event_type: str,
+        actor_id: str | None,
+        actor_role: str,
+        target_type: str,
+        target_id: str,
+        outcome: str = GovernanceAuditOutcome.SUCCESS.value,
+        reason: str = "",
+        request_id: str | None = None,
+        event_key: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record a security-relevant automation action in the V35 audit log."""
+        return self._audit(
+            event_type=event_type,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            target_type=target_type,
+            target_id=target_id,
             outcome=outcome,
             reason=reason,
             request_id=request_id,

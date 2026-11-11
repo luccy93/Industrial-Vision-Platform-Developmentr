@@ -16,6 +16,7 @@ from backend.app.core.config import get_settings  # noqa: E402
 from backend.app.models import (
     autonomous_orm,  # noqa: E402,F401 (register autonomous metadata)
     forensic_orm,  # noqa: E402,F401 (register forensic metadata)
+    governance_automation_orm,  # noqa: E402,F401 (register governance automation metadata)
     governance_orm,  # noqa: E402,F401 (register governance metadata)
     incident_orm,  # noqa: E402,F401 (register incident metadata)
     quality_orm,  # noqa: E402,F401 (register quality metadata)

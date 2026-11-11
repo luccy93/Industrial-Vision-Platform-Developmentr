@@ -215,6 +215,16 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         except Exception as exc:
             return f"integrity scheduler stop failed ({type(exc).__name__})"
 
+    def _stop_governance_automation_scheduler() -> str:
+        scheduler = getattr(state, "governance_automation_scheduler", None)
+        if scheduler is None:
+            return "no governance automation scheduler"
+        try:
+            scheduler.stop(timeout=5.0)
+            return "governance automation scheduler stopped"
+        except Exception as exc:
+            return f"governance automation scheduler stop failed ({type(exc).__name__})"
+
     def _close_integrity_store() -> str:
         store = getattr(state, "integrity_store", None)
         if store is None:
@@ -235,6 +245,11 @@ def _register_runtime_phases(app: FastAPI, settings: Settings) -> None:
         runtime.register_phase(_phase, lambda m=_message: m, shutdown=True)
     runtime.register_phase("stop_event_bus", _stop_event_bus, shutdown=True)
     runtime.register_phase("stop_integrity_scheduler", _stop_integrity_scheduler, shutdown=True)
+    runtime.register_phase(
+        "stop_governance_automation_scheduler",
+        _stop_governance_automation_scheduler,
+        shutdown=True,
+    )
     runtime.register_phase("close_redis", _close_redis, shutdown=True)
     runtime.register_phase("close_integrity_store", _close_integrity_store, shutdown=True)
     runtime.register_phase("close_database", lambda: _dispose_engine(state), shutdown=True)
@@ -324,6 +339,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 integrity_scheduler.start()
             except Exception:
                 logger.warning("integrity scheduler start failed", exc_info=True)
+        # V36: governance automation is opt-in. The scheduler is never started
+        # when the global flag is off; manual runs remain available.
+        governance_automation_scheduler = getattr(app.state, "governance_automation_scheduler", None)
+        if governance_automation_scheduler is not None and bool(settings.governance_automation_enabled):
+            try:
+                governance_automation_scheduler.start()
+            except Exception:
+                logger.warning("governance automation scheduler start failed", exc_info=True)
         yield
     finally:
         # Graceful shutdown (§6, §31): refuse new sockets, drain with a bound,
@@ -758,6 +781,77 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             governance_service = None
     app.state.governance_repository = governance_repository
     app.state.governance_service = governance_service
+
+    # V36: opt-in governance automation. Schedules are seeded disabled and the
+    # scheduler thread starts only in lifespan when the global flag is on.
+    from backend.app.governance.automation.executor import GovernanceJobExecutor
+    from backend.app.governance.automation.repository import (
+        GovernanceAutomationRepository,
+    )
+    from backend.app.governance.automation.scheduler import (
+        GovernanceAutomationScheduler,
+    )
+    from backend.app.governance.automation.service import GovernanceAutomationService
+
+    governance_automation_repository: GovernanceAutomationRepository | None = None
+    governance_automation_executor: GovernanceJobExecutor | None = None
+    governance_automation_scheduler: GovernanceAutomationScheduler | None = None
+    governance_automation_service: GovernanceAutomationService | None = None
+    if governance_service is not None and forensic_repository is not None:
+        try:
+            governance_automation_repository = GovernanceAutomationRepository(app.state.session_factory)
+            governance_automation_repository.ensure_schedules()
+            governance_automation_executor = GovernanceJobExecutor(
+                repository=governance_automation_repository,
+                governance_service=governance_service,
+                forensic_repository=forensic_repository,
+                integrity_service=integrity_service,
+                lease_seconds=float(settings.governance_automation_lease_seconds),
+                timeout_seconds=float(settings.governance_automation_job_timeout_seconds),
+            )
+            governance_automation_scheduler = GovernanceAutomationScheduler(
+                settings=settings,
+                repository=governance_automation_repository,
+                executor=governance_automation_executor,
+            )
+            governance_automation_service = GovernanceAutomationService(
+                settings=settings,
+                repository=governance_automation_repository,
+                executor=governance_automation_executor,
+                scheduler=governance_automation_scheduler,
+                governance_service=governance_service,
+                integrity_service=integrity_service,
+            )
+            governance_service.set_automation_status_provider(governance_automation_service.status)
+
+            def _governance_automation_readiness() -> tuple[Any, str]:
+                from backend.app.runtime.health import HealthStatus
+
+                if not bool(settings.governance_automation_enabled):
+                    return HealthStatus.DISABLED, "governance automation disabled"
+                health = governance_automation_service.health()
+                if health["overall_status"] == "FAILED":
+                    return HealthStatus.DEGRADED, "governance automation health failed"
+                scheduler_status = health.get("scheduler") or {}
+                if not bool(scheduler_status.get("running")):
+                    return HealthStatus.DEGRADED, "governance automation scheduler not running"
+                return HealthStatus.READY, "governance automation scheduler running"
+
+            app.state.readiness.register_check(
+                "governance_automation", _governance_automation_readiness, required=False
+            )
+        except Exception:
+            get_logger("industrial-vision.governance").warning(
+                "governance automation initialization skipped", exc_info=True
+            )
+            governance_automation_repository = None
+            governance_automation_executor = None
+            governance_automation_scheduler = None
+            governance_automation_service = None
+    app.state.governance_automation_repository = governance_automation_repository
+    app.state.governance_automation_executor = governance_automation_executor
+    app.state.governance_automation_scheduler = governance_automation_scheduler
+    app.state.governance_automation_service = governance_automation_service
 
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()

@@ -92,6 +92,7 @@ SHUTDOWN_PHASES: tuple[str, ...] = (
     "stop_event_bus",
     "close_websockets",
     "stop_integrity_scheduler",
+    "stop_governance_automation_scheduler",
     "close_redis",
     "close_integrity_store",
     "close_database",

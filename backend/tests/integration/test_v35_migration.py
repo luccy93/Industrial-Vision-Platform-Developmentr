@@ -182,7 +182,7 @@ def test_governance_migration_upgrade_downgrade_reupgrade(tmp_path, monkeypatch)
     config = _config(tmp_path, monkeypatch)
     url = f"sqlite:///{tmp_path}/migrate.db"
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "012_create_governance")
     tables = _tables(url)
     assert _GOVERNANCE_TABLES <= tables
     assert _PRIOR_TABLES <= tables
@@ -360,7 +360,7 @@ def test_governance_migration_upgrade_downgrade_reupgrade(tmp_path, monkeypatch)
         ).all()
         assert leftover_triggers == []
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "012_create_governance")
     assert _GOVERNANCE_TABLES <= _tables(url)
     with engine.begin() as connection:
         reseeded = connection.execute(

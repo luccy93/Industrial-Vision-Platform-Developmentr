@@ -282,6 +282,135 @@ def set_integrity_external_anchor_configured(configured: bool, service: str | No
     integrity_external_anchor_configured.labels(service=_service(service)).set(1.0 if configured else 0.0)
 
 
+# ---------------------------------------------------------------------------
+# V36 governance automation (bounded labels only)
+# ---------------------------------------------------------------------------
+governance_automation_jobs_total = Counter(
+    "ivp_governance_automation_jobs_total",
+    "Governance automation jobs by bounded type, trigger, and terminal status.",
+    ["service", "job_type", "trigger", "status"],
+)
+
+governance_automation_job_duration_seconds = Histogram(
+    "ivp_governance_automation_job_duration_seconds",
+    "Governance automation job duration by bounded job type.",
+    ["service", "job_type"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0),
+)
+
+governance_automation_reminders_total = Counter(
+    "ivp_governance_automation_reminders_total",
+    "Governance reminder evaluations by bounded category and outcome.",
+    ["service", "category", "outcome"],
+)
+
+governance_automation_snapshots_total = Counter(
+    "ivp_governance_automation_snapshots_total",
+    "Governance compliance snapshots by trigger and bounded status.",
+    ["service", "trigger", "status"],
+)
+
+governance_automation_recoveries_total = Counter(
+    "ivp_governance_automation_recoveries_total",
+    "Recovered governance jobs by bounded job type.",
+    ["service", "job_type"],
+)
+
+governance_automation_queue_depth = Gauge(
+    "ivp_governance_automation_queue_depth",
+    "Governance automation queue depth by bounded job status.",
+    ["service", "status"],
+)
+
+_AUTOMATION_JOB_TYPES = frozenset(
+    {
+        "RETENTION_EVALUATION",
+        "RETENTION_REVIEW_REMINDERS",
+        "LEGAL_HOLD_REMINDERS",
+        "DISPOSITION_REVIEW_REMINDERS",
+        "EXPORT_APPROVAL_REMINDERS",
+        "COMPLIANCE_SNAPSHOT",
+        "GOVERNANCE_HEALTH_CHECK",
+    }
+)
+_AUTOMATION_TRIGGERS = frozenset({"SCHEDULE", "MANUAL", "RETRY", "RECOVERY"})
+_AUTOMATION_STATUSES = frozenset({"PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "UNAVAILABLE"})
+_AUTOMATION_REMINDER_CATEGORIES = frozenset({"RETENTION", "LEGAL_HOLD", "DISPOSITION", "EXPORT_APPROVAL"})
+_AUTOMATION_REMINDER_OUTCOMES = frozenset(
+    {
+        "QUEUED",
+        "DEDUPLICATED",
+        "COOLDOWN",
+        "NO_RULE",
+        "DISABLED",
+        "MUTED",
+        "ERROR",
+    }
+)
+_AUTOMATION_SNAPSHOT_TRIGGERS = frozenset({"SCHEDULE", "MANUAL", "RETRY"})
+_AUTOMATION_SNAPSHOT_STATUSES = frozenset({"CREATED", "REPLAYED", "FAILED"})
+
+
+def _bounded_label(value: str | None, allowed: frozenset[str]) -> str:
+    candidate = str(value or "").strip().upper()
+    return candidate if candidate in allowed else "UNKNOWN"
+
+
+def record_governance_automation_job(
+    *,
+    job_type: str,
+    trigger: str,
+    status: str,
+    duration_seconds: float,
+    service: str | None = None,
+) -> None:
+    """Record one terminal governance job using bounded labels only."""
+    resolved = _service(service)
+    bounded_type = _bounded_label(job_type, _AUTOMATION_JOB_TYPES)
+    bounded_trigger = _bounded_label(trigger, _AUTOMATION_TRIGGERS)
+    bounded_status = _bounded_label(status, _AUTOMATION_STATUSES)
+    governance_automation_jobs_total.labels(
+        service=resolved,
+        job_type=bounded_type,
+        trigger=bounded_trigger,
+        status=bounded_status,
+    ).inc()
+    governance_automation_job_duration_seconds.labels(service=resolved, job_type=bounded_type).observe(
+        max(0.0, float(duration_seconds))
+    )
+
+
+def record_governance_automation_reminder(category: str, outcome: str, service: str | None = None) -> None:
+    governance_automation_reminders_total.labels(
+        service=_service(service),
+        category=_bounded_label(category, _AUTOMATION_REMINDER_CATEGORIES),
+        outcome=_bounded_label(outcome, _AUTOMATION_REMINDER_OUTCOMES),
+    ).inc()
+
+
+def record_governance_automation_snapshot(trigger: str, status: str, service: str | None = None) -> None:
+    governance_automation_snapshots_total.labels(
+        service=_service(service),
+        trigger=_bounded_label(trigger, _AUTOMATION_SNAPSHOT_TRIGGERS),
+        status=_bounded_label(status, _AUTOMATION_SNAPSHOT_STATUSES),
+    ).inc()
+
+
+def record_governance_automation_recovery(job_type: str, service: str | None = None) -> None:
+    governance_automation_recoveries_total.labels(
+        service=_service(service),
+        job_type=_bounded_label(job_type, _AUTOMATION_JOB_TYPES),
+    ).inc()
+
+
+def set_governance_automation_queue_depth(counts: dict[str, int], service: str | None = None) -> None:
+    resolved = _service(service)
+    for status, count in counts.items():
+        governance_automation_queue_depth.labels(
+            service=resolved, status=_bounded_label(status, _AUTOMATION_STATUSES)
+        ).set(max(0, int(count)))
+
+
 def metrics_payload() -> bytes:
     return generate_latest(REGISTRY)
 
