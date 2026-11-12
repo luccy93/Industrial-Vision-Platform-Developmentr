@@ -336,8 +336,8 @@ Deterministic local tests cover:
   reminder category.
 - Snapshot digest, idempotent replay, CSV, and read-time digest validation.
 - RBAC for every capability, pagination, and absence of delete routes.
-- Bounded metric cardinality, redaction, isolated section failures, and
-  failure recovery.
+- Bounded metric cardinality, redaction, snapshot digest tamper detection, and
+  bounded failure records.
 - V10/V15/V16/V29–V35 regressions.
 - Migration upgrade/downgrade/re-upgrade when PostgreSQL or SQLite migration
   tests run.

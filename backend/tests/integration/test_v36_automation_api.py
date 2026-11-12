@@ -325,3 +325,28 @@ def test_reminder_activity_reports_pending_and_delivered_states(client: Any) -> 
     )
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
+
+
+def test_uninitialized_automation_service_returns_503(client: Any) -> None:
+    parties = _clients(client)
+    original = client.app.state.governance_automation_service
+    client.app.state.governance_automation_service = None
+    try:
+        response = parties["viewer"].get("/api/v1/governance/automation/status")
+    finally:
+        client.app.state.governance_automation_service = original
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_not_ready"
+
+
+def test_openapi_declares_no_delete_routes_for_automation(client: Any) -> None:
+    parties = _clients(client)
+    schema = parties["admin"].get("/openapi.json").json()
+    automation_paths = {
+        path: operations
+        for path, operations in schema["paths"].items()
+        if path.startswith("/api/v1/governance/automation")
+    }
+    assert automation_paths
+    assert all("delete" not in operations for operations in automation_paths.values())
+    assert any("post" in operations for operations in automation_paths.values())

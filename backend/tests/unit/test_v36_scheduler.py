@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -50,14 +52,14 @@ class FakeExecutor:
         return stored
 
 
-def _setup(
+def _settings(
     tmp_path: Any,
     *,
     enabled: bool = True,
     max_pending: int = 100,
     max_per_tick: int = 5,
-) -> tuple[GovernanceAutomationScheduler, GovernanceAutomationRepository, FakeExecutor, Any]:
-    settings = Settings(
+) -> Settings:
+    return Settings(
         app_name="v36-scheduler",
         app_env=AppEnv.testing,
         database_url=f"sqlite:///{tmp_path}/scheduler.db",
@@ -67,6 +69,21 @@ def _setup(
         governance_automation_poll_seconds=5,
         governance_automation_lease_seconds=30,
         _env_file=None,  # type: ignore[call-arg]
+    )
+
+
+def _setup(
+    tmp_path: Any,
+    *,
+    enabled: bool = True,
+    max_pending: int = 100,
+    max_per_tick: int = 5,
+) -> tuple[GovernanceAutomationScheduler, GovernanceAutomationRepository, FakeExecutor, Any]:
+    settings = _settings(
+        tmp_path,
+        enabled=enabled,
+        max_pending=max_pending,
+        max_per_tick=max_per_tick,
     )
     init_db(settings.database_url)
     repository = GovernanceAutomationRepository(get_session_factory(settings.database_url))
@@ -199,3 +216,34 @@ def test_scheduler_status_reports_queue_and_heartbeat(tmp_path: Any) -> None:
     assert status["queue"][JobStatus.SUCCEEDED.value] == 1
     assert status["last_cycle_at"] is not None
     assert status["last_success_at"] is not None
+
+
+def test_concurrent_scheduler_cycles_enqueue_and_execute_one_slot(tmp_path: Any) -> None:
+    settings = _settings(tmp_path)
+    scheduler, repository, executor, _ = _setup(tmp_path)
+    _enable(repository, "GOVERNANCE_HEALTH_CHECK", {})
+    other = GovernanceAutomationScheduler(
+        settings=settings,
+        repository=repository,
+        executor=executor,  # type: ignore[arg-type]
+        name="governance-automation-b",
+        clock=lambda: NOW,
+    )
+    barrier = threading.Barrier(2)
+
+    def cycle(target: GovernanceAutomationScheduler) -> dict[str, Any]:
+        barrier.wait(timeout=10)
+        return target.run_once(NOW)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            future.result(timeout=60) for future in [pool.submit(cycle, scheduler), pool.submit(cycle, other)]
+        ]
+    jobs, total = repository.list_jobs(job_type="GOVERNANCE_HEALTH_CHECK")
+    assert total == 1
+    assert jobs[0]["status"] == JobStatus.SUCCEEDED.value
+    assert len(executor.calls) == 1
+    assert sum(item["enqueued"] for item in results) == 1
+    assert sum(item["executed"] for item in results) == 1
+    events = repository.job_events(jobs[0]["job_id"])
+    assert sum(1 for event in events if event["event_type"] == "CLAIMED") == 1
