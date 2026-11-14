@@ -26,12 +26,20 @@ from backend.app.governance.intelligence.errors import (
     IntelligenceDisabledError,
     IntelligenceError,
     IntelligenceValidationError,
+    RecommendationNotFoundError,
+    RecommendationStateError,
+    RecommendationVersionConflictError,
     RiskCaseNotFoundError,
     RiskModelVersionConflictError,
     SlaTargetNotFoundError,
     SlaTargetVersionConflictError,
+    SnapshotNotFoundError,
 )
 from backend.app.governance.intelligence.schemas import (
+    IntelligenceSnapshotGenerateRequest,
+    RecommendationAcknowledgeRequest,
+    RecommendationDismissRequest,
+    RecommendationRefreshRequest,
     RiskModelUpdateRequest,
     SlaTargetUpdateRequest,
 )
@@ -74,9 +82,25 @@ def _request_id(request: Request) -> str | None:
 
 
 def _handle_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, (RiskCaseNotFoundError, SlaTargetNotFoundError)):
+    if isinstance(
+        exc,
+        (
+            RecommendationNotFoundError,
+            RiskCaseNotFoundError,
+            SlaTargetNotFoundError,
+            SnapshotNotFoundError,
+        ),
+    ):
         return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (RiskModelVersionConflictError, SlaTargetVersionConflictError)):
+    if isinstance(
+        exc,
+        (
+            RecommendationStateError,
+            RecommendationVersionConflictError,
+            RiskModelVersionConflictError,
+            SlaTargetVersionConflictError,
+        ),
+    ):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, IntelligenceDisabledError):
         return HTTPException(status_code=503, detail=str(exc))
@@ -238,6 +262,207 @@ def sla_backlog(
 ) -> dict[str, Any]:
     try:
         return service.sla_backlog(target_key=target_key, state=state, page=page, page_size=page_size)
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+# ---------------------------------------------------------------------------
+# Bounded trend analytics
+# ---------------------------------------------------------------------------
+@router.get("/trends", summary="Read bounded governance trend analytics")
+def governance_trends(
+    start_at: str | None = Query(default=None, max_length=64),
+    end_at: str | None = Query(default=None, max_length=64),
+    bucket: str | None = Query(default=None, pattern="^(hour|day|week)$"),
+    _principal: Principal = Depends(require_capability_dep("governance_trends_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    try:
+        return service.trends(start_at=start_at, end_at=end_at, bucket=bucket)
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+# ---------------------------------------------------------------------------
+# Advisory recommendations
+# ---------------------------------------------------------------------------
+@router.post(
+    "/recommendations/refresh",
+    summary="Refresh deterministic advisory recommendations",
+)
+def refresh_recommendations(
+    request: Request,
+    payload: RecommendationRefreshRequest | None = None,
+    principal: Principal = Depends(require_capability_dep("governance_intelligence_refresh")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    actor_id, actor_role = _actor(principal)
+    try:
+        return service.refresh_recommendations(
+            actor_id=actor_id,
+            actor_role=actor_role,
+            request_id=_request_id(request),
+            reason=(payload.reason if payload is not None else ""),
+        )
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.get("/recommendations", summary="List advisory governance recommendations")
+def list_recommendations(
+    status: str | None = Query(default=None, pattern="^(OPEN|ACKNOWLEDGED|DISMISSED|RESOLVED)$"),
+    severity: str | None = Query(default=None, pattern="^(LOW|MEDIUM|HIGH|CRITICAL)$"),
+    rule_id: str | None = Query(default=None, max_length=64),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
+    _principal: Principal = Depends(require_capability_dep("governance_recommendations_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    try:
+        return service.list_recommendations(
+            status=status,
+            severity=severity,
+            rule_id=rule_id,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.get(
+    "/recommendations/{recommendation_id}",
+    summary="Read one recommendation and its lifecycle events",
+)
+def recommendation_detail(
+    recommendation_id: str,
+    _principal: Principal = Depends(require_capability_dep("governance_recommendations_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    try:
+        return service.recommendation_detail(recommendation_id)
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.post(
+    "/recommendations/{recommendation_id}/acknowledge",
+    summary="Acknowledge an advisory recommendation",
+)
+def acknowledge_recommendation(
+    recommendation_id: str,
+    payload: RecommendationAcknowledgeRequest,
+    request: Request,
+    principal: Principal = Depends(require_capability_dep("governance_recommendation_acknowledge")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    actor_id, actor_role = _actor(principal)
+    try:
+        return service.acknowledge_recommendation(
+            recommendation_id,
+            reason=payload.reason,
+            expected_version=payload.expected_version,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            request_id=_request_id(request),
+        )
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.post(
+    "/recommendations/{recommendation_id}/dismiss",
+    summary="Dismiss an advisory recommendation with a mandatory reason",
+)
+def dismiss_recommendation(
+    recommendation_id: str,
+    payload: RecommendationDismissRequest,
+    request: Request,
+    principal: Principal = Depends(require_capability_dep("governance_recommendation_dismiss")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    actor_id, actor_role = _actor(principal)
+    try:
+        return service.dismiss_recommendation(
+            recommendation_id,
+            reason=payload.reason,
+            expected_version=payload.expected_version,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            request_id=_request_id(request),
+        )
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+# ---------------------------------------------------------------------------
+# Local intelligence snapshots
+# ---------------------------------------------------------------------------
+@router.get("/snapshots", summary="List stored intelligence snapshots")
+def list_intelligence_snapshots(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=MAX_PAGE_SIZE),
+    _principal: Principal = Depends(require_capability_dep("governance_snapshot_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    try:
+        return service.list_intelligence_snapshots(page=page, page_size=page_size)
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.post("/snapshots", summary="Generate a local intelligence snapshot")
+def generate_intelligence_snapshot(
+    payload: IntelligenceSnapshotGenerateRequest,
+    request: Request,
+    principal: Principal = Depends(require_capability_dep("governance_snapshot_generate")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    actor_id, actor_role = _actor(principal)
+    try:
+        return service.generate_intelligence_snapshot(
+            idempotency_key=payload.idempotency_key,
+            reason=payload.reason,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            request_id=_request_id(request),
+        )
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.get("/snapshots/{snapshot_id}", summary="Read one intelligence snapshot")
+def intelligence_snapshot_detail(
+    snapshot_id: str,
+    _principal: Principal = Depends(require_capability_dep("governance_snapshot_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    try:
+        return service.get_intelligence_snapshot(snapshot_id)
+    except Exception as exc:
+        raise _handle_error(exc) from None
+
+
+@router.get(
+    "/snapshots/{snapshot_id}/compare/{other_snapshot_id}",
+    summary="Compare two compatible local snapshots",
+)
+def compare_intelligence_snapshots(
+    snapshot_id: str,
+    other_snapshot_id: str,
+    request: Request,
+    principal: Principal = Depends(require_capability_dep("governance_snapshot_read")),
+    service: GovernanceIntelligenceService = Depends(get_governance_intelligence_service),
+) -> dict[str, Any]:
+    actor_id, actor_role = _actor(principal)
+    try:
+        return service.compare_intelligence_snapshots(
+            snapshot_id,
+            other_snapshot_id,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            request_id=_request_id(request),
+        )
     except Exception as exc:
         raise _handle_error(exc) from None
 

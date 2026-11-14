@@ -489,13 +489,15 @@ class GovernanceIntelligenceRepository:
                 str(candidate.get("scope_id") or ""),
             )
             candidate_map[key] = candidate
-        summary = {
+        summary: dict[str, Any] = {
             "created": 0,
             "refreshed": 0,
             "reopened": 0,
             "auto_resolved": 0,
             "suppressed": 0,
             "truncated": len(candidates) > len(bounded),
+            "created_ids": [],
+            "reopened_ids": [],
         }
         with self._session_factory() as session:
             existing_rows = (
@@ -549,6 +551,7 @@ class GovernanceIntelligenceRepository:
                         )
                     )
                     summary["created"] += 1
+                    summary["created_ids"].append(str(row.id))
                     continue
 
                 if row.status == RecommendationStatus.DISMISSED.value:
@@ -585,6 +588,7 @@ class GovernanceIntelligenceRepository:
                         )
                     )
                     summary["reopened"] += 1
+                    summary["reopened_ids"].append(str(row.id))
                 else:
                     summary["refreshed"] += 1
                 row.severity = _safe_text(candidate.get("severity"), 16).upper()
@@ -810,6 +814,12 @@ class GovernanceIntelligenceRepository:
     def count_recommendations(self) -> int:
         with self._session_factory() as session:
             return int(session.query(GovernanceRecommendationORM).count())
+
+    def recommendation_coverage_start(self) -> str | None:
+        """Earliest recommendation event timestamp, or ``None`` for no history."""
+        with self._session_factory() as session:
+            earliest = session.query(func.min(GovernanceRecommendationEventORM.created_at)).scalar()
+        return _iso(earliest) if earliest is not None else None
 
     def recommendation_timestamps_in_range(
         self, start: datetime, end: datetime, *, limit: int = 5000

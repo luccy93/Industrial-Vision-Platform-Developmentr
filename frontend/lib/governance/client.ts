@@ -15,18 +15,29 @@ import type {
   GovernanceDispositionListResponse,
   GovernanceExportApproval,
   GovernanceExportApprovalListResponse,
+  GovernanceIntelligenceSnapshotDetail,
+  GovernanceIntelligenceSnapshotListResponse,
+  GovernanceIntelligenceStatus,
   GovernanceLegalHoldDetail,
   GovernanceLegalHoldListResponse,
   GovernancePolicy,
   GovernancePolicyListResponse,
   GovernancePolicyVersionsResponse,
+  GovernanceRecommendationDetail,
+  GovernanceRecommendationListResponse,
+  GovernanceRecommendationRefreshResponse,
   GovernanceReminderActivity,
   GovernanceRetentionCaseResponse,
   GovernanceRetentionQueueResponse,
+  GovernanceRiskCaseDetail,
+  GovernanceRiskCaseListResponse,
+  GovernanceSlaBacklogResponse,
   GovernanceSnapshot,
+  GovernanceSnapshotComparison,
   GovernanceSnapshotDetail,
   GovernanceSnapshotListResponse,
   GovernanceStatus,
+  GovernanceTrendsResponse,
 } from "../../types";
 
 function queryString(
@@ -531,6 +542,176 @@ export function fetchGovernanceReminderActivity(
 ): Promise<GovernanceReminderActivity> {
   return apiFetch<GovernanceReminderActivity>(
     `/api/v1/governance/automation/reminders${queryString(params)}`,
+    { signal }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// V37 governance intelligence
+// ---------------------------------------------------------------------------
+export function fetchGovernanceIntelligenceStatus(
+  signal?: AbortSignal
+): Promise<GovernanceIntelligenceStatus> {
+  return apiFetch<GovernanceIntelligenceStatus>("/api/v1/governance/intelligence/status", {
+    signal,
+  });
+}
+
+export function fetchGovernanceRiskCases(
+  params: {
+    risk_level?: string;
+    case_status?: string;
+    case_severity?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceRiskCaseListResponse> {
+  return apiFetch<GovernanceRiskCaseListResponse>(
+    `/api/v1/governance/intelligence/risk/cases${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceRiskCase(
+  caseId: string,
+  signal?: AbortSignal
+): Promise<GovernanceRiskCaseDetail> {
+  return apiFetch<GovernanceRiskCaseDetail>(
+    `/api/v1/governance/intelligence/risk/cases/${encodeURIComponent(caseId)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceSlaBacklog(
+  params: {
+    target_key?: string;
+    state?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceSlaBacklogResponse> {
+  return apiFetch<GovernanceSlaBacklogResponse>(
+    `/api/v1/governance/intelligence/sla/backlog${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceTrends(
+  params: { start_at?: string; end_at?: string; bucket?: string } = {},
+  signal?: AbortSignal
+): Promise<GovernanceTrendsResponse> {
+  return apiFetch<GovernanceTrendsResponse>(
+    `/api/v1/governance/intelligence/trends${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function refreshGovernanceRecommendations(input: {
+  reason: string;
+}): Promise<GovernanceRecommendationRefreshResponse> {
+  return apiFetch("/api/v1/governance/intelligence/recommendations/refresh", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchGovernanceRecommendations(
+  params: {
+    status?: string;
+    severity?: string;
+    rule_id?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceRecommendationListResponse> {
+  return apiFetch<GovernanceRecommendationListResponse>(
+    `/api/v1/governance/intelligence/recommendations${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceRecommendation(
+  recommendationId: string,
+  signal?: AbortSignal
+): Promise<GovernanceRecommendationDetail> {
+  return apiFetch<GovernanceRecommendationDetail>(
+    `/api/v1/governance/intelligence/recommendations/${encodeURIComponent(recommendationId)}`,
+    { signal }
+  );
+}
+
+export function acknowledgeGovernanceRecommendation(
+  recommendationId: string,
+  input: { reason?: string; expected_version?: number }
+): Promise<GovernanceRecommendationDetail> {
+  return apiFetch(
+    `/api/v1/governance/intelligence/recommendations/${encodeURIComponent(
+      recommendationId
+    )}/acknowledge`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function dismissGovernanceRecommendation(
+  recommendationId: string,
+  input: { reason: string; expected_version?: number }
+): Promise<GovernanceRecommendationDetail> {
+  return apiFetch(
+    `/api/v1/governance/intelligence/recommendations/${encodeURIComponent(
+      recommendationId
+    )}/dismiss`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceIntelligenceSnapshots(
+  params: { page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceIntelligenceSnapshotListResponse> {
+  return apiFetch<GovernanceIntelligenceSnapshotListResponse>(
+    `/api/v1/governance/intelligence/snapshots${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function generateGovernanceIntelligenceSnapshot(input: {
+  idempotency_key: string;
+  reason: string;
+}): Promise<{
+  snapshot: GovernanceIntelligenceSnapshotDetail["snapshot"];
+  replayed: boolean;
+  availability: string;
+  assurance: string;
+  non_claims: string[];
+}> {
+  return apiFetch("/api/v1/governance/intelligence/snapshots", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchGovernanceIntelligenceSnapshot(
+  snapshotId: string,
+  signal?: AbortSignal
+): Promise<GovernanceIntelligenceSnapshotDetail> {
+  return apiFetch<GovernanceIntelligenceSnapshotDetail>(
+    `/api/v1/governance/intelligence/snapshots/${encodeURIComponent(snapshotId)}`,
+    { signal }
+  );
+}
+
+export function compareGovernanceIntelligenceSnapshots(
+  snapshotId: string,
+  otherSnapshotId: string,
+  signal?: AbortSignal
+): Promise<GovernanceSnapshotComparison> {
+  return apiFetch<GovernanceSnapshotComparison>(
+    `/api/v1/governance/intelligence/snapshots/${encodeURIComponent(
+      snapshotId
+    )}/compare/${encodeURIComponent(otherSnapshotId)}`,
     { signal }
   );
 }

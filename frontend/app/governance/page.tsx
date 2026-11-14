@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AutomationWorkspace } from "../../components/governance/AutomationWorkspace";
+import { IntelligenceWorkspace } from "../../components/governance/IntelligenceWorkspace";
 import { Card } from "../../components/ui/Card";
 import { DataState, SectionBadge } from "../../components/operations/primitives";
 import { useAuth } from "../../components/auth/AuthProvider";
@@ -1525,6 +1526,8 @@ export default function GovernancePage() {
           </div>
         )}
       </Card>
+
+      <IntelligenceWorkspace />
 
       <AutomationWorkspace />
     </div>

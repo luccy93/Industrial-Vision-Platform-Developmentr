@@ -26,4 +26,30 @@ class SlaTargetUpdateRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=128)
 
 
-__all__ = ["RiskModelUpdateRequest", "SlaTargetUpdateRequest"]
+class RecommendationRefreshRequest(BaseModel):
+    reason: str = Field(default="", max_length=2048)
+
+
+class RecommendationAcknowledgeRequest(BaseModel):
+    reason: str = Field(default="", max_length=2048)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class RecommendationDismissRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class IntelligenceSnapshotGenerateRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2048)
+
+
+__all__ = [
+    "IntelligenceSnapshotGenerateRequest",
+    "RecommendationAcknowledgeRequest",
+    "RecommendationDismissRequest",
+    "RecommendationRefreshRequest",
+    "RiskModelUpdateRequest",
+    "SlaTargetUpdateRequest",
+]

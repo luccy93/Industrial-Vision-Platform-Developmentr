@@ -195,31 +195,95 @@ modeled.
 
 ## Backlog and trend analytics
 
-*(Completed in the second V37 commit.)* Analytics reuse V14 bounded windows and
-report per-section availability. A reachable empty source is `count=0` with
-`OK`; a failed source is `UNAVAILABLE`, never zero. Rates are `null` when the
-denominator is zero. Historical gaps are marked per source and bucket; buckets
-outside coverage are `null`, while buckets inside coverage with no records are
-genuine zeros. Row caps produce explicit `partial`/`truncated` flags.
+The SLA backlog is computed on demand from current V35 records. Each section
+reports its own availability: retention evaluations, open dispositions, blocking
+legal holds, and open export approvals. A failed read makes that section
+`UNAVAILABLE` and is never rendered as an empty or zero backlog. Items are
+ordered by open age, and unresolved items expose only `open_age_hours`.
+
+Trends reuse the V14 bounded-window convention. A request may span at most 90
+days; the default window is 30 days and buckets are `hour`, `day`, or `week` in
+UTC. Five sources are reported:
+
+| Source | Definition |
+|---|---|
+| `governance_events` | V35 access-audit events grouped into bounded categories |
+| `retention_evaluations` | Retention evaluation observations by governance state |
+| `recommendations` | Recommendation lifecycle events |
+| `sla_inflow` | Disposition, hold, export, and retention-review inflow by target key |
+| `risk_scores` | Deliberately `UNAVAILABLE`: historical scores are not persisted |
+
+Every source reports `availability`, `definition`, `coverage_start`,
+`coverage_available`, `no_history`, `truncated`, `total`, `categories`,
+`category_totals`, and `buckets[]`. Bucket rules are explicit:
+
+- A bucket before the earliest stored record is `count=null` and
+  `coverage=BEFORE_COVERAGE`; it is not a zero.
+- A bucket that straddles the first stored record is marked
+  `partial_coverage=true`.
+- A bucket inside recorded coverage with no rows is a genuine `count=0`.
+- When coverage itself cannot be read, `in_coverage` is `null` and
+  `coverage=UNKNOWN` rather than being asserted.
+- A source that cannot be read reports `count=null` in every bucket, even if
+  some rows were available before the failure.
+- A source with no recorded history reports `NO_HISTORY` and `count=null`.
+
+Row caps produce explicit `truncated` flags and a `partial` response. Historical
+gaps are never silently interpolated, and no forecast or statistical model is
+used.
 
 ## Recommendations
 
-*(Completed in the second V37 commit.)* Deterministic rules raise advisory
-recommendations with stable UUIDv5 identifiers and deduplication keys.
-Lifecycle: `OPEN -> ACKNOWLEDGED` or `OPEN/ACKNOWLEDGED -> DISMISSED` (reason
-required, ADMIN-only), and source-condition clearing auto-resolves to
-`RESOLVED`. A later recurrence reopens the same deduplicated row. Refresh is
-idempotent and bounded, uses optimistic concurrency, and performs no governance
-mutation.
+Deterministic rules raise advisory recommendations with stable UUIDv5
+identifiers and `rule_id|scope_type|scope_id` deduplication keys. Supported rules
+cover critical/high risk cases, confirmed or unavailable integrity verification,
+overdue retention and disposition reviews, overdue legal-hold review, expired
+export approval, snapshot integrity attention, and automation health. Every
+candidate carries a rationale and source references.
+
+Lifecycle transitions are optimistic-concurrency guarded:
+
+- `OPEN -> ACKNOWLEDGED`, `DISMISSED`, or `RESOLVED`;
+- `ACKNOWLEDGED -> DISMISSED` or `RESOLVED`;
+- `DISMISSED -> OPEN` only when a recurrence is observed;
+- source-condition clearing auto-resolves to `RESOLVED` with actor `SYSTEM`;
+- a later recurrence reopens the same deduplicated row.
+
+Acknowledged and dismissed rows keep append-only lifecycle events. Dismissal
+requires a reason of at least 8 characters, is ADMIN-only, and suppresses the
+same candidate only while its condition persists. Refresh is bounded,
+idempotent, and performs no governance mutation. Newly created `CRITICAL`
+recommendations may notify through the existing V15 notifier only when
+`GOVERNANCE_INTELLIGENCE_ALERTS_ENABLED=true`; the default is off.
 
 ## Snapshot generation and comparison
 
-*(Completed in the second V37 commit.)* Manual generation reuses the V36
-snapshot repository and canonical SHA-256 self-digest. Comparison accepts only
-the same snapshot type and schema version. Recomputing either digest yields
-`INTEGRITY_FAILED`/tamper state with no diff when invalid; cross-type or
-cross-schema comparisons return `INCOMPATIBLE`. Snapshots are never modified or
-deleted by comparison.
+Manual generation reuses the V36 snapshot repository and canonical SHA-256
+self-digest. `INTELLIGENCE_SUMMARY` payloads contain aggregate model, risk, SLA,
+recommendation, automation, and coverage data only — no case IDs, evidence IDs,
+or evidence bytes.
+
+- List responses omit the stored payload; detail responses include it with an
+  explicit `integrity.state` of `VALID` or `INTEGRITY_FAILED`.
+- Generation is idempotent per idempotency key; a replay returns the existing
+  snapshot without creating another row.
+- Comparison accepts only the same snapshot type and schema version. A different
+  type or schema returns `INCOMPATIBLE`.
+- Recomputing either digest yields `INTEGRITY_FAILED` with
+  `tampered_snapshot_ids` and no diff.
+- Successful comparison returns a bounded `COMPARED` diff with
+  `added`/`removed`/`changed` counts and a `truncated` flag.
+- Comparison never modifies, rewrites, or deletes either snapshot.
+
+## Frontend
+
+The existing `/governance` page renders `IntelligenceWorkspace` above the V36
+automation workspace. It shows the active model version, factor explanations,
+missing or unavailable data, operational SLA targets and backlog, bounded trend
+buckets with explicit unavailable markers, the advisory recommendation lifecycle,
+and snapshot generation/comparison. Controls are RBAC-aware; dismissal and
+generation use confirmation dialogs with required reasons. No separate
+governance application is introduced.
 
 ## API and RBAC
 
@@ -236,6 +300,16 @@ Prefix: `/api/v1/governance/intelligence`. No `DELETE` routes.
 | `GET /sla/targets` | `governance_sla_read` |
 | `PUT /sla/targets/{target_key}` | `governance_intelligence_configure` |
 | `GET /sla/backlog` | `governance_sla_read` |
+| `GET /trends` | `governance_trends_read` |
+| `POST /recommendations/refresh` | `governance_intelligence_refresh` |
+| `GET /recommendations` | `governance_recommendations_read` |
+| `GET /recommendations/{recommendation_id}` | `governance_recommendations_read` |
+| `POST /recommendations/{recommendation_id}/acknowledge` | `governance_recommendation_acknowledge` |
+| `POST /recommendations/{recommendation_id}/dismiss` | `governance_recommendation_dismiss` |
+| `GET /snapshots` | `governance_snapshot_read` |
+| `POST /snapshots` | `governance_snapshot_generate` |
+| `GET /snapshots/{snapshot_id}` | `governance_snapshot_read` |
+| `GET /snapshots/{snapshot_id}/compare/{other_snapshot_id}` | `governance_snapshot_read` |
 
 Capability map:
 

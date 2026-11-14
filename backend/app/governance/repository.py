@@ -1564,5 +1564,125 @@ class GovernanceRepository:
         with self._session_factory() as session:
             return int(session.query(func.count(GovernanceAccessAuditORM.id)).scalar() or 0)
 
+    # ------------------------------------------------------------------
+    # Bounded historical reads for V37 trend analytics
+    # ------------------------------------------------------------------
+    def historical_coverage(self) -> dict[str, str | None]:
+        """Earliest stored timestamp per source; ``None`` means no history.
+
+        V37 uses this to distinguish a bucket outside recorded history from a
+        genuine zero inside recorded history. It never invents a start time.
+        """
+        with self._session_factory() as session:
+            audit = session.query(func.min(GovernanceAccessAuditORM.created_at)).scalar()
+            evaluations = session.query(func.min(GovernanceRetentionEvaluationORM.evaluated_at)).scalar()
+            holds = session.query(func.min(GovernanceLegalHoldORM.requested_at)).scalar()
+            dispositions = session.query(func.min(GovernanceDispositionRequestORM.requested_at)).scalar()
+            approvals = session.query(func.min(GovernanceExportApprovalORM.requested_at)).scalar()
+        return {
+            "governance_audit": _iso(audit) if audit is not None else None,
+            "retention_evaluations": _iso(evaluations) if evaluations is not None else None,
+            "legal_holds": _iso(holds) if holds is not None else None,
+            "dispositions": _iso(dispositions) if dispositions is not None else None,
+            "export_approvals": _iso(approvals) if approvals is not None else None,
+        }
+
+    def audit_timestamps_in_range(
+        self, start: datetime, end: datetime, *, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(5000, int(limit)))
+        with self._session_factory() as session:
+            rows = (
+                session.query(
+                    GovernanceAccessAuditORM.event_type,
+                    GovernanceAccessAuditORM.created_at,
+                )
+                .filter(
+                    GovernanceAccessAuditORM.created_at >= start,
+                    GovernanceAccessAuditORM.created_at < end,
+                )
+                .order_by(GovernanceAccessAuditORM.created_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {"event_type": str(event_type), "created_at": _iso(created_at)}
+                for event_type, created_at in rows
+            ]
+
+    def retention_timestamps_in_range(
+        self, start: datetime, end: datetime, *, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(5000, int(limit)))
+        with self._session_factory() as session:
+            rows = (
+                session.query(
+                    GovernanceRetentionEvaluationORM.governance_state,
+                    GovernanceRetentionEvaluationORM.evaluated_at,
+                )
+                .filter(
+                    GovernanceRetentionEvaluationORM.evaluated_at >= start,
+                    GovernanceRetentionEvaluationORM.evaluated_at < end,
+                )
+                .order_by(GovernanceRetentionEvaluationORM.evaluated_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {"governance_state": str(state), "evaluated_at": _iso(evaluated_at)}
+                for state, evaluated_at in rows
+            ]
+
+    def legal_hold_timestamps_in_range(
+        self, start: datetime, end: datetime, *, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(5000, int(limit)))
+        with self._session_factory() as session:
+            rows = (
+                session.query(GovernanceLegalHoldORM.requested_at)
+                .filter(
+                    GovernanceLegalHoldORM.requested_at >= start,
+                    GovernanceLegalHoldORM.requested_at < end,
+                )
+                .order_by(GovernanceLegalHoldORM.requested_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [{"requested_at": _iso(row[0])} for row in rows]
+
+    def disposition_timestamps_in_range(
+        self, start: datetime, end: datetime, *, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(5000, int(limit)))
+        with self._session_factory() as session:
+            rows = (
+                session.query(GovernanceDispositionRequestORM.requested_at)
+                .filter(
+                    GovernanceDispositionRequestORM.requested_at >= start,
+                    GovernanceDispositionRequestORM.requested_at < end,
+                )
+                .order_by(GovernanceDispositionRequestORM.requested_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [{"requested_at": _iso(row[0])} for row in rows]
+
+    def export_approval_timestamps_in_range(
+        self, start: datetime, end: datetime, *, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(5000, int(limit)))
+        with self._session_factory() as session:
+            rows = (
+                session.query(GovernanceExportApprovalORM.requested_at)
+                .filter(
+                    GovernanceExportApprovalORM.requested_at >= start,
+                    GovernanceExportApprovalORM.requested_at < end,
+                )
+                .order_by(GovernanceExportApprovalORM.requested_at.asc())
+                .limit(limit)
+                .all()
+            )
+            return [{"requested_at": _iso(row[0])} for row in rows]
+
 
 __all__ = ["GovernanceRepository"]

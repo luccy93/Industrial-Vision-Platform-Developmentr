@@ -422,6 +422,72 @@ SNAPSHOT_COMPARABLE_TYPES: frozenset[str] = frozenset(
 )
 MAX_SNAPSHOT_DIFF_ITEMS = 200
 
+#: Fields that legitimately differ between two snapshots and therefore do not
+#: belong in a metric diff.
+SNAPSHOT_VOLATILE_KEYS: frozenset[str] = frozenset(
+    {"generated_at", "as_of", "snapshot_type", "schema_version"}
+)
+
+# ---------------------------------------------------------------------------
+# Trend sources and bounded categories
+# ---------------------------------------------------------------------------
+TREND_SOURCE_ORDER: tuple[str, ...] = (
+    "governance_events",
+    "retention_evaluations",
+    "recommendations",
+    "sla_inflow",
+    "risk_scores",
+)
+TREND_AUDIT_GROUPS: tuple[str, ...] = (
+    "ACCESS",
+    "RETENTION",
+    "LEGAL_HOLD",
+    "DISPOSITION",
+    "EXPORT",
+    "REPORT",
+    "AUTOMATION",
+    "INTELLIGENCE",
+    "OTHER",
+)
+RECOMMENDATION_SCOPE_CASE = "CASE"
+RECOMMENDATION_SCOPE_DISPOSITION = "DISPOSITION"
+RECOMMENDATION_SCOPE_LEGAL_HOLD = "LEGAL_HOLD"
+RECOMMENDATION_SCOPE_EXPORT_APPROVAL = "EXPORT_APPROVAL"
+RECOMMENDATION_SCOPE_SNAPSHOT = "SNAPSHOT"
+RECOMMENDATION_SCOPE_AUTOMATION = "AUTOMATION"
+
+#: Optional V15 event type for newly created CRITICAL recommendations.
+INTELLIGENCE_ALERT_EVENT_TYPE = "GOVERNANCE_INTELLIGENCE_RECOMMENDATION_CRITICAL"
+
+
+def audit_event_group(event_type: str) -> str:
+    """Map a bounded governance audit event type to a stable trend group."""
+    value = str(event_type or "").upper()
+    if value.startswith("EXPORT_"):
+        return "EXPORT"
+    if value.startswith("LEGAL_HOLD_"):
+        return "LEGAL_HOLD"
+    if value.startswith("RETENTION_"):
+        return "RETENTION"
+    if value.startswith("DISPOSITION_"):
+        return "DISPOSITION"
+    if value.startswith("AUTOMATION_"):
+        return "AUTOMATION"
+    if value.startswith("INTELLIGENCE_"):
+        return "INTELLIGENCE"
+    if value.startswith("GOVERNANCE_REPORT_"):
+        return "REPORT"
+    if value in {
+        "CASE_VIEWED",
+        "EVIDENCE_METADATA_VIEWED",
+        "CUSTODY_HISTORY_VIEWED",
+        "EVIDENCE_VERIFICATION_REQUESTED",
+        "GOVERNANCE_ACCESS_DENIED",
+    }:
+        return "ACCESS"
+    return "OTHER"
+
+
 # ---------------------------------------------------------------------------
 # Bounds and page defaults
 # ---------------------------------------------------------------------------
@@ -470,6 +536,7 @@ __all__ = [
     "FACTOR_ORDER",
     "FactorDataStatus",
     "GLOBAL_SCOPE_TYPE",
+    "INTELLIGENCE_ALERT_EVENT_TYPE",
     "INTELLIGENCE_ASSURANCE",
     "INTELLIGENCE_LIMITATIONS",
     "INTELLIGENCE_NON_CLAIMS",
@@ -494,6 +561,12 @@ __all__ = [
     "RECOMMENDATION_EVENT_VALUES",
     "RECOMMENDATION_ID_NAMESPACE",
     "RECOMMENDATION_RULES",
+    "RECOMMENDATION_SCOPE_AUTOMATION",
+    "RECOMMENDATION_SCOPE_CASE",
+    "RECOMMENDATION_SCOPE_DISPOSITION",
+    "RECOMMENDATION_SCOPE_EXPORT_APPROVAL",
+    "RECOMMENDATION_SCOPE_LEGAL_HOLD",
+    "RECOMMENDATION_SCOPE_SNAPSHOT",
     "RECOMMENDATION_SEVERITY_VALUES",
     "RECOMMENDATION_STATUS_VALUES",
     "RECOMMENDATION_TRANSITIONS",
@@ -511,9 +584,13 @@ __all__ = [
     "SNAPSHOT_COMPARABLE_TYPES",
     "SNAPSHOT_TYPE_COMPLIANCE_SUMMARY",
     "SNAPSHOT_TYPE_INTELLIGENCE_SUMMARY",
+    "SNAPSHOT_VOLATILE_KEYS",
     "SlaState",
     "SlaTargetKey",
+    "TREND_AUDIT_GROUPS",
     "TREND_BUCKETS",
+    "TREND_SOURCE_ORDER",
+    "audit_event_group",
     "default_risk_model",
     "ordered_factor_points",
     "recommendation_id",

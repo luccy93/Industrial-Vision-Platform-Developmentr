@@ -653,6 +653,16 @@ only from a V34 verification outcome of `FAIL`; `PARTIAL`, `UNAVAILABLE`,
 failures or as `PASS`. Operational SLA targets are organization-configurable
 and versioned, and are distinct from legal or regulatory deadlines.
 
+Trend requests are bounded to 90 days (default 30) with UTC hour/day/week
+buckets. Buckets before recorded coverage are `null` and marked as outside
+coverage; an unavailable source reports `null` counts and is never rendered as
+zero. Recommendation refresh is bounded, deduplicated, and advisory: it can
+auto-resolve or reopen rows when the underlying condition changes, but never
+approves or releases a hold, decides a disposition, generates an export, or
+modifies evidence. Snapshot comparison is read-only and returns `COMPARED`,
+`INCOMPATIBLE`, or `INTEGRITY_FAILED`; an invalid self-digest produces no diff
+and the snapshots are preserved for investigation.
+
 Operational sequence:
 
 1. Run the Alembic upgrade before enabling the V37 API. Revision `014` seeds

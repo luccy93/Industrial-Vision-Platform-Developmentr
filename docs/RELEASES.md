@@ -1074,9 +1074,13 @@ V37 is deterministic and on demand. It uses no LLM, machine learning, or
 external AI service, starts no scheduler, and does not modify the V36 scheduler.
 Risk scores are explainable rule-based prioritization aids, not probabilities,
 forecasts, or legal advice. Operational SLA targets are versioned and distinct
-from legal or regulatory deadlines. Recommendations are advisory; dismissal is
-ADMIN-only and requires a reason. Snapshot comparison validates a local
-self-digest only and is not regulatory certification or external immutable
-storage. V37 never approves or releases a hold, decides a disposition, modifies
-evidence, deletes a record, or makes an automatic governance decision. See
+from legal or regulatory deadlines. Trend analytics use bounded UTC windows,
+mark historical coverage gaps, and never render an unavailable source as zero.
+Recommendations are advisory; refresh is bounded and deduplicated, dismissal is
+ADMIN-only and requires a reason, and no recommendation executes a governance
+action. Snapshot comparison validates a local self-digest only, reports
+`COMPARED`, `INCOMPATIBLE`, or `INTEGRITY_FAILED`, and is not regulatory
+certification or external immutable storage. V37 never approves or releases a
+hold, decides a disposition, modifies evidence, deletes a record, or makes an
+automatic governance decision. See
 [V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).

@@ -2071,3 +2071,335 @@ export type GovernanceSnapshotDetail = {
   snapshot: GovernanceSnapshot;
   non_claims: string[];
 };
+
+// ---------------------------------------------------------------------------
+// V37 governance intelligence
+// ---------------------------------------------------------------------------
+export type GovernanceIntelligenceModelSummary = {
+  model_id: string | null;
+  version: number | null;
+  name?: string | null;
+  state?: string | null;
+};
+
+export type GovernanceIntelligenceSlaTargetSummary = {
+  target_key: string;
+  version: number | null;
+  target_hours: number | null;
+  warning_hours: number | null;
+  effective_from: string | null;
+};
+
+export type GovernanceIntelligenceCounts = {
+  total: number;
+  by_status: Record<string, number>;
+  by_severity: Record<string, number>;
+  by_status_severity: Record<string, Record<string, number>>;
+};
+
+export type GovernanceIntelligenceStatus = {
+  enabled: boolean;
+  assurance: string;
+  model: GovernanceIntelligenceModelSummary;
+  sla_targets: GovernanceIntelligenceSlaTargetSummary[];
+  recommendation_counts: GovernanceIntelligenceCounts;
+  scheduled_intelligence: false;
+  scheduled_intelligence_note: string;
+  alerts_enabled: boolean;
+  generated_at: string | null;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceRiskFactor = {
+  factor_id: string;
+  label?: string;
+  points: number;
+  reason: string;
+  source_refs: string[];
+  data_status: string;
+  suppressed: boolean;
+  suppressed_by?: string | null;
+  suppression_reason?: string | null;
+};
+
+export type GovernanceRiskMissingData = {
+  source: string;
+  status: string;
+  message: string;
+};
+
+export type GovernanceRiskScore = {
+  case_id: string;
+  case_number: string | null;
+  case_status: string | null;
+  case_severity: string | null;
+  score: number;
+  risk_level: string;
+  score_available: boolean;
+  data_completeness: string;
+  model_id: string | null;
+  model_version: number | null;
+  policy_context: Record<string, unknown> | null;
+  factors: GovernanceRiskFactor[];
+  missing_data: GovernanceRiskMissingData[];
+  calculated_at: string | null;
+  sla_context: Record<string, GovernanceSlaCalculation>;
+  non_claims: string[];
+};
+
+export type GovernanceRiskCaseSummary = {
+  case_id: string;
+  case_number: string | null;
+  case_status: string | null;
+  case_severity: string | null;
+  score: number;
+  risk_level: string;
+  data_completeness: string;
+  top_factors: string[];
+  model_version: number | null;
+  calculated_at: string | null;
+};
+
+export type GovernanceRiskCaseListResponse = {
+  items: GovernanceRiskCaseSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  risk_level_counts: Record<string, number>;
+  model: GovernanceIntelligenceModelSummary;
+  truncated: boolean;
+  unavailable_case_count: number;
+  partial: boolean;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceRiskCaseDetail = {
+  risk: GovernanceRiskScore;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceSlaCalculation = {
+  target_key: string;
+  sla_kind: string;
+  source_ref: string | null;
+  computed_at: string | null;
+  non_claim: string;
+  target_version: number | null;
+  target_hours: number | null;
+  warning_hours: number | null;
+  target_effective_from: string | null;
+  start_at: string | null;
+  due_at: string | null;
+  warning_at: string | null;
+  resolution_at: string | null;
+  elapsed_hours: number | null;
+  open_age_hours: number | null;
+  duration_hours: number | null;
+  resolved: boolean;
+  state: string;
+  reason: string;
+};
+
+export type GovernanceSlaBacklogItem = {
+  item_type: string;
+  item_id: string | null;
+  case_id: string | null;
+  label: string;
+  sla: GovernanceSlaCalculation;
+};
+
+export type GovernanceSlaBacklogResponse = {
+  items: GovernanceSlaBacklogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  state_counts: Record<string, Record<string, number>>;
+  availability: Record<string, { availability: string; message: string }>;
+  partial: boolean;
+  truncated: boolean;
+  unavailable_sources: string[];
+  sla_kind: string;
+  non_claim: string;
+  non_claims: string[];
+};
+
+export type GovernanceTrendBucket = {
+  bucket_start: string;
+  bucket_end: string;
+  count: number | null;
+  in_coverage: boolean | null;
+  coverage: string;
+  partial_coverage: boolean;
+};
+
+export type GovernanceTrendSource = {
+  availability: string;
+  message: string;
+  definition: string;
+  coverage_start: string | null;
+  coverage_available: boolean;
+  no_history: boolean;
+  truncated: boolean;
+  total: number;
+  categories: string[];
+  category_totals: Record<string, number | null>;
+  buckets: GovernanceTrendBucket[];
+  components?: Record<string, Record<string, unknown>>;
+};
+
+export type GovernanceTrendsResponse = {
+  start_at: string;
+  end_at: string;
+  bucket: string;
+  timezone: string;
+  source_order: string[];
+  sources: Record<string, GovernanceTrendSource>;
+  coverage: {
+    available: boolean;
+    message: string;
+    earliest: Record<string, string | null>;
+  };
+  partial: boolean;
+  truncated: boolean;
+  unavailable_sources: string[];
+  degraded_sources: string[];
+  assurance: string;
+  limitations: string[];
+  non_claims: string[];
+};
+
+export type GovernanceRecommendation = {
+  recommendation_id: string;
+  recommendation_key: string;
+  rule_id: string;
+  scope_type: string;
+  scope_id: string;
+  case_id: string | null;
+  severity: string;
+  risk_level: string | null;
+  title: string;
+  rationale: string;
+  source_refs: string[];
+  status: "OPEN" | "ACKNOWLEDGED" | "DISMISSED" | "RESOLVED";
+  version: number;
+  first_seen_at: string | null;
+  last_evaluated_at: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  acknowledgement_reason: string | null;
+  dismissed_by: string | null;
+  dismissed_at: string | null;
+  dismissal_reason: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  resolution_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type GovernanceRecommendationEvent = {
+  event_id: string;
+  recommendation_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  actor_id: string | null;
+  actor_role: string | null;
+  reason: string;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceRecommendationListResponse = {
+  items: GovernanceRecommendation[];
+  total: number;
+  page: number;
+  page_size: number;
+  counts: GovernanceIntelligenceCounts;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceRecommendationDetail = {
+  recommendation: GovernanceRecommendation;
+  events: GovernanceRecommendationEvent[];
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceRecommendationRefreshResponse = {
+  summary: {
+    created: number;
+    refreshed: number;
+    reopened: number;
+    auto_resolved: number;
+    suppressed: number;
+    truncated: boolean;
+    created_ids: string[];
+    reopened_ids: string[];
+  };
+  counts: GovernanceIntelligenceCounts;
+  alerts: Record<string, number | boolean>;
+  sources: Record<string, { availability: string; message: string; truncated?: boolean }>;
+  partial: boolean;
+  truncated: boolean;
+  unavailable_sources: string[];
+  degraded_sources: string[];
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceIntelligenceSnapshot = Omit<GovernanceSnapshot, "payload"> & {
+  payload?: Record<string, unknown>;
+};
+
+export type GovernanceIntelligenceSnapshotListResponse = {
+  items: GovernanceIntelligenceSnapshot[];
+  total: number;
+  page: number;
+  page_size: number;
+  availability: string;
+  message: string;
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceIntelligenceSnapshotDetail = {
+  snapshot: GovernanceIntelligenceSnapshot;
+  integrity: {
+    state: "VALID" | "INTEGRITY_FAILED";
+    digest_valid: boolean;
+    message: string;
+  };
+  assurance: string;
+  non_claims: string[];
+};
+
+export type GovernanceSnapshotChange = {
+  path: string;
+  change: "ADDED" | "REMOVED" | "CHANGED";
+  before: unknown;
+  after: unknown;
+};
+
+export type GovernanceSnapshotComparison = {
+  snapshot_id: string;
+  other_snapshot_id: string;
+  snapshot_type: string;
+  other_snapshot_type: string;
+  schema_version: number;
+  other_schema_version: number;
+  status: "COMPARED" | "INCOMPATIBLE" | "INTEGRITY_FAILED";
+  comparable: boolean;
+  tampered_snapshot_ids: string[];
+  diff: { changes: GovernanceSnapshotChange[]; truncated: boolean } | null;
+  changes: GovernanceSnapshotChange[];
+  summary: { added: number; removed: number; changed: number; total: number };
+  truncated: boolean;
+  message: string;
+  assurance: string;
+  non_claims: string[];
+};
