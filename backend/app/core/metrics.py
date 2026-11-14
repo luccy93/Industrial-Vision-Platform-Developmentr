@@ -412,6 +412,129 @@ def set_governance_automation_queue_depth(counts: dict[str, int], service: str |
         ).set(max(0, int(count)))
 
 
+# ---------------------------------------------------------------------------
+# V37 governance intelligence (bounded labels only)
+# ---------------------------------------------------------------------------
+governance_intelligence_scores_total = Counter(
+    "ivp_governance_intelligence_scores_total",
+    "Governance risk scores by bounded risk level and data completeness.",
+    ["service", "risk_level", "data_completeness"],
+)
+
+governance_intelligence_scoring_duration_seconds = Histogram(
+    "ivp_governance_intelligence_scoring_duration_seconds",
+    "Governance risk scoring duration.",
+    ["service"],
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
+governance_intelligence_recommendations = Gauge(
+    "ivp_governance_intelligence_recommendations",
+    "Current governance recommendations by bounded status and severity.",
+    ["service", "status", "severity"],
+)
+
+governance_intelligence_refresh_total = Counter(
+    "ivp_governance_intelligence_refresh_total",
+    "Governance recommendation refresh outcomes.",
+    ["service", "outcome"],
+)
+
+governance_intelligence_sla_items = Gauge(
+    "ivp_governance_intelligence_sla_items",
+    "Governance SLA backlog items by bounded target key and state.",
+    ["service", "target_key", "state"],
+)
+
+governance_intelligence_snapshot_comparisons_total = Counter(
+    "ivp_governance_intelligence_snapshot_comparisons_total",
+    "Governance snapshot comparisons by bounded outcome.",
+    ["service", "status"],
+)
+
+_INTELLIGENCE_RISK_LEVELS = frozenset({"LOW", "MODERATE", "HIGH", "CRITICAL"})
+_INTELLIGENCE_COMPLETENESS = frozenset({"COMPLETE", "PARTIAL", "UNAVAILABLE"})
+_INTELLIGENCE_SLA_TARGET_KEYS = frozenset(
+    {"RETENTION_REVIEW", "DISPOSITION_REVIEW", "LEGAL_HOLD_REVIEW", "EXPORT_APPROVAL"}
+)
+_INTELLIGENCE_SLA_STATES = frozenset(
+    {"WITHIN_TARGET", "AT_RISK", "BREACHED", "MET", "MISSED", "UNKNOWN", "NOT_APPLICABLE"}
+)
+_INTELLIGENCE_RECOMMENDATION_STATUSES = frozenset({"OPEN", "ACKNOWLEDGED", "DISMISSED", "RESOLVED"})
+_INTELLIGENCE_RECOMMENDATION_SEVERITIES = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
+_INTELLIGENCE_REFRESH_OUTCOMES = frozenset(
+    {"CREATED", "REFRESHED", "REOPENED", "AUTO_RESOLVED", "SUPPRESSED", "FAILED"}
+)
+_INTELLIGENCE_COMPARISON_STATUSES = frozenset({"COMPARED", "INTEGRITY_FAILED", "INCOMPATIBLE", "UNAVAILABLE"})
+
+
+def record_governance_intelligence_score(
+    *,
+    risk_level: str,
+    data_completeness: str,
+    duration_seconds: float = 0.0,
+    service: str | None = None,
+) -> None:
+    """Record one governance risk score using bounded labels only."""
+    resolved = _service(service)
+    governance_intelligence_scores_total.labels(
+        service=resolved,
+        risk_level=_bounded_label(risk_level, _INTELLIGENCE_RISK_LEVELS),
+        data_completeness=_bounded_label(data_completeness, _INTELLIGENCE_COMPLETENESS),
+    ).inc()
+    governance_intelligence_scoring_duration_seconds.labels(service=resolved).observe(
+        max(0.0, float(duration_seconds))
+    )
+
+
+def set_governance_intelligence_recommendation_counts(
+    counts: dict[str, dict[str, int]],
+    service: str | None = None,
+) -> None:
+    """Set recommendation gauges from a bounded status -> severity -> count map."""
+    resolved = _service(service)
+    for status in _INTELLIGENCE_RECOMMENDATION_STATUSES:
+        for severity in _INTELLIGENCE_RECOMMENDATION_SEVERITIES:
+            governance_intelligence_recommendations.labels(
+                service=resolved, status=status, severity=severity
+            ).set(0)
+    for status, severity_counts in counts.items():
+        bounded_status = _bounded_label(status, _INTELLIGENCE_RECOMMENDATION_STATUSES)
+        for severity, count in severity_counts.items():
+            governance_intelligence_recommendations.labels(
+                service=resolved,
+                status=bounded_status,
+                severity=_bounded_label(severity, _INTELLIGENCE_RECOMMENDATION_SEVERITIES),
+            ).set(max(0, int(count)))
+
+
+def record_governance_intelligence_refresh(outcome: str, service: str | None = None) -> None:
+    governance_intelligence_refresh_total.labels(
+        service=_service(service),
+        outcome=_bounded_label(outcome, _INTELLIGENCE_REFRESH_OUTCOMES),
+    ).inc()
+
+
+def set_governance_intelligence_sla_counts(
+    target_key: str, states: dict[str, int], service: str | None = None
+) -> None:
+    resolved = _service(service)
+    bounded_key = _bounded_label(target_key, _INTELLIGENCE_SLA_TARGET_KEYS)
+    for state, count in states.items():
+        governance_intelligence_sla_items.labels(
+            service=resolved,
+            target_key=bounded_key,
+            state=_bounded_label(state, _INTELLIGENCE_SLA_STATES),
+        ).set(max(0, int(count)))
+
+
+def record_governance_intelligence_snapshot_comparison(status: str, service: str | None = None) -> None:
+    governance_intelligence_snapshot_comparisons_total.labels(
+        service=_service(service),
+        status=_bounded_label(status, _INTELLIGENCE_COMPARISON_STATUSES),
+    ).inc()
+
+
 def metrics_payload() -> bytes:
     return generate_latest(REGISTRY)
 

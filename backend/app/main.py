@@ -856,6 +856,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.governance_automation_scheduler = governance_automation_scheduler
     app.state.governance_automation_service = governance_automation_service
 
+    # V37: deterministic governance intelligence. Risk scoring, operational
+    # SLA tracking, recommendations, and snapshot comparison are computed on
+    # demand from V35/V36 records. V37 starts no scheduler and never approves
+    # or releases a hold, decides a disposition, modifies evidence, or deletes
+    # any record.
+    from backend.app.governance.intelligence.repository import (
+        GovernanceIntelligenceRepository,
+    )
+    from backend.app.governance.intelligence.service import (
+        GovernanceIntelligenceService,
+    )
+    from backend.app.incidents.repository import IncidentRepository
+
+    governance_intelligence_repository: GovernanceIntelligenceRepository | None = None
+    governance_intelligence_service: GovernanceIntelligenceService | None = None
+    if (
+        governance_service is not None
+        and governance_repository is not None
+        and forensic_repository is not None
+        and bool(settings.governance_intelligence_enabled)
+    ):
+        try:
+            governance_intelligence_repository = GovernanceIntelligenceRepository(
+                app.state.session_factory
+            )
+            governance_intelligence_repository.ensure_defaults()
+            governance_intelligence_service = GovernanceIntelligenceService(
+                settings=settings,
+                repository=governance_intelligence_repository,
+                governance_service=governance_service,
+                governance_repository=governance_repository,
+                forensic_repository=forensic_repository,
+                forensic_service=forensic_service,
+                automation_repository=governance_automation_repository,
+                incident_repository=IncidentRepository(app.state.session_factory),
+                notifier=governance_notifier,
+            )
+        except Exception:
+            get_logger("industrial-vision.governance").warning(
+                "governance intelligence initialization skipped", exc_info=True
+            )
+            governance_intelligence_repository = None
+            governance_intelligence_service = None
+    app.state.governance_intelligence_repository = governance_intelligence_repository
+    app.state.governance_intelligence_service = governance_intelligence_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -1096,6 +1142,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.governance_automation import router as governance_automation_router
 
     app.include_router(governance_automation_router)
+    from backend.app.api.v1.governance_intelligence import (
+        router as governance_intelligence_router,
+    )
+
+    app.include_router(governance_intelligence_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

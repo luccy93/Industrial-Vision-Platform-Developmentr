@@ -60,7 +60,7 @@ def test_governance_automation_migration_cycle(tmp_path, monkeypatch) -> None:  
     config = _config(tmp_path, monkeypatch)
     url = f"sqlite:///{tmp_path}/migrate.db"
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "013_create_governance_automation")
     tables = _tables(url)
     assert _V36_TABLES <= tables
     assert _V35_TABLES <= tables
@@ -124,7 +124,7 @@ def test_governance_automation_migration_cycle(tmp_path, monkeypatch) -> None:  
             connection.execute(text("DELETE FROM governance_snapshots WHERE id = 'snap-1'"))
 
     # V36 reverses alone: only automation tables disappear.
-    command.downgrade(config, "-1")
+    command.downgrade(config, "012_create_governance")
     remaining = _tables(url)
     assert _V36_TABLES.isdisjoint(remaining)
     assert _V35_TABLES <= remaining
@@ -137,7 +137,7 @@ def test_governance_automation_migration_cycle(tmp_path, monkeypatch) -> None:  
         ).all()
         assert leftover == []
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "013_create_governance_automation")
     assert _V36_TABLES <= _tables(url)
     assert _seed_counts(url) == (7, 7)
 

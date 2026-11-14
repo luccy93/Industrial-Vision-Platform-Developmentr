@@ -621,6 +621,66 @@ Operational sequence:
 See
 [V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).
 
+### Governance intelligence and predictive analytics (V37)
+
+V37 adds deterministic, explainable governance intelligence to the existing
+`/governance` workspace and V35/V36 APIs. Alembic revision
+`014_create_governance_intelligence` follows `013_create_governance_automation`
+and creates only four V37-owned tables: risk model versions, SLA target
+versions, recommendations, and recommendation lifecycle events. Foreign keys
+are non-cascading; `downgrade()` drops only the V37 tables. V36
+`governance_snapshots` is reused unchanged for `INTELLIGENCE_SUMMARY` records.
+
+```powershell
+$env:GOVERNANCE_INTELLIGENCE_ENABLED="true"
+$env:GOVERNANCE_INTELLIGENCE_PAGE_SIZE="20"
+$env:GOVERNANCE_INTELLIGENCE_MAX_CASES="500"
+$env:GOVERNANCE_INTELLIGENCE_MAX_RECOMMENDATIONS="500"
+$env:GOVERNANCE_INTELLIGENCE_DEFAULT_WINDOW_DAYS="30"
+$env:GOVERNANCE_INTELLIGENCE_ALERTS_ENABLED="false"
+$env:GOVERNANCE_INTELLIGENCE_ALERT_MIN_SEVERITY="CRITICAL"
+```
+
+Intelligence is computed on demand. V37 starts no scheduler and does not modify
+the V36 scheduler, which remains disabled by default. The optional V15 alert
+path is off by default; when enabled, only newly opened `CRITICAL`
+recommendations are queued through the existing V15 GOVERNANCE pipeline.
+
+Risk scores are deterministic rule-based prioritization aids in `0..100`, not
+probabilities, forecasts, or legal advice. Confirmed integrity failures come
+only from a V34 verification outcome of `FAIL`; `PARTIAL`, `UNAVAILABLE`,
+`NOT_RUN`, simulated, and incomplete checks are never reported as confirmed
+failures or as `PASS`. Operational SLA targets are organization-configurable
+and versioned, and are distinct from legal or regulatory deadlines.
+
+Operational sequence:
+
+1. Run the Alembic upgrade before enabling the V37 API. Revision `014` seeds
+   risk model `RISK-DEFAULT` v1 and four operational SLA targets v1; both paths
+   are idempotent.
+2. Keep `GOVERNANCE_INTELLIGENCE_ENABLED=true` unless the workspace must be
+   disabled; `503` is returned when the service is disabled or unavailable.
+3. Review `/api/v1/governance/intelligence/status` and `/risk/model` before
+   trusting scores. Model and SLA changes are ADMIN-only, append-only, and
+   require a reason plus `expected_version` for optimistic concurrency.
+4. Treat `partial=true`, `truncated=true`, `UNAVAILABLE`, and `UNKNOWN` as
+   explicit data-quality states, never as zero or a pass.
+5. Dismissal is ADMIN-only and requires a reason. Recommendations never approve
+   or release a hold, approve or reject a disposition, generate an export, or
+   modify evidence.
+6. Plan capacity for retained model, SLA, recommendation, and event history.
+   V37 performs no pruning and exposes no `DELETE` route.
+
+Rollback: stop writing intelligence configuration, run the Alembic downgrade
+to `013_create_governance_automation`, and restore the pre-upgrade backup if
+V37 rows must be discarded. Downgrading drops only V37 tables and does not
+touch V01–V36 schema, evidence, custody, exports, holds, dispositions, audit,
+or V36 automation records. Disabling the service is reversible without a
+schema change.
+
+See
+[V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

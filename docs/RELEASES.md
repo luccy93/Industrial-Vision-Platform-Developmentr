@@ -1051,3 +1051,32 @@ is reported as local queue state, not an external delivery guarantee.
 Compliance snapshots are local self-digested SUMMARY records, not regulatory
 certification, immutable storage, or external trust anchors. See
 [V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).
+
+## V37 release impact
+
+V37 adds an additive Alembic revision, `014_create_governance_intelligence`,
+creating only governance risk-model, SLA-target, recommendation, and
+recommendation-event tables after `013_create_governance_automation`. Existing
+V01–V36 tables, evidence references, custody records, export IDs, paths,
+hashes, and semantics are untouched; `downgrade()` drops only the V37 tables.
+No release tag, image publication, workflow dispatch, or deployment is part of
+V37.
+
+New runtime configuration is additive: `GOVERNANCE_INTELLIGENCE_ENABLED`,
+`GOVERNANCE_INTELLIGENCE_PAGE_SIZE`, `GOVERNANCE_INTELLIGENCE_MAX_CASES`,
+`GOVERNANCE_INTELLIGENCE_MAX_RECOMMENDATIONS`,
+`GOVERNANCE_INTELLIGENCE_DEFAULT_WINDOW_DAYS`,
+`GOVERNANCE_INTELLIGENCE_ALERTS_ENABLED`, and
+`GOVERNANCE_INTELLIGENCE_ALERT_MIN_SEVERITY`. Deployments must run the
+migration before enabling the intelligence API.
+
+V37 is deterministic and on demand. It uses no LLM, machine learning, or
+external AI service, starts no scheduler, and does not modify the V36 scheduler.
+Risk scores are explainable rule-based prioritization aids, not probabilities,
+forecasts, or legal advice. Operational SLA targets are versioned and distinct
+from legal or regulatory deadlines. Recommendations are advisory; dismissal is
+ADMIN-only and requires a reason. Snapshot comparison validates a local
+self-digest only and is not regulatory certification or external immutable
+storage. V37 never approves or releases a hold, decides a disposition, modifies
+evidence, deletes a record, or makes an automatic governance decision. See
+[V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).

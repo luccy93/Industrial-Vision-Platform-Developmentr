@@ -415,3 +415,17 @@ prompts and never approve or release a hold, approve or reject a disposition, or
 generate an export. V36 snapshots are local self-digested SUMMARY records and
 are not a regulatory certification or external trust anchor. See
 [V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md](V36_GOVERNANCE_AUTOMATION_AND_COMPLIANCE_OPERATIONS.md).
+
+## Relationship to V37 governance intelligence
+
+V37 adds deterministic, explainable governance intelligence above this V35
+layer without changing V35 evidence, case, custody, export, hold, disposition,
+policy, report, or audit semantics. It reads V35 retention evaluations, legal
+holds, dispositions, export approvals, and enabled policies; risk factors and
+operational SLA states are derived from those records, not written back into
+them. V37 audit events use the existing V35 governance audit. V37 adds the
+additive revision `014_create_governance_intelligence` and never approves or
+releases a hold, approves or rejects a disposition, modifies evidence, or
+deletes a record. Operational SLA targets are organization-configurable and
+distinct from legal or regulatory deadlines. See
+[V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).

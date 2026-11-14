@@ -360,3 +360,17 @@ behavior; those require separate deployment validation.
   capacity.
 - PostgreSQL trigger behavior is covered by offline SQL generation and SQLite
   integration tests in CI; a live PostgreSQL migration is a deployment step.
+
+## Relationship to V37 governance intelligence
+
+V37 adds deterministic, explainable governance intelligence above V35/V36
+without changing V36 schedules, jobs, job events, snapshots, or scheduler
+semantics. V37 starts no scheduler; intelligence is computed on demand. It
+reuses the V36 `governance_snapshots` table and canonical SHA-256 self-digest
+for the additive `INTELLIGENCE_SUMMARY` snapshot type, leaving
+`COMPLIANCE_SUMMARY` unchanged. When
+`GOVERNANCE_INTELLIGENCE_ALERTS_ENABLED=true`, newly opened `CRITICAL`
+recommendations may queue through the existing V15 GOVERNANCE notification
+pipeline; the default is off. V37 never approves or releases a hold, decides a
+disposition, modifies evidence, or deletes a record. See
+[V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).

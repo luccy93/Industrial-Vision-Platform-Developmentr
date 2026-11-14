@@ -240,6 +240,15 @@ class Settings(BaseSettings):
     governance_automation_max_pending_jobs: int = Field(default=100, ge=1, le=1000)
     governance_automation_max_jobs_per_tick: int = Field(default=5, ge=1, le=50)
 
+    # --- V37 governance intelligence (deterministic, on demand) ---
+    governance_intelligence_enabled: bool = Field(default=True)
+    governance_intelligence_page_size: int = Field(default=20, ge=1, le=100)
+    governance_intelligence_max_cases: int = Field(default=500, ge=1, le=2000)
+    governance_intelligence_max_recommendations: int = Field(default=500, ge=1, le=2000)
+    governance_intelligence_default_window_days: int = Field(default=30, ge=1, le=90)
+    governance_intelligence_alerts_enabled: bool = Field(default=False)
+    governance_intelligence_alert_min_severity: str = Field(default="CRITICAL")
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")
