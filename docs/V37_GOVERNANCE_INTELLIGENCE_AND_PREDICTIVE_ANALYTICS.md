@@ -250,11 +250,18 @@ Lifecycle transitions are optimistic-concurrency guarded:
 - a later recurrence reopens the same deduplicated row.
 
 Acknowledged and dismissed rows keep append-only lifecycle events. Dismissal
-requires a reason of at least 8 characters, is ADMIN-only, and suppresses the
+requires a reason of at least 3 characters, is ADMIN-only, and suppresses the
 same candidate only while its condition persists. Refresh is bounded,
 idempotent, and performs no governance mutation. Newly created `CRITICAL`
 recommendations may notify through the existing V15 notifier only when
 `GOVERNANCE_INTELLIGENCE_ALERTS_ENABLED=true`; the default is off.
+
+Lifecycle writes use a compare-and-set update on the observed `version`, not a
+read-modify-write in application code. Two concurrent transitions with the same
+expected version therefore produce one success and one `409` conflict, and
+exactly one lifecycle event. A concurrent refresh that loses a unique-key race
+rolls back and retries once against the winner's row, so duplicate suppression
+holds without surfacing a database error.
 
 ## Snapshot generation and comparison
 
@@ -347,6 +354,29 @@ SLA state, recommendation status/severity, refresh outcome, and comparison
 status. Actor IDs, case IDs, recommendation IDs, evidence IDs, and
 user-controlled strings are never metric labels. Logs and error details pass
 through V29 redaction.
+
+## Testing and validation
+
+The V37 suite is synthetic, deterministic, and local-only. It covers risk-score
+determinism, factor completeness, correlation suppression, confirmed versus
+unavailable/simulated integrity states, versioned SLA history, bounded trend
+windows, historical coverage gaps, unavailable-not-zero sources, recommendation
+deduplication and lifecycle, concurrent transitions and refreshes, cross-case
+isolation, metric cardinality, malicious identifiers and ranges, snapshot
+idempotency, tamper detection, incompatible comparison, RBAC, migration
+upgrade/downgrade, and V10/V14/V15/V16/V29-V36 regression smoke checks. A
+downgrade test seeds V35 audit history and a V36 snapshot, then proves both rows
+survive `014 -> 013 -> 014`.
+
+The focused V37 suite is 48 tests (14 hardening, 14 analytics, 17 foundation,
+and 3 migration). The final local full backend run recorded 2266 passed, 4
+skipped, and 11 deselected; the frontend suite recorded 132 passed across 26
+files. Ruff check/format, `compileall`, the workflow SHA-pin audit, and all six
+Compose configuration checks passed.
+
+The suite does not validate a live PostgreSQL migration, live SMTP/webhook
+delivery, real scheduler timing, Docker runtime containers, external trust
+anchors, or a production deployment.
 
 ## Limitations and non-claims
 

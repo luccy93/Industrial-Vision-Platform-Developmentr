@@ -659,9 +659,12 @@ coverage; an unavailable source reports `null` counts and is never rendered as
 zero. Recommendation refresh is bounded, deduplicated, and advisory: it can
 auto-resolve or reopen rows when the underlying condition changes, but never
 approves or releases a hold, decides a disposition, generates an export, or
-modifies evidence. Snapshot comparison is read-only and returns `COMPARED`,
-`INCOMPATIBLE`, or `INTEGRITY_FAILED`; an invalid self-digest produces no diff
-and the snapshots are preserved for investigation.
+modifies evidence. Concurrent refreshes retry once against a unique-key winner;
+concurrent lifecycle writes use a version compare-and-set and return `409` for
+the loser instead of overwriting a newer decision. Snapshot comparison is
+read-only and returns `COMPARED`, `INCOMPATIBLE`, or `INTEGRITY_FAILED`; an
+invalid self-digest produces no diff and the snapshots are preserved for
+investigation.
 
 Operational sequence:
 

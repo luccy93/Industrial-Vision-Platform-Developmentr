@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -183,6 +184,83 @@ def test_governance_intelligence_migration_cycle(tmp_path, monkeypatch) -> None:
     command.upgrade(config, "head")
     assert _V37_TABLES <= _tables(url)
     assert _seed_counts(url) == (1, 4)
+
+
+def test_v37_downgrade_preserves_v35_and_v36_history(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    config = _config(tmp_path, monkeypatch)
+    url = f"sqlite:///{tmp_path}/migrate.db"
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO governance_snapshots (
+                    id, snapshot_type, as_of, generated_at, generated_by, job_id,
+                    trigger, dedup_key, payload, payload_digest, row_count,
+                    schema_version
+                ) VALUES (
+                    'snap-preserved', 'COMPLIANCE_SUMMARY', '2026-11-11 12:00:00',
+                    '2026-11-11 12:00:00', 'operator@example.com', NULL, 'MANUAL',
+                    'v37-hardening-preserved-snapshot', :payload, :digest, 1, 1
+                )
+                """
+            ),
+            {
+                "payload": json.dumps({"sentinel": "v37-preserved"}),
+                "digest": "a" * 64,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO governance_access_audit (
+                    id, event_type, actor_id, actor_role, target_type, target_id,
+                    case_id, outcome, reason, request_id, occurred_at, event_key,
+                    event_hash, metadata, created_at
+                ) VALUES (
+                    'audit-preserved', 'CASE_VIEWED', 'operator@example.com',
+                    'OPERATOR', 'FORENSIC_CASE', 'case-1', 'case-1', 'ALLOWED',
+                    'synthetic preserved history', NULL, '2026-11-11T12:00:00Z',
+                    'v37-hardening-preserved-audit', :digest, :metadata,
+                    '2026-11-11 12:00:00'
+                )
+                """
+            ),
+            {
+                "digest": "b" * 64,
+                "metadata": json.dumps({"source": "v37-hardening"}),
+            },
+        )
+
+    command.downgrade(config, "013_create_governance_automation")
+    with engine.begin() as connection:
+        assert (
+            connection.execute(
+                text("SELECT COUNT(*) FROM governance_snapshots WHERE id = 'snap-preserved'")
+            ).scalar_one()
+            == 1
+        )
+        assert (
+            connection.execute(
+                text("SELECT COUNT(*) FROM governance_access_audit WHERE id = 'audit-preserved'")
+            ).scalar_one()
+            == 1
+        )
+
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        snapshot = connection.execute(
+            text("SELECT payload, payload_digest FROM governance_snapshots WHERE id = 'snap-preserved'")
+        ).one()
+        assert json.loads(snapshot[0]) == {"sentinel": "v37-preserved"}
+        assert snapshot[1] == "a" * 64
+        audit = connection.execute(
+            text("SELECT reason, event_hash FROM governance_access_audit WHERE id = 'audit-preserved'")
+        ).one()
+        assert audit[0] == "synthetic preserved history"
+        assert audit[1] == "b" * 64
 
 
 def test_governance_intelligence_postgresql_sql_is_additive_and_triggered(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

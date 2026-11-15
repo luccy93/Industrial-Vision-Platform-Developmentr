@@ -160,7 +160,14 @@ def test_no_mutation_routes_exist(client: TestClient) -> None:
     # reliable route inventory.
     app = cast(FastAPI, cast(Any, client).app)
     paths = app.openapi()["paths"]
-    intelligence = {p: methods for p, methods in paths.items() if "intelligence" in p}
+    # V37 governance intelligence is a separate namespace under
+    # /api/v1/governance/intelligence; this test covers the V09 operational
+    # intelligence engine only.
+    intelligence = {
+        p: methods
+        for p, methods in paths.items()
+        if "intelligence" in p and not p.startswith("/api/v1/governance/")
+    }
     assert set(intelligence) == {
         "/api/v1/intelligence/status",
         "/api/v1/cameras/{camera_id}/intelligence/events",

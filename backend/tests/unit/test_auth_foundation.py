@@ -57,6 +57,15 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.ADMIN, "governance_automation_cancel")
     assert can(Role.ADMIN, "governance_snapshot_read")
     assert can(Role.ADMIN, "governance_snapshot_generate")
+    assert can(Role.ADMIN, "governance_intelligence_read")
+    assert can(Role.ADMIN, "governance_risk_read")
+    assert can(Role.ADMIN, "governance_sla_read")
+    assert can(Role.ADMIN, "governance_trends_read")
+    assert can(Role.ADMIN, "governance_recommendations_read")
+    assert can(Role.ADMIN, "governance_recommendation_acknowledge")
+    assert can(Role.ADMIN, "governance_recommendation_dismiss")
+    assert can(Role.ADMIN, "governance_intelligence_refresh")
+    assert can(Role.ADMIN, "governance_intelligence_configure")
     assert can(Role.OPERATOR, "governance_read")
     assert can(Role.OPERATOR, "retention_evaluate")
     assert can(Role.OPERATOR, "legal_hold_write")
@@ -67,6 +76,15 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.OPERATOR, "governance_automation_cancel")
     assert can(Role.OPERATOR, "governance_snapshot_read")
     assert can(Role.OPERATOR, "governance_snapshot_generate")
+    assert can(Role.OPERATOR, "governance_intelligence_read")
+    assert can(Role.OPERATOR, "governance_risk_read")
+    assert can(Role.OPERATOR, "governance_sla_read")
+    assert can(Role.OPERATOR, "governance_trends_read")
+    assert can(Role.OPERATOR, "governance_recommendations_read")
+    assert can(Role.OPERATOR, "governance_recommendation_acknowledge")
+    assert can(Role.OPERATOR, "governance_intelligence_refresh")
+    assert not can(Role.OPERATOR, "governance_recommendation_dismiss")
+    assert not can(Role.OPERATOR, "governance_intelligence_configure")
     assert not can(Role.OPERATOR, "governance_policy_write")
     assert not can(Role.OPERATOR, "governance_automation_configure")
     assert not can(Role.OPERATOR, "legal_hold_approve")
@@ -77,6 +95,15 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.VIEWER, "governance_read")
     assert can(Role.VIEWER, "governance_automation_read")
     assert can(Role.VIEWER, "governance_snapshot_read")
+    assert can(Role.VIEWER, "governance_intelligence_read")
+    assert can(Role.VIEWER, "governance_risk_read")
+    assert can(Role.VIEWER, "governance_sla_read")
+    assert can(Role.VIEWER, "governance_trends_read")
+    assert can(Role.VIEWER, "governance_recommendations_read")
+    assert not can(Role.VIEWER, "governance_recommendation_acknowledge")
+    assert not can(Role.VIEWER, "governance_recommendation_dismiss")
+    assert not can(Role.VIEWER, "governance_intelligence_refresh")
+    assert not can(Role.VIEWER, "governance_intelligence_configure")
     assert not can(Role.VIEWER, "governance_automation_configure")
     assert not can(Role.VIEWER, "governance_automation_retry")
     assert not can(Role.VIEWER, "governance_automation_cancel")
@@ -113,6 +140,15 @@ def test_role_matrix_least_privilege() -> None:
             "governance_automation_cancel",
             "governance_snapshot_read",
             "governance_snapshot_generate",
+            "governance_intelligence_read",
+            "governance_risk_read",
+            "governance_sla_read",
+            "governance_trends_read",
+            "governance_recommendations_read",
+            "governance_recommendation_acknowledge",
+            "governance_recommendation_dismiss",
+            "governance_intelligence_refresh",
+            "governance_intelligence_configure",
             "admin_config",
             "user_admin",
         }

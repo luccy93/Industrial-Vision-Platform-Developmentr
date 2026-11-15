@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -477,8 +477,14 @@ class GovernanceIntelligenceRepository:
         *,
         now: datetime | None = None,
         max_items: int = 500,
+        _attempt: int = 0,
     ) -> dict[str, Any]:
-        """Upsert deterministic recommendations and auto-resolve cleared ones."""
+        """Upsert deterministic recommendations and auto-resolve cleared ones.
+
+        A concurrent refresh may insert the same deterministic row between our
+        read and commit. The unique recommendation key makes that safe; one
+        bounded retry re-reads the winner's row instead of failing the request.
+        """
         moment = _normalize_dt(now, utcnow())
         bounded = list(candidates)[: max(1, int(max_items))]
         candidate_map: dict[str, Mapping[str, Any]] = {}
@@ -535,7 +541,6 @@ class GovernanceIntelligenceRepository:
                         updated_at=moment,
                     )
                     session.add(row)
-                    session.flush()
                     session.add(
                         GovernanceRecommendationEventORM(
                             id=_new_id(),
@@ -631,7 +636,18 @@ class GovernanceIntelligenceRepository:
                     )
                 )
                 summary["auto_resolved"] += 1
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                if _attempt >= 1:
+                    raise
+                return self.sync_recommendations(
+                    candidates,
+                    now=moment,
+                    max_items=max_items,
+                    _attempt=_attempt + 1,
+                )
         return summary
 
     def get_recommendation(self, recommendation_id_value: str) -> dict[str, Any] | None:
@@ -717,31 +733,64 @@ class GovernanceIntelligenceRepository:
                     f"recommendation transition {current} -> {normalized_target} is not allowed"
                 )
             previous = current
-            row.status = normalized_target
-            row.version = int(row.version) + 1
-            row.updated_at = moment
+            observed_version = int(row.version)
+            values: dict[str, Any] = {
+                "status": normalized_target,
+                "version": observed_version + 1,
+                "updated_at": moment,
+            }
             if normalized_target == RecommendationStatus.ACKNOWLEDGED.value:
-                row.acknowledged_by = _safe_text(actor_id or "SYSTEM", 256)
-                row.acknowledged_at = moment
-                row.acknowledgement_reason = _safe_text(reason, 2048) or None
+                values.update(
+                    acknowledged_by=_safe_text(actor_id or "SYSTEM", 256),
+                    acknowledged_at=moment,
+                    acknowledgement_reason=_safe_text(reason, 2048) or None,
+                )
             elif normalized_target == RecommendationStatus.DISMISSED.value:
-                row.dismissed_by = _safe_text(actor_id or "SYSTEM", 256)
-                row.dismissed_at = moment
-                row.dismissal_reason = _safe_text(reason, 500)
+                values.update(
+                    dismissed_by=_safe_text(actor_id or "SYSTEM", 256),
+                    dismissed_at=moment,
+                    dismissal_reason=_safe_text(reason, 500),
+                )
             elif normalized_target == RecommendationStatus.RESOLVED.value:
-                row.resolved_by = _safe_text(actor_id or "SYSTEM", 256)
-                row.resolved_at = moment
-                row.resolution_reason = _safe_text(reason, 2048) or None
+                values.update(
+                    resolved_by=_safe_text(actor_id or "SYSTEM", 256),
+                    resolved_at=moment,
+                    resolution_reason=_safe_text(reason, 2048) or None,
+                )
             elif normalized_target == RecommendationStatus.OPEN.value:
-                row.dismissed_by = None
-                row.dismissed_at = None
-                row.dismissal_reason = None
-                row.resolved_by = None
-                row.resolved_at = None
-                row.resolution_reason = None
-                row.acknowledged_by = None
-                row.acknowledged_at = None
-                row.acknowledgement_reason = None
+                values.update(
+                    dismissed_by=None,
+                    dismissed_at=None,
+                    dismissal_reason=None,
+                    resolved_by=None,
+                    resolved_at=None,
+                    resolution_reason=None,
+                    acknowledged_by=None,
+                    acknowledged_at=None,
+                    acknowledgement_reason=None,
+                )
+            # Compare-and-set on the observed version so two concurrent
+            # transitions cannot both succeed with a lost update. A competing
+            # writer that committed after our read leaves rowcount at zero.
+            result = session.execute(
+                update(GovernanceRecommendationORM)
+                .where(
+                    GovernanceRecommendationORM.id == str(recommendation_id_value),
+                    GovernanceRecommendationORM.version == observed_version,
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            if int(result.rowcount or 0) != 1:
+                session.rollback()
+                fresh = session.get(GovernanceRecommendationORM, str(recommendation_id_value))
+                if fresh is None:
+                    raise RecommendationNotFoundError(str(recommendation_id_value))
+                raise RecommendationVersionConflictError(
+                    str(recommendation_id_value),
+                    int(expected_version) if expected_version is not None else observed_version,
+                    int(fresh.version),
+                )
             event_type = {
                 RecommendationStatus.ACKNOWLEDGED.value: "ACKNOWLEDGED",
                 RecommendationStatus.DISMISSED.value: "DISMISSED",

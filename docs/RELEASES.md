@@ -1078,7 +1078,10 @@ from legal or regulatory deadlines. Trend analytics use bounded UTC windows,
 mark historical coverage gaps, and never render an unavailable source as zero.
 Recommendations are advisory; refresh is bounded and deduplicated, dismissal is
 ADMIN-only and requires a reason, and no recommendation executes a governance
-action. Snapshot comparison validates a local self-digest only, reports
+action. Concurrent refreshes retry once against a unique-key winner, and
+concurrent lifecycle writes use a version compare-and-set so the loser receives
+`409` rather than overwriting a newer decision. Snapshot comparison validates a
+local self-digest only, reports
 `COMPARED`, `INCOMPATIBLE`, or `INTEGRITY_FAILED`, and is not regulatory
 certification or external immutable storage. V37 never approves or releases a
 hold, decides a disposition, modifies evidence, deletes a record, or makes an
