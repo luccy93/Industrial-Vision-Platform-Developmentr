@@ -829,6 +829,31 @@ class GovernanceAutomationRepository:
         with self._session_factory() as session:
             return int(session.query(GovernanceJobORM).count())
 
+    def count_jobs_in_range(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        status: str | None = None,
+    ) -> int:
+        """Count jobs whose finish time falls inside ``[start, end)``.
+
+        V38 uses this for failed-job executive KPIs. A successful query that
+        finds no rows is a genuine zero; an unreadable source is handled by the
+        caller and is never converted to zero.
+        """
+        moment_start = normalize_utc(start)
+        moment_end = normalize_utc(end)
+        with self._session_factory() as session:
+            query = session.query(GovernanceJobORM).filter(
+                GovernanceJobORM.finished_at.is_not(None),
+                GovernanceJobORM.finished_at >= moment_start,
+                GovernanceJobORM.finished_at < moment_end,
+            )
+            if status is not None:
+                query = query.filter(GovernanceJobORM.status == str(status).upper())
+            return int(query.count())
+
     # ------------------------------------------------------------------
     # Reminder activity (V15 notification queue state; never a delivery claim)
     # ------------------------------------------------------------------

@@ -249,6 +249,16 @@ class Settings(BaseSettings):
     governance_intelligence_alerts_enabled: bool = Field(default=False)
     governance_intelligence_alert_min_severity: str = Field(default="CRITICAL")
 
+    # --- V38 executive governance command center (deterministic, on demand) ---
+    governance_executive_enabled: bool = Field(default=True)
+    governance_executive_page_size: int = Field(default=20, ge=1, le=100)
+    governance_executive_default_window_days: int = Field(default=30, ge=1, le=90)
+    governance_executive_max_actions: int = Field(default=500, ge=1, le=2000)
+    governance_executive_max_report_rows: int = Field(default=500, ge=1, le=5000)
+    governance_executive_report_max_bytes: int = Field(default=524288, ge=1024, le=2097152)
+    governance_executive_comparison_period_days: int = Field(default=30, ge=1, le=90)
+    governance_executive_action_due_soon_hours: int = Field(default=72, ge=1, le=720)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")

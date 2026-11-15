@@ -17,6 +17,8 @@ from backend.app.models import (
     autonomous_orm,  # noqa: E402,F401 (register autonomous metadata)
     forensic_orm,  # noqa: E402,F401 (register forensic metadata)
     governance_automation_orm,  # noqa: E402,F401 (register governance automation metadata)
+    governance_executive_orm,  # noqa: E402,F401 (register executive governance metadata)
+    governance_intelligence_orm,  # noqa: E402,F401 (register governance intelligence metadata)
     governance_orm,  # noqa: E402,F401 (register governance metadata)
     incident_orm,  # noqa: E402,F401 (register incident metadata)
     quality_orm,  # noqa: E402,F401 (register quality metadata)

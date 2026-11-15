@@ -147,7 +147,44 @@ class ForensicService:
         }
 
     def summary(self) -> dict[str, Any]:
-        return self._repository.summary()
+        summary = self._repository.summary()
+        summary["integrity_findings"] = self._integrity_findings_summary()
+        return summary
+
+    def _integrity_findings_summary(self) -> dict[str, Any]:
+        """Additive V38 read of the V33 store; never promotes a finding to a case."""
+        if self._store is None:
+            return {
+                "availability": "UNAVAILABLE",
+                "message": "The V33 integrity monitoring store is not initialized.",
+                "latest_audit_id": None,
+                "latest_audit_status": None,
+                "latest_findings": None,
+                "latest_findings_by_severity": {},
+            }
+        try:
+            store_summary = self._store.summary()
+        except Exception as exc:  # noqa: BLE001 - one unavailable source must not break forensics
+            return {
+                "availability": "UNAVAILABLE",
+                "message": (f"The V33 integrity summary could not be read ({type(exc).__name__})."),
+                "latest_audit_id": None,
+                "latest_audit_status": None,
+                "latest_findings": None,
+                "latest_findings_by_severity": {},
+            }
+        latest = store_summary.get("latest_audit") or {}
+        return {
+            "availability": "AVAILABLE",
+            "message": "",
+            "latest_audit_id": latest.get("audit_run_id"),
+            "latest_audit_status": latest.get("status"),
+            "latest_findings": int(store_summary.get("open_findings", 0)),
+            "latest_findings_by_severity": {
+                str(severity): int(count)
+                for severity, count in (store_summary.get("latest_findings_by_severity") or {}).items()
+            },
+        }
 
     def list_cases(self, **filters: Any) -> dict[str, Any]:
         items, total = self._repository.list_cases(**filters)

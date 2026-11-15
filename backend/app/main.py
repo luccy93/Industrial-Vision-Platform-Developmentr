@@ -902,6 +902,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.governance_intelligence_repository = governance_intelligence_repository
     app.state.governance_intelligence_service = governance_intelligence_service
 
+    # V38: executive governance command center. KPIs, health, comparisons, and
+    # reports are computed on demand from V10-V37 records. V38 starts no
+    # scheduler, never approves or releases a hold, never decides a
+    # disposition, never modifies evidence, and never deletes a record.
+    from backend.app.governance.executive.repository import (
+        GovernanceExecutiveRepository,
+    )
+    from backend.app.governance.executive.service import GovernanceExecutiveService
+
+    governance_executive_repository: GovernanceExecutiveRepository | None = None
+    governance_executive_service: GovernanceExecutiveService | None = None
+    if (
+        governance_service is not None
+        and governance_repository is not None
+        and forensic_repository is not None
+        and bool(settings.governance_executive_enabled)
+    ):
+        try:
+            governance_executive_repository = GovernanceExecutiveRepository(
+                app.state.session_factory
+            )
+            governance_executive_service = GovernanceExecutiveService(
+                settings=settings,
+                repository=governance_executive_repository,
+                governance_service=governance_service,
+                governance_repository=governance_repository,
+                forensic_repository=forensic_repository,
+                forensic_service=forensic_service,
+                automation_repository=governance_automation_repository,
+                intelligence_service=governance_intelligence_service,
+                intelligence_repository=governance_intelligence_repository,
+            )
+        except Exception:
+            get_logger("industrial-vision.governance").warning(
+                "governance executive initialization skipped", exc_info=True
+            )
+            governance_executive_repository = None
+            governance_executive_service = None
+    app.state.governance_executive_repository = governance_executive_repository
+    app.state.governance_executive_service = governance_executive_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -1147,6 +1188,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(governance_intelligence_router)
+    from backend.app.api.v1.governance_executive import router as governance_executive_router
+
+    app.include_router(governance_executive_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)

@@ -212,6 +212,46 @@ class GovernanceService:
             "limitations": list(GOVERNANCE_LIMITATIONS),
         }
 
+    def readiness_metrics(self) -> dict[str, Any]:
+        """Read-only readiness inputs for V38 executive KPIs.
+
+        Unlike :meth:`compliance_report`, this method never writes an audit
+        event. It returns the latest bounded evaluations and workflow counts so
+        the caller can distinguish a genuine zero from an unknown or truncated
+        source. It never deletes, approves, releases, or mutates anything.
+        """
+        self._require_enabled()
+        max_rows = int(getattr(self._settings, "governance_report_max_rows", 500))
+        evaluations = self._repository.latest_evaluations(limit=max_rows)
+        holds = self._repository.list_blocking_holds(limit=max_rows)
+        dispositions = self._repository.list_open_dispositions(limit=max_rows)
+        export_states = self._repository.export_status_counts()
+        next_review_known = sum(1 for item in evaluations if item.get("next_review_at"))
+        retention_deadline_known = sum(1 for item in evaluations if item.get("retention_deadline"))
+        return {
+            "availability": "OK",
+            "message": "",
+            "evaluated_at": self._clock().isoformat(),
+            "evaluations": evaluations,
+            "evaluation_count": len(evaluations),
+            "evaluations_truncated": len(evaluations) >= max_rows,
+            "evaluation_state_counts": self._repository.evaluation_state_counts(),
+            "next_review_known": next_review_known,
+            "next_review_unknown": len(evaluations) - next_review_known,
+            "retention_deadline_known": retention_deadline_known,
+            "retention_deadline_unknown": len(evaluations) - retention_deadline_known,
+            "hold_states": self._repository.hold_status_counts(),
+            "blocking_holds": holds,
+            "blocking_hold_count": len(holds),
+            "oldest_blocking_requested_at": self._repository.oldest_blocking_hold_at(),
+            "disposition_states": self._repository.disposition_status_counts(),
+            "open_dispositions": dispositions,
+            "open_disposition_count": len(dispositions),
+            "export_states": export_states,
+            "pending_export_approvals": int(export_states.get("PENDING_APPROVAL", 0)),
+            "non_claims": list(GOVERNANCE_NON_CLAIMS),
+        }
+
     # ------------------------------------------------------------------
     # Policies
     # ------------------------------------------------------------------

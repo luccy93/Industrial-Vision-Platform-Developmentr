@@ -51,6 +51,20 @@ Capability assignments (locked V16 decisions):
   roles.
 - ``governance_snapshot_generate``: generate a compliance snapshot on demand —
   ADMIN, OPERATOR.
+- ``governance_executive_read``: executive status, health, KPI summary, and
+  source coverage — all roles.
+- ``governance_executive_detail_read``: executive detail reads, report history,
+  report payloads, CSV, and configuration reads — ADMIN, OPERATOR.
+- ``governance_executive_report_generate``: generate bounded local executive
+  reports — ADMIN only.
+- ``governance_executive_action_read``: read strategic actions and their audit
+  history — ADMIN, OPERATOR.
+- ``governance_executive_action_write``: create and transition strategic
+  actions — ADMIN, OPERATOR.
+- ``governance_executive_action_assign``: assign or reassign an action owner —
+  ADMIN only.
+- ``governance_executive_configure``: append executive operational
+  configuration — ADMIN only.
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -106,6 +120,13 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "governance_recommendation_dismiss": frozenset({Role.ADMIN}),
     "governance_intelligence_refresh": frozenset({Role.ADMIN, Role.OPERATOR}),
     "governance_intelligence_configure": frozenset({Role.ADMIN}),
+    "governance_executive_read": frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER}),
+    "governance_executive_detail_read": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_executive_report_generate": frozenset({Role.ADMIN}),
+    "governance_executive_action_read": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_executive_action_write": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_executive_action_assign": frozenset({Role.ADMIN}),
+    "governance_executive_configure": frozenset({Role.ADMIN}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

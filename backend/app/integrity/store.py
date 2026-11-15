@@ -806,6 +806,7 @@ class MonitoringStore:
                 ).scalar_one()
             )
             latest_findings = 0
+            latest_findings_by_severity: dict[str, int] = {}
             if latest_row is not None:
                 latest_id = str(latest_row._mapping["audit_run_id"])
                 latest_findings = int(
@@ -813,6 +814,14 @@ class MonitoringStore:
                         select(func.count()).select_from(findings).where(findings.c.audit_run_id == latest_id)
                     ).scalar_one()
                 )
+                latest_findings_by_severity = {
+                    str(severity): int(count)
+                    for severity, count in connection.execute(
+                        select(findings.c.severity, func.count(findings.c.finding_id))
+                        .where(findings.c.audit_run_id == latest_id)
+                        .group_by(findings.c.severity)
+                    ).all()
+                }
         return {
             "total_runs": total_runs,
             "by_status": by_status,
@@ -828,6 +837,7 @@ class MonitoringStore:
             "latest_audit": _run_from_row(latest_row).to_dict() if latest_row else None,
             "running_audits": running,
             "open_findings": latest_findings,
+            "latest_findings_by_severity": latest_findings_by_severity,
         }
 
     def status_counts(self) -> dict[str, int]:

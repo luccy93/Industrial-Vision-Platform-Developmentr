@@ -535,6 +535,154 @@ def record_governance_intelligence_snapshot_comparison(status: str, service: str
     ).inc()
 
 
+# ---------------------------------------------------------------------------
+# V38 executive governance (bounded labels only)
+# ---------------------------------------------------------------------------
+governance_executive_health = Gauge(
+    "ivp_governance_executive_health",
+    "Current executive health status (1 for the active status, 0 otherwise).",
+    ["service", "status"],
+)
+
+governance_executive_kpi_availability = Gauge(
+    "ivp_governance_executive_kpi_availability",
+    "Current executive KPI availability (1 for the active value, 0 otherwise).",
+    ["service", "kpi_id", "availability"],
+)
+
+governance_executive_actions = Gauge(
+    "ivp_governance_executive_actions",
+    "Current strategic executive actions by bounded lifecycle status.",
+    ["service", "status"],
+)
+
+governance_executive_reports_total = Counter(
+    "ivp_governance_executive_reports_total",
+    "Executive report generation outcomes by bounded report type and format.",
+    ["service", "report_type", "format", "outcome"],
+)
+
+governance_executive_report_generation_duration_seconds = Histogram(
+    "ivp_governance_executive_report_generation_duration_seconds",
+    "Executive report generation duration.",
+    ["service", "report_type"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+governance_executive_comparisons_total = Counter(
+    "ivp_governance_executive_comparisons_total",
+    "Executive historical comparison outcomes.",
+    ["service", "status"],
+)
+
+governance_executive_action_transitions_total = Counter(
+    "ivp_governance_executive_action_transitions_total",
+    "Strategic executive action transitions by bounded from/to status and outcome.",
+    ["service", "from_status", "to_status", "outcome"],
+)
+
+_EXECUTIVE_HEALTH_STATUSES = frozenset(
+    {"HEALTHY", "ATTENTION_REQUIRED", "DEGRADED", "CRITICAL", "UNAVAILABLE"}
+)
+_EXECUTIVE_KPI_IDS = frozenset(
+    {
+        "FORENSIC_OPEN_CASES",
+        "FORENSIC_CRITICAL_CASES",
+        "INTEGRITY_CRITICAL_FINDINGS",
+        "GOVERNANCE_OVERDUE_REVIEWS",
+        "GOVERNANCE_RETENTION_DUE",
+        "GOVERNANCE_BLOCKING_HOLDS",
+        "GOVERNANCE_OLDEST_BLOCKING_HOLD_AGE_HOURS",
+        "GOVERNANCE_OPEN_DISPOSITIONS",
+        "GOVERNANCE_PENDING_EXPORT_APPROVALS",
+        "AUTOMATION_FAILED_JOBS",
+        "AUTOMATION_STALE_JOBS",
+        "RECOMMENDATIONS_OPEN",
+        "RECOMMENDATIONS_OPEN_CRITICAL",
+        "SLA_BREACHED_ITEMS",
+        "SLA_COMPLIANCE_RATIO",
+    }
+)
+_EXECUTIVE_KPI_AVAILABILITY = frozenset({"AVAILABLE", "PARTIAL", "UNAVAILABLE"})
+_EXECUTIVE_ACTION_STATUSES = frozenset({"OPEN", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELLED"})
+_EXECUTIVE_REPORT_TYPES = frozenset(
+    {"EXECUTIVE_SUMMARY", "EXECUTIVE_RISK", "EXECUTIVE_SLA", "EXECUTIVE_OPERATIONS"}
+)
+_EXECUTIVE_REPORT_FORMATS = frozenset({"json", "csv"})
+_EXECUTIVE_REPORT_OUTCOMES = frozenset({"GENERATED", "REPLAYED", "FAILED", "UNAVAILABLE"})
+_EXECUTIVE_COMPARISON_STATUSES = frozenset({"COMPARABLE", "INCOMPATIBLE", "UNAVAILABLE"})
+_EXECUTIVE_TRANSITION_OUTCOMES = frozenset({"APPLIED", "REJECTED", "CONFLICT"})
+
+
+def set_governance_executive_health(status: str, service: str | None = None) -> None:
+    resolved = _service(service)
+    bounded = _bounded_label(status, _EXECUTIVE_HEALTH_STATUSES)
+    for candidate in _EXECUTIVE_HEALTH_STATUSES:
+        governance_executive_health.labels(service=resolved, status=candidate).set(
+            1 if candidate == bounded else 0
+        )
+
+
+def set_governance_executive_kpi_availability(kpis: dict[str, str], service: str | None = None) -> None:
+    resolved = _service(service)
+    for kpi_id in _EXECUTIVE_KPI_IDS:
+        availability = _bounded_label(kpis.get(kpi_id, "UNAVAILABLE"), _EXECUTIVE_KPI_AVAILABILITY)
+        for candidate in _EXECUTIVE_KPI_AVAILABILITY:
+            governance_executive_kpi_availability.labels(
+                service=resolved, kpi_id=kpi_id, availability=candidate
+            ).set(1 if candidate == availability else 0)
+
+
+def set_governance_executive_action_counts(counts: dict[str, int], service: str | None = None) -> None:
+    resolved = _service(service)
+    for status in _EXECUTIVE_ACTION_STATUSES:
+        governance_executive_actions.labels(service=resolved, status=status).set(
+            max(0, int(counts.get(status, 0)))
+        )
+
+
+def record_governance_executive_report(
+    report_type: str,
+    report_format: str,
+    outcome: str,
+    *,
+    duration_seconds: float = 0.0,
+    service: str | None = None,
+) -> None:
+    resolved = _service(service)
+    bounded_type = _bounded_label(report_type, _EXECUTIVE_REPORT_TYPES)
+    governance_executive_reports_total.labels(
+        service=resolved,
+        report_type=bounded_type,
+        format=_bounded_label(report_format, _EXECUTIVE_REPORT_FORMATS),
+        outcome=_bounded_label(outcome, _EXECUTIVE_REPORT_OUTCOMES),
+    ).inc()
+    governance_executive_report_generation_duration_seconds.labels(
+        service=resolved, report_type=bounded_type
+    ).observe(max(0.0, float(duration_seconds)))
+
+
+def record_governance_executive_comparison(status: str, service: str | None = None) -> None:
+    governance_executive_comparisons_total.labels(
+        service=_service(service),
+        status=_bounded_label(status, _EXECUTIVE_COMPARISON_STATUSES),
+    ).inc()
+
+
+def record_governance_executive_action_transition(
+    from_status: str,
+    to_status: str,
+    outcome: str,
+    service: str | None = None,
+) -> None:
+    governance_executive_action_transitions_total.labels(
+        service=_service(service),
+        from_status=_bounded_label(from_status, _EXECUTIVE_ACTION_STATUSES),
+        to_status=_bounded_label(to_status, _EXECUTIVE_ACTION_STATUSES),
+        outcome=_bounded_label(outcome, _EXECUTIVE_TRANSITION_OUTCOMES),
+    ).inc()
+
+
 def metrics_payload() -> bytes:
     return generate_latest(REGISTRY)
 
