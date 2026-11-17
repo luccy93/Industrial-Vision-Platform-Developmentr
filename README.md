@@ -99,7 +99,7 @@ and frontend security headers (report-only CSP by default, opt-in HSTS),
 ordered/idempotent shutdown with no orphaned threads on partial startup,
 emitted worker/outbox/notification/Redis/DB metrics with corrected Prometheus
 alerts, and bounded frontend WebSocket reconnect with 401/4401/4403 handling.
-No new domain features and no API/WebSocket contract changes.
+No new domain features and no API/WebSocket contract changes.tech 
 **V20 = Production Hardening.**
 
 ## Features (V22)
