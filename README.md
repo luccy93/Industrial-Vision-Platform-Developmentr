@@ -181,7 +181,7 @@ No new domain features and no API/WebSocket contract changes.tech
 - Operator actions: assignment with history, escalation to any priority with mandatory reason (up or down), notes/findings/actions/observations, mitigation and resolution reasons, terminal closure with reason
 - Auto-resolve only for OPEN incidents after a configurable grace once the cluster goes quiet; acknowledgement and investigation are operator-owned
 - Evidence metadata only (type/URI/frame/description/checksum) — V10 uploads nothing; deletion leaves a timeline entry; timeline is append-only across 14 event types
-- 16 REST endpoints (list with status/priority/severity/category/camera/assignee/risk/time filters + pagination, manual create, detail, PATCH title/description/metadata, 9 actions, evidence CRUD) under `/api/v1/incidents`
+- 16 REST endpoints (list with status/priority/severity/category/camera/assignee/risk/time filters + pagination, manual create, detail, PATCH worktitle/description/metadata, 9 actions, evidence CRUD) under `/api/v1/incidents`
 - WS `incident_created` / `incident_updated` / `incident_status_changed` / `incident_assigned` / `incident_resolved` / `incident_closed` / `incident_evidence_added` with bounded payloads; all V01–V09 channels preserved
 - Incidents pages: filterable paginated queue with manual creation, detail with summary/risk/timeline/linked events/evidence/assignment and state-gated action buttons
 - Six PostgreSQL tables (`incidents`, `incident_events`, `incident_timeline`, `incident_evidence`, `incident_assignments`, `incident_counters`); Alembic `005_create_incident_management`; `INCIDENTS_*` config in `.env.example`
