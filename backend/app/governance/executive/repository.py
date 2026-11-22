@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func
@@ -22,6 +22,7 @@ from backend.app.core.redaction import redact_structure, redact_text
 from backend.app.domain.common import utcnow
 from backend.app.forensics.custody import canonical_json_bytes, datetime_to_iso, sha256_hex
 from backend.app.governance.executive.constants import (
+    ACTION_OPEN_STATUSES,
     ACTION_STATUS_VALUES,
     ACTION_TERMINAL_STATUSES,
     ACTION_TRANSITIONS,
@@ -195,6 +196,37 @@ class GovernanceExecutiveRepository:
         with self._session_factory() as session:
             return int(session.query(GovernanceExecutiveReportORM).count())
 
+    def action_due_counts(
+        self,
+        *,
+        now: datetime,
+        due_soon_hours: int,
+    ) -> dict[str, int]:
+        """Bounded action counts used by reports and the workspace."""
+        moment = _normalize_utc(now)
+        horizon = moment + timedelta(hours=max(1, int(due_soon_hours)))
+        open_statuses = tuple(sorted(ACTION_OPEN_STATUSES))
+        with self._session_factory() as session:
+            total = int(session.query(GovernanceExecutiveActionORM).count())
+            overdue = int(
+                session.query(GovernanceExecutiveActionORM)
+                .filter(
+                    GovernanceExecutiveActionORM.status.in_(open_statuses),
+                    GovernanceExecutiveActionORM.due_at < moment,
+                )
+                .count()
+            )
+            due_soon = int(
+                session.query(GovernanceExecutiveActionORM)
+                .filter(
+                    GovernanceExecutiveActionORM.status.in_(open_statuses),
+                    GovernanceExecutiveActionORM.due_at >= moment,
+                    GovernanceExecutiveActionORM.due_at <= horizon,
+                )
+                .count()
+            )
+        return {"total": total, "overdue": overdue, "due_soon": due_soon}
+
     def report_type_counts(self) -> dict[str, int]:
         with self._session_factory() as session:
             rows = (
@@ -238,6 +270,7 @@ class GovernanceExecutiveRepository:
         priority: str,
         created_by: str,
         idempotency_key: str,
+        actor_role: str = "SYSTEM",
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
         moment = _normalize_utc(now or utcnow())
@@ -276,7 +309,7 @@ class GovernanceExecutiveRepository:
                     from_status=None,
                     to_status="OPEN",
                     actor_id=_safe_text(created_by, 256) or "SYSTEM",
-                    actor_role="SYSTEM",
+                    actor_role=_safe_text(actor_role, 16).upper() or "SYSTEM",
                     reason="Strategic action created.",
                     detail={
                         "recommendation_id": row.recommendation_id,

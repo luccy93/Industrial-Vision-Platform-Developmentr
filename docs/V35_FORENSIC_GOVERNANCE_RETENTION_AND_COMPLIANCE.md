@@ -429,3 +429,19 @@ releases a hold, approves or rejects a disposition, modifies evidence, or
 deletes a record. Operational SLA targets are organization-configurable and
 distinct from legal or regulatory deadlines. See
 [V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).
+
+## Relationship to V38 executive governance
+
+V38 adds an advisory executive command center above this V35 layer without
+changing V35 evidence, case, custody, export, hold, disposition, policy, report,
+or audit semantics. It reads V35 retention evaluations, legal holds,
+dispositions, export approvals, and enabled policies through existing services;
+it never approves or releases a hold, approves or rejects a disposition,
+generates an export, modifies evidence, or deletes a record. V38 adds read-only
+`next_review_known` and `retention_deadline_known` coverage counts to the
+readiness metrics instead of calling the V35 report generator from a read path,
+so an executive read never appends an audit event. Executive action, report, and
+configuration writes are recorded with the existing V35 `record_access` audit.
+V38 adds the additive revision `015_create_governance_executive` and does not
+alter any V35 table. See
+[V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).

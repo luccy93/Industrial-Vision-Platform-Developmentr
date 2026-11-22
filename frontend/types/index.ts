@@ -355,6 +355,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/integrity", label: "Integrity", note: "V33 continuous audit" },
   { href: "/forensics", label: "Forensics", note: "V34 incident response" },
   { href: "/governance", label: "Governance", note: "V35 retention & compliance" },
+  { href: "/governance/executive", label: "Executive", note: "V38 command center" },
   { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -2400,6 +2401,338 @@ export type GovernanceSnapshotComparison = {
   summary: { added: number; removed: number; changed: number; total: number };
   truncated: boolean;
   message: string;
+  assurance: string;
+  non_claims: string[];
+};
+
+// ---------------------------------------------------------------------------
+// V38 executive governance command center
+// ---------------------------------------------------------------------------
+export type GovernanceExecutiveAvailability = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
+export type GovernanceExecutiveCoverageStatus = "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+export type GovernanceExecutiveHealthStatus =
+  | "HEALTHY"
+  | "ATTENTION_REQUIRED"
+  | "DEGRADED"
+  | "CRITICAL"
+  | "UNAVAILABLE";
+export type GovernanceExecutiveActionStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "BLOCKED"
+  | "COMPLETED"
+  | "CANCELLED";
+export type GovernanceExecutiveReportType =
+  | "EXECUTIVE_SUMMARY"
+  | "EXECUTIVE_RISK"
+  | "EXECUTIVE_SLA"
+  | "EXECUTIVE_OPERATIONS";
+
+export type GovernanceExecutiveCompleteness = {
+  status: string;
+  known: number;
+  unknown: number;
+  total: number;
+  message: string;
+};
+
+export type GovernanceExecutiveKpi = {
+  kpi_id: string;
+  name: string;
+  definition: string;
+  source: string;
+  unit: string;
+  window: Record<string, unknown>;
+  calculated_at: string;
+  availability: GovernanceExecutiveAvailability;
+  completeness: GovernanceExecutiveCompleteness;
+  applicable: boolean;
+  value: number | string | boolean | null;
+  numerator: number | null;
+  denominator: number | null;
+  detail: Record<string, unknown>;
+  model_version: string | number | null;
+  policy_version: string | number | null;
+  unavailable_reason: string | null;
+  source_refs: string[];
+};
+
+export type GovernanceExecutiveKpiResponse = {
+  items: GovernanceExecutiveKpi[];
+  total: number;
+  window: Record<string, unknown>;
+  window_days: number;
+  calculated_at: string;
+  source_coverage: {
+    status: GovernanceExecutiveCoverageStatus;
+    message: string;
+    applicable_kpis: number;
+    available_kpis: number;
+    partial_kpis: number;
+    unavailable_kpis: number;
+    partial_kpi_ids: string[];
+    unavailable_kpi_ids: string[];
+  };
+  sources: Record<string, { availability: string; message: string }>;
+  assurance: string;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceExecutiveSignal = {
+  code: string;
+  label: string;
+  kpi_id: string;
+  operator: string;
+  threshold: number;
+  status: GovernanceExecutiveHealthStatus;
+  observed_value: number | null;
+  evaluated: boolean;
+  triggered: boolean;
+  explanation: string;
+  source_availability: string | null;
+};
+
+export type GovernanceExecutiveHealth = {
+  overall_status: GovernanceExecutiveHealthStatus;
+  status_reason: string;
+  model_version: string;
+  calculated_at: string;
+  coverage: GovernanceExecutiveKpiResponse["source_coverage"];
+  signals: GovernanceExecutiveSignal[];
+  triggered_signals: string[];
+  evaluated_signal_count: number;
+  triggered_signal_count: number;
+  thresholds: {
+    model_version: string;
+    fixed: boolean;
+    signals: Array<{
+      code: string;
+      kpi_id: string;
+      operator: string;
+      threshold: number;
+      status: string;
+    }>;
+  };
+  averaged_score_used: boolean;
+  assurance: string;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceExecutiveHealthResponse = {
+  health: GovernanceExecutiveHealth;
+  kpi_summary: Array<
+    Pick<
+      GovernanceExecutiveKpi,
+      | "kpi_id"
+      | "name"
+      | "value"
+      | "unit"
+      | "availability"
+      | "completeness"
+      | "applicable"
+      | "model_version"
+      | "policy_version"
+    >
+  >;
+  window: Record<string, unknown>;
+  window_days: number;
+  source_coverage: GovernanceExecutiveKpiResponse["source_coverage"];
+  sources: Record<string, { availability: string; message: string }>;
+  calculated_at: string;
+  assurance: string;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceExecutiveStatus = {
+  enabled: boolean;
+  assurance: string;
+  health_model_version: string;
+  kpi_count: number;
+  kpi_ids: string[];
+  action_counts: Record<string, number>;
+  action_total: number;
+  report_counts: Record<string, number>;
+  report_total: number;
+  config_source: Record<string, unknown>;
+  sources: Record<string, string>;
+  scheduled_executive: boolean;
+  scheduled_executive_note: string;
+  generated_at: string;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceExecutiveConfig = {
+  config: Record<string, unknown>;
+  schema_version: number;
+  availability: string;
+  message: string;
+  source: Record<string, unknown>;
+  fixed_health_model_version: string;
+  health_thresholds_fixed: boolean;
+  assurance: string;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceExecutiveAction = {
+  action_id: string;
+  recommendation_id: string;
+  recommendation_rule_id: string;
+  recommendation_severity: string;
+  case_id: string | null;
+  title: string;
+  description: string;
+  owner_id: string;
+  due_at: string | null;
+  priority: string;
+  status: GovernanceExecutiveActionStatus;
+  version: number;
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+  started_at: string | null;
+  blocked_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  outcome_summary: string | null;
+  block_reason: string | null;
+  cancel_reason: string | null;
+  idempotency_key: string;
+  terminal: boolean;
+};
+
+export type GovernanceExecutiveActionEvent = {
+  event_id: string;
+  action_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  actor_id: string | null;
+  actor_role: string | null;
+  reason: string;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type GovernanceExecutiveActionListResponse = {
+  items: GovernanceExecutiveAction[];
+  total: number;
+  page: number;
+  page_size: number;
+  status_counts: Record<string, number>;
+  lifecycle: {
+    statuses: GovernanceExecutiveActionStatus[];
+    transitions: Record<string, GovernanceExecutiveActionStatus[]>;
+    terminal: GovernanceExecutiveActionStatus[];
+  };
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveActionDetail = {
+  action: GovernanceExecutiveAction;
+  events: GovernanceExecutiveActionEvent[];
+  linked_recommendation: Record<string, unknown> | null;
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveActionMutationResponse = {
+  action: GovernanceExecutiveAction;
+  events: GovernanceExecutiveActionEvent[];
+  replayed?: boolean;
+  recommendation_status?: string;
+  from_status?: string;
+  to_status?: string;
+  recommendation_resolved?: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveReport = {
+  report_id: string;
+  report_type: GovernanceExecutiveReportType;
+  format: "json" | "csv";
+  status: string;
+  window_start: string | null;
+  window_end: string | null;
+  generated_at: string | null;
+  generated_by: string;
+  snapshot_id: string;
+  snapshot_type: string;
+  schema_version: number;
+  source_coverage: Record<string, unknown>;
+  sections_available: string[];
+  sections_unavailable: string[];
+  payload_digest: string;
+  report_digest: string;
+  row_count: number;
+  redaction_applied: boolean;
+  idempotency_key: string;
+  reason: string;
+  created_at: string | null;
+};
+
+export type GovernanceExecutiveReportListResponse = {
+  items: GovernanceExecutiveReport[];
+  total: number;
+  page: number;
+  page_size: number;
+  report_types: GovernanceExecutiveReportType[];
+  formats: string[];
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveReportDetail = {
+  report: GovernanceExecutiveReport;
+  payload: Record<string, unknown>;
+  integrity: {
+    report_digest_valid: boolean;
+    snapshot_digest_valid: boolean;
+    redaction_applied: boolean;
+    schema_version: number;
+  };
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveReportGenerateResponse = {
+  report: GovernanceExecutiveReport;
+  payload: Record<string, unknown>;
+  content: string;
+  media_type: string;
+  replayed: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceExecutiveComparison = {
+  status: "COMPARABLE" | "INCOMPATIBLE" | "UNAVAILABLE";
+  compatibility_version: string;
+  message: string;
+  comparable: boolean;
+  baseline: Record<string, unknown>;
+  current: Record<string, unknown>;
+  model_versions: Record<string, string | null>;
+  changes: Array<{
+    kpi_id: string;
+    name: string;
+    unit: string;
+    baseline_value: number;
+    current_value: number;
+    delta: number;
+    percent_change: number | null;
+    baseline_availability: string;
+    current_availability: string;
+    baseline_model_version: string | number | null;
+    current_model_version: string | number | null;
+    partial: boolean;
+  }>;
+  gaps: Array<Record<string, unknown>>;
+  incompatibilities: Array<{ code: string; message: string; kpi_id?: string }>;
+  truncated: boolean;
+  interpolated: boolean;
+  fabricated_history: boolean;
+  source_preserved: boolean;
   assurance: string;
   non_claims: string[];
 };

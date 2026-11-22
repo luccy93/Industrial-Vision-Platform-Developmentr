@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AutomationWorkspace } from "../../components/governance/AutomationWorkspace";
 import { IntelligenceWorkspace } from "../../components/governance/IntelligenceWorkspace";
 import { Card } from "../../components/ui/Card";
@@ -592,6 +593,21 @@ export default function GovernancePage() {
           {notice}
         </p>
       ) : null}
+
+      <Card title="Executive governance command center (V38)">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <p className="text-slate-400">
+            Deterministic executive health, source-preserving KPIs, compatible comparisons, advisory
+            strategic actions, and bounded local reports over the records below.
+          </p>
+          <Link
+            href="/governance/executive"
+            className="rounded border border-slate-700 px-3 py-1 font-medium text-slate-200 hover:bg-slate-800"
+          >
+            Open executive command center
+          </Link>
+        </div>
+      </Card>
 
       <Card title="Governance overview">
         {statusError ? (

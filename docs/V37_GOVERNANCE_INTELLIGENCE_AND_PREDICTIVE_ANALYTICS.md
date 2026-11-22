@@ -390,3 +390,18 @@ anchors, or a production deployment.
 - No live PostgreSQL migration, external notification delivery, scheduler
   timing, Docker runtime, external anchor, or production deployment was
   validated by the local V37 test suite.
+
+## Relationship to V38 executive governance
+
+V38 adds an advisory executive command center above V35/V36/V37 without changing
+V37 risk models, SLA targets, recommendations, recommendation events,
+`INTELLIGENCE_SUMMARY` snapshots, or scoring semantics. V38 reads current risk
+counts, SLA backlog states, and recommendations, and it exposes executive health
+as a separate versioned governance aggregate (`EXEC_HEALTH_V1`), distinct from
+the V37 operational risk score. A strategic action may be created only from an
+`OPEN` or `ACKNOWLEDGED` V37 recommendation; V38 never resolves, dismisses, or
+acknowledges a recommendation automatically, and a `DISMISSED` or `RESOLVED`
+recommendation returns `409 RECOMMENDATION_NOT_ACTIONABLE`. V38 adds no LLM,
+machine learning, forecast, or external AI service, starts no scheduler, and
+adds the additive revision `015_create_governance_executive`. See
+[V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).

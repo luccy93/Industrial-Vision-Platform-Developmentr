@@ -13,6 +13,19 @@ import type {
   GovernanceComplianceReport,
   GovernanceDispositionDetail,
   GovernanceDispositionListResponse,
+  GovernanceExecutiveActionDetail,
+  GovernanceExecutiveActionListResponse,
+  GovernanceExecutiveActionMutationResponse,
+  GovernanceExecutiveActionStatus,
+  GovernanceExecutiveComparison,
+  GovernanceExecutiveConfig,
+  GovernanceExecutiveHealthResponse,
+  GovernanceExecutiveKpiResponse,
+  GovernanceExecutiveReportDetail,
+  GovernanceExecutiveReportGenerateResponse,
+  GovernanceExecutiveReportListResponse,
+  GovernanceExecutiveReportType,
+  GovernanceExecutiveStatus,
   GovernanceExportApproval,
   GovernanceExportApprovalListResponse,
   GovernanceIntelligenceSnapshotDetail,
@@ -714,4 +727,218 @@ export function compareGovernanceIntelligenceSnapshots(
     )}/compare/${encodeURIComponent(otherSnapshotId)}`,
     { signal }
   );
+}
+
+// ---------------------------------------------------------------------------
+// V38 executive governance command center
+// ---------------------------------------------------------------------------
+export function fetchGovernanceExecutiveStatus(
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveStatus> {
+  return apiFetch<GovernanceExecutiveStatus>("/api/v1/governance/executive/status", {
+    signal,
+  });
+}
+
+export function fetchGovernanceExecutiveHealth(
+  params: { window_days?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveHealthResponse> {
+  return apiFetch<GovernanceExecutiveHealthResponse>(
+    `/api/v1/governance/executive/health${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceExecutiveKpis(
+  params: { window_days?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveKpiResponse> {
+  return apiFetch<GovernanceExecutiveKpiResponse>(
+    `/api/v1/governance/executive/kpis${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceExecutiveConfig(
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveConfig> {
+  return apiFetch<GovernanceExecutiveConfig>("/api/v1/governance/executive/config", {
+    signal,
+  });
+}
+
+export function updateGovernanceExecutiveConfig(input: {
+  config: Record<string, unknown>;
+  reason: string;
+}): Promise<GovernanceExecutiveConfig & { replayed: boolean; snapshot_id: string }> {
+  return apiFetch("/api/v1/governance/executive/config", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchGovernanceExecutiveActions(
+  params: {
+    status?: GovernanceExecutiveActionStatus | "";
+    owner_id?: string;
+    recommendation_id?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveActionListResponse> {
+  return apiFetch<GovernanceExecutiveActionListResponse>(
+    `/api/v1/governance/executive/actions${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceExecutiveAction(
+  actionId: string,
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveActionDetail> {
+  return apiFetch<GovernanceExecutiveActionDetail>(
+    `/api/v1/governance/executive/actions/${encodeURIComponent(actionId)}`,
+    { signal }
+  );
+}
+
+export type GovernanceExecutiveActionInput = {
+  recommendation_id: string;
+  title: string;
+  description?: string;
+  owner_id: string;
+  due_at: string;
+  priority?: string;
+  idempotency_key: string;
+  reason: string;
+};
+
+export function createGovernanceExecutiveAction(
+  input: GovernanceExecutiveActionInput
+): Promise<GovernanceExecutiveActionMutationResponse> {
+  return apiFetch("/api/v1/governance/executive/actions", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function transitionGovernanceExecutiveAction(
+  actionId: string,
+  input: {
+    target_status: GovernanceExecutiveActionStatus;
+    expected_version: number;
+    reason?: string;
+    outcome_summary?: string;
+    block_reason?: string;
+    cancel_reason?: string;
+  }
+): Promise<GovernanceExecutiveActionMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/executive/actions/${encodeURIComponent(actionId)}/transition`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function assignGovernanceExecutiveAction(
+  actionId: string,
+  input: { owner_id: string; expected_version: number; reason: string }
+): Promise<GovernanceExecutiveActionMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/executive/actions/${encodeURIComponent(actionId)}/assign`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceExecutiveReports(
+  params: { report_type?: GovernanceExecutiveReportType | ""; page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveReportListResponse> {
+  return apiFetch<GovernanceExecutiveReportListResponse>(
+    `/api/v1/governance/executive/reports${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function fetchGovernanceExecutiveReport(
+  reportId: string,
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveReportDetail> {
+  return apiFetch<GovernanceExecutiveReportDetail>(
+    `/api/v1/governance/executive/reports/${encodeURIComponent(reportId)}`,
+    { signal }
+  );
+}
+
+export function generateGovernanceExecutiveReport(input: {
+  report_type: GovernanceExecutiveReportType;
+  format: "json" | "csv";
+  window_days?: number;
+  idempotency_key: string;
+  reason: string;
+}): Promise<GovernanceExecutiveReportGenerateResponse> {
+  return apiFetch("/api/v1/governance/executive/reports", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchGovernanceExecutiveComparison(
+  reportId: string,
+  params: { other_report_id?: string; window_days?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceExecutiveComparison> {
+  if (params.other_report_id) {
+    return apiFetch<GovernanceExecutiveComparison>(
+      `/api/v1/governance/executive/comparisons/${encodeURIComponent(
+        reportId
+      )}/vs/${encodeURIComponent(params.other_report_id)}`,
+      { signal }
+    );
+  }
+  return apiFetch<GovernanceExecutiveComparison>(
+    `/api/v1/governance/executive/comparisons/${encodeURIComponent(reportId)}${queryString({
+      window_days: params.window_days,
+    })}`,
+    { signal }
+  );
+}
+
+/** Trigger a cookie-authenticated executive report content download. */
+export async function downloadGovernanceExecutiveReportContent(
+  reportId: string,
+  fallbackName = "executive-report.json"
+): Promise<void> {
+  const res = await fetch(
+    `${appConfig.apiUrl}/api/v1/governance/executive/reports/${encodeURIComponent(
+      reportId
+    )}/content`,
+    { credentials: "include" }
+  );
+  if (res.status === 401) dispatchUnauthorized();
+  if (!res.ok) {
+    let detail = `Report download failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: { message?: string; code?: string } };
+      if (body?.error?.message) detail = `${body.error.code ?? res.status}: ${body.error.message}`;
+    } catch {
+      /* keep status fallback */
+    }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = match?.[1] ?? fallbackName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }

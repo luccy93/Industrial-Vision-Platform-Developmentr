@@ -694,6 +694,80 @@ schema change.
 See
 [V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).
 
+### Executive governance command center (V38)
+
+V38 adds an advisory executive command center to the existing `/governance`
+workspace and the V35/V36/V37 APIs. Alembic revision
+`015_create_governance_executive` follows `014_create_governance_intelligence`
+and creates only three V38-owned tables: strategic actions, append-only action
+events, and append-only report metadata. Foreign keys are non-cascading;
+`downgrade()` drops only the V38 tables. V36 `governance_snapshots` is reused
+unchanged for the `EXECUTIVE_SUMMARY`, `EXECUTIVE_RISK`, `EXECUTIVE_SLA`,
+`EXECUTIVE_OPERATIONS`, and operational `EXECUTIVE_CONFIG` snapshot types.
+
+```powershell
+$env:GOVERNANCE_EXECUTIVE_ENABLED="true"
+$env:GOVERNANCE_EXECUTIVE_PAGE_SIZE="20"
+$env:GOVERNANCE_EXECUTIVE_DEFAULT_WINDOW_DAYS="30"
+$env:GOVERNANCE_EXECUTIVE_MAX_ACTIONS="500"
+$env:GOVERNANCE_EXECUTIVE_MAX_REPORT_ROWS="500"
+$env:GOVERNANCE_EXECUTIVE_REPORT_MAX_BYTES="524288"
+$env:GOVERNANCE_EXECUTIVE_COMPARISON_PERIOD_DAYS="30"
+$env:GOVERNANCE_EXECUTIVE_ACTION_DUE_SOON_HOURS="72"
+```
+
+Executive views and reports are computed on demand. V38 starts no scheduler and
+does not modify the V36 scheduler. The 15 executive KPIs are derived from stored
+V10–V37 records: a missing or unreadable source is `UNAVAILABLE` or `PARTIAL`
+with an explicit reason, never zero. Health is a deterministic, versioned
+(`EXEC_HEALTH_V1`) severity ranking over fixed signals with an explicit
+`coverage_status`; it is never an averaged compliance percentage and its
+thresholds are not runtime-configurable. The SLA compliance ratio is a
+documented ratio over known SLA items with numerator, denominator, and
+per-target detail, not a blended governance compliance percentage.
+
+Comparisons read stored report snapshots only. They check period length, UTC
+boundaries, and health/risk/policy/schema versions; incompatible periods or
+model versions return `INCOMPATIBLE` with explained incompatibilities and no
+delta, and unavailable sources produce explicit gaps. Comparisons never
+interpolate or fabricate a historical value. Strategic actions link only to V37
+recommendations in `OPEN` or `ACKNOWLEDGED` state, require owner, due date, and
+reason, use validated lifecycle transitions plus optimistic concurrency, and
+never resolve a recommendation or execute a sensitive governance operation.
+Completion requires an outcome summary; blocking and cancellation require
+reasons. Reports are bounded local JSON/CSV documents with payload and source
+snapshot self-digests validated on read; tampering raises a stable integrity
+error and the report is preserved for investigation. There is no email, PDF,
+external distribution, publication, or `DELETE` route.
+
+Operational sequence:
+
+1. Run the Alembic upgrade to `015_create_governance_executive` before enabling
+   the V38 API. The revision is additive and reversible.
+2. Keep `GOVERNANCE_EXECUTIVE_ENABLED=true` unless the workspace must be
+   disabled; `503` is returned when disabled or unavailable.
+3. Review `/api/v1/governance/executive/status`, `/health`, and `/kpis` before
+   trusting a summary. Treat `PARTIAL`, `UNAVAILABLE`, `truncated`, and
+   `unknown` as explicit data-quality states, never as zero or a pass.
+4. Configuration is append-only and ADMIN-only, requires a reason, and writes an
+   `EXECUTIVE_CONFIG` snapshot. Health thresholds remain fixed; a request that
+   tries to change them is rejected.
+5. Report generation, action assignment, and configuration writes are ADMIN
+   only; action create/transition is ADMIN/OPERATOR; detail, action, and report
+   reads are ADMIN/OPERATOR. Summary reads are available to VIEWER.
+6. Plan capacity for retained action, event, and report metadata. V38 performs
+   no pruning and exposes no `DELETE` route.
+
+Rollback: stop executive writes, run the Alembic downgrade to
+`014_create_governance_intelligence`, and restore the pre-upgrade backup if V38
+rows must be discarded. Downgrading drops only V38 tables and does not touch
+V01–V37 schema, evidence, custody, exports, holds, dispositions, audit,
+automation, or intelligence records. Disabling the service is reversible
+without a schema change.
+
+See
+[V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP

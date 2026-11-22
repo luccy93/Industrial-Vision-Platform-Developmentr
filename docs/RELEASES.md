@@ -1087,3 +1087,34 @@ certification or external immutable storage. V37 never approves or releases a
 hold, decides a disposition, modifies evidence, deletes a record, or makes an
 automatic governance decision. See
 [V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).
+
+## V38 release impact
+
+V38 adds an additive Alembic revision, `015_create_governance_executive`,
+creating only executive action, action-event, and report-metadata tables after
+`014_create_governance_intelligence`. Existing V01-V37 tables, evidence
+references, custody records, export IDs, paths, hashes, snapshots, and
+semantics are untouched; `downgrade()` drops only the V38 tables. No release
+tag, image publication, workflow dispatch, or deployment is part of V38.
+
+New runtime configuration is additive: `GOVERNANCE_EXECUTIVE_ENABLED`,
+`GOVERNANCE_EXECUTIVE_PAGE_SIZE`, `GOVERNANCE_EXECUTIVE_DEFAULT_WINDOW_DAYS`,
+`GOVERNANCE_EXECUTIVE_MAX_ACTIONS`, `GOVERNANCE_EXECUTIVE_MAX_REPORT_ROWS`,
+`GOVERNANCE_EXECUTIVE_REPORT_MAX_BYTES`,
+`GOVERNANCE_EXECUTIVE_COMPARISON_PERIOD_DAYS`, and
+`GOVERNANCE_EXECUTIVE_ACTION_DUE_SOON_HOURS`. Deployments must run the migration
+before enabling the executive API.
+
+V38 is read-mostly and deterministic. It composes 15 executive KPIs from stored
+V10-V37 records, reports `UNAVAILABLE` or `PARTIAL` rather than zero for missing
+sources, and derives health from a fixed, versioned signal model
+(`EXEC_HEALTH_V1`) with an explicit coverage status instead of an averaged
+compliance percentage. Comparisons read stored snapshots only, use compatible
+UTC periods, and never interpolate or fabricate historical values. Strategic
+actions link to V37 recommendations with validated lifecycle transitions,
+optimistic concurrency, and idempotent creation, but never resolve a
+recommendation or execute a sensitive governance operation. Reports are bounded
+local JSON/CSV documents with payload and source-snapshot self-digests validated
+on read; they are never emailed, published, externally distributed, or rendered
+as PDF, and no `DELETE` route exists for protected reporting history. See
+[V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).

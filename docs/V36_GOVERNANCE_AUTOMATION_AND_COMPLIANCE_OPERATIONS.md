@@ -374,3 +374,19 @@ recommendations may queue through the existing V15 GOVERNANCE notification
 pipeline; the default is off. V37 never approves or releases a hold, decides a
 disposition, modifies evidence, or deletes a record. See
 [V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md](V37_GOVERNANCE_INTELLIGENCE_AND_PREDICTIVE_ANALYTICS.md).
+
+## Relationship to V38 executive governance
+
+V38 adds an advisory executive command center above V35/V36 without changing
+V36 schedules, jobs, job events, snapshots, or scheduler semantics. V38 starts
+no scheduler and computes executive views on demand. It reads failed and stale
+automation job counts through an additive read-only `count_jobs_in_range()`
+method, so an executive read never mutates a job or a schedule. V38 reuses the
+V36 `governance_snapshots` table and canonical SHA-256 self-digest for the
+additive `EXECUTIVE_SUMMARY`, `EXECUTIVE_RISK`, `EXECUTIVE_SLA`,
+`EXECUTIVE_OPERATIONS`, and operational `EXECUTIVE_CONFIG` snapshot types,
+leaving `COMPLIANCE_SUMMARY` and V37 `INTELLIGENCE_SUMMARY` unchanged. V38 adds
+the additive revision `015_create_governance_executive` and never approves or
+releases a hold, decides a disposition, modifies evidence, or deletes a record.
+See
+[V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
