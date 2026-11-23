@@ -357,6 +357,20 @@ PostgreSQL migration, live object storage, live SMTP/webhook delivery, browser
 runtime, scheduler timing, and production deployment are deployment validation
 steps and are not claimed by the local suite.
 
+Recorded local evidence for this revision:
+
+- Full backend suite from the repository root: **2309 passed, 4 skipped,
+  11 deselected, 0 failed** (`26:44`).
+- Focused V38 suite: **43 passed** (foundation, actions/reports, migration,
+  and 11 new hardening tests).
+- Frontend: **135 passed across 27 files**; lint, typecheck, and production
+  build passed.
+- Ruff check/format, `compileall`, workflow SHA-pin audit, and all six Compose
+  configuration checks passed.
+- The role-matrix regression test was updated for the seven V38 capabilities;
+  the migration-registration test passes when the suite is launched from the
+  repository root, which is the documented invocation.
+
 ## Operations and recovery
 
 1. Run the Alembic upgrade to `015_create_governance_executive` before enabling
@@ -392,3 +406,33 @@ steps and are not claimed by the local suite.
   sensitive governance operation.
 - PostgreSQL trigger behavior is covered by offline SQL generation and SQLite
   integration tests; a live PostgreSQL migration remains a deployment step.
+
+## Hardening guarantees
+
+Commit 3 adds adversarial local tests and small hardening fixes around the
+executive layer:
+
+- Concurrent action creation, report generation, and lifecycle transitions are
+  exercised with real threads. Unique-key conflicts are resolved by bounded
+  re-reads of the committed winner, so one action/report and one audit event
+  survive a race; stale version writes receive `409`.
+- A report idempotency race returns the stored winner's payload and content,
+  not a locally rebuilt copy, and never emits a duplicate `GENERATED` audit
+  event or metric.
+- Executive Prometheus labels are fixed vocabularies. Hostile service, status,
+  KPI, report-type, format, and transition labels map to `UNKNOWN` or
+  `unknown`; no case, action, report, or free-text value becomes a label. The
+  report-format label is lower-cased explicitly because report formats are
+  `json` and `csv`.
+- Configuration request bodies are bounded before service validation: at most
+  32 scalar keys, 64-character keys, and 256-character values.
+- Cross-case tests verify that a strategic action's linked recommendation,
+  case id, and event detail belong to the same case and that a filtered list
+  cannot return another case's action.
+- Credential-shaped text in action descriptions, outcomes, event history, and
+  audit records is redacted through the existing V29 helpers.
+- The router surface has no `DELETE` route. Protected action events and report
+  metadata are also protected by database triggers in the Alembic revision.
+
+These are deterministic local tests. They do not prove PostgreSQL trigger
+behavior under live concurrency, external delivery, or production deployment.

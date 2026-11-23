@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.governance.executive.constants import (
     MAX_ACTION_DESCRIPTION_LENGTH,
@@ -58,6 +58,21 @@ class ExecutiveReportGenerateRequest(BaseModel):
 class ExecutiveConfigUpdateRequest(BaseModel):
     config: dict[str, Any]
     reason: str = Field(min_length=MIN_REPORT_REASON_LENGTH, max_length=MAX_REPORT_REASON_LENGTH)
+
+    @field_validator("config")
+    @classmethod
+    def _bound_config(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Keep configuration writes bounded before they reach the service."""
+        if len(value) > 32:
+            raise ValueError("config must contain at most 32 keys")
+        for key, item in value.items():
+            if len(key) > 64:
+                raise ValueError("config keys must be at most 64 characters")
+            if isinstance(item, str) and len(item) > 256:
+                raise ValueError("config values must be at most 256 characters")
+            if isinstance(item, (dict, list, tuple, set)):
+                raise ValueError("config values must be scalar")
+        return value
 
 
 __all__ = [

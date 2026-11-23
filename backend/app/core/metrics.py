@@ -608,14 +608,23 @@ _EXECUTIVE_ACTION_STATUSES = frozenset({"OPEN", "IN_PROGRESS", "BLOCKED", "COMPL
 _EXECUTIVE_REPORT_TYPES = frozenset(
     {"EXECUTIVE_SUMMARY", "EXECUTIVE_RISK", "EXECUTIVE_SLA", "EXECUTIVE_OPERATIONS"}
 )
-_EXECUTIVE_REPORT_FORMATS = frozenset({"json", "csv"})
+_EXECUTIVE_REPORT_FORMATS = frozenset({"json", "csv", "unknown"})
+_EXECUTIVE_SERVICE_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
 _EXECUTIVE_REPORT_OUTCOMES = frozenset({"GENERATED", "REPLAYED", "FAILED", "UNAVAILABLE"})
 _EXECUTIVE_COMPARISON_STATUSES = frozenset({"COMPARABLE", "INCOMPATIBLE", "UNAVAILABLE"})
 _EXECUTIVE_TRANSITION_OUTCOMES = frozenset({"APPLIED", "REJECTED", "CONFLICT"})
 
 
-def set_governance_executive_health(status: str, service: str | None = None) -> None:
+def _bounded_executive_service(service: str | None = None) -> str:
+    """Bound the V38 service label to a fixed, low-cardinality vocabulary."""
     resolved = _service(service)
+    if len(resolved) > 64 or any(char not in _EXECUTIVE_SERVICE_ALLOWED for char in resolved):
+        return "unknown"
+    return resolved
+
+
+def set_governance_executive_health(status: str, service: str | None = None) -> None:
+    resolved = _bounded_executive_service(service)
     bounded = _bounded_label(status, _EXECUTIVE_HEALTH_STATUSES)
     for candidate in _EXECUTIVE_HEALTH_STATUSES:
         governance_executive_health.labels(service=resolved, status=candidate).set(
@@ -624,7 +633,7 @@ def set_governance_executive_health(status: str, service: str | None = None) -> 
 
 
 def set_governance_executive_kpi_availability(kpis: dict[str, str], service: str | None = None) -> None:
-    resolved = _service(service)
+    resolved = _bounded_executive_service(service)
     for kpi_id in _EXECUTIVE_KPI_IDS:
         availability = _bounded_label(kpis.get(kpi_id, "UNAVAILABLE"), _EXECUTIVE_KPI_AVAILABILITY)
         for candidate in _EXECUTIVE_KPI_AVAILABILITY:
@@ -634,7 +643,7 @@ def set_governance_executive_kpi_availability(kpis: dict[str, str], service: str
 
 
 def set_governance_executive_action_counts(counts: dict[str, int], service: str | None = None) -> None:
-    resolved = _service(service)
+    resolved = _bounded_executive_service(service)
     for status in _EXECUTIVE_ACTION_STATUSES:
         governance_executive_actions.labels(service=resolved, status=status).set(
             max(0, int(counts.get(status, 0)))
@@ -649,12 +658,14 @@ def record_governance_executive_report(
     duration_seconds: float = 0.0,
     service: str | None = None,
 ) -> None:
-    resolved = _service(service)
+    resolved = _bounded_executive_service(service)
     bounded_type = _bounded_label(report_type, _EXECUTIVE_REPORT_TYPES)
+    candidate_format = str(report_format or "").strip().lower()
+    bounded_format = candidate_format if candidate_format in _EXECUTIVE_REPORT_FORMATS else "unknown"
     governance_executive_reports_total.labels(
         service=resolved,
         report_type=bounded_type,
-        format=_bounded_label(report_format, _EXECUTIVE_REPORT_FORMATS),
+        format=bounded_format,
         outcome=_bounded_label(outcome, _EXECUTIVE_REPORT_OUTCOMES),
     ).inc()
     governance_executive_report_generation_duration_seconds.labels(
@@ -664,7 +675,7 @@ def record_governance_executive_report(
 
 def record_governance_executive_comparison(status: str, service: str | None = None) -> None:
     governance_executive_comparisons_total.labels(
-        service=_service(service),
+        service=_bounded_executive_service(service),
         status=_bounded_label(status, _EXECUTIVE_COMPARISON_STATUSES),
     ).inc()
 
@@ -676,7 +687,7 @@ def record_governance_executive_action_transition(
     service: str | None = None,
 ) -> None:
     governance_executive_action_transitions_total.labels(
-        service=_service(service),
+        service=_bounded_executive_service(service),
         from_status=_bounded_label(from_status, _EXECUTIVE_ACTION_STATUSES),
         to_status=_bounded_label(to_status, _EXECUTIVE_ACTION_STATUSES),
         outcome=_bounded_label(outcome, _EXECUTIVE_TRANSITION_OUTCOMES),

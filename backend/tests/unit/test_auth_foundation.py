@@ -66,6 +66,13 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.ADMIN, "governance_recommendation_dismiss")
     assert can(Role.ADMIN, "governance_intelligence_refresh")
     assert can(Role.ADMIN, "governance_intelligence_configure")
+    assert can(Role.ADMIN, "governance_executive_read")
+    assert can(Role.ADMIN, "governance_executive_detail_read")
+    assert can(Role.ADMIN, "governance_executive_report_generate")
+    assert can(Role.ADMIN, "governance_executive_action_read")
+    assert can(Role.ADMIN, "governance_executive_action_write")
+    assert can(Role.ADMIN, "governance_executive_action_assign")
+    assert can(Role.ADMIN, "governance_executive_configure")
     assert can(Role.OPERATOR, "governance_read")
     assert can(Role.OPERATOR, "retention_evaluate")
     assert can(Role.OPERATOR, "legal_hold_write")
@@ -83,6 +90,13 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.OPERATOR, "governance_recommendations_read")
     assert can(Role.OPERATOR, "governance_recommendation_acknowledge")
     assert can(Role.OPERATOR, "governance_intelligence_refresh")
+    assert can(Role.OPERATOR, "governance_executive_read")
+    assert can(Role.OPERATOR, "governance_executive_detail_read")
+    assert can(Role.OPERATOR, "governance_executive_action_read")
+    assert can(Role.OPERATOR, "governance_executive_action_write")
+    assert not can(Role.OPERATOR, "governance_executive_report_generate")
+    assert not can(Role.OPERATOR, "governance_executive_action_assign")
+    assert not can(Role.OPERATOR, "governance_executive_configure")
     assert not can(Role.OPERATOR, "governance_recommendation_dismiss")
     assert not can(Role.OPERATOR, "governance_intelligence_configure")
     assert not can(Role.OPERATOR, "governance_policy_write")
@@ -100,6 +114,13 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.VIEWER, "governance_sla_read")
     assert can(Role.VIEWER, "governance_trends_read")
     assert can(Role.VIEWER, "governance_recommendations_read")
+    assert can(Role.VIEWER, "governance_executive_read")
+    assert not can(Role.VIEWER, "governance_executive_detail_read")
+    assert not can(Role.VIEWER, "governance_executive_report_generate")
+    assert not can(Role.VIEWER, "governance_executive_action_read")
+    assert not can(Role.VIEWER, "governance_executive_action_write")
+    assert not can(Role.VIEWER, "governance_executive_action_assign")
+    assert not can(Role.VIEWER, "governance_executive_configure")
     assert not can(Role.VIEWER, "governance_recommendation_acknowledge")
     assert not can(Role.VIEWER, "governance_recommendation_dismiss")
     assert not can(Role.VIEWER, "governance_intelligence_refresh")
@@ -149,6 +170,13 @@ def test_role_matrix_least_privilege() -> None:
             "governance_recommendation_dismiss",
             "governance_intelligence_refresh",
             "governance_intelligence_configure",
+            "governance_executive_read",
+            "governance_executive_detail_read",
+            "governance_executive_report_generate",
+            "governance_executive_action_read",
+            "governance_executive_action_write",
+            "governance_executive_action_assign",
+            "governance_executive_configure",
             "admin_config",
             "user_admin",
         }

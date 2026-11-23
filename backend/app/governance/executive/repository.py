@@ -9,6 +9,7 @@ history.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -256,6 +257,22 @@ class GovernanceExecutiveRepository:
             )
             return _action_to_dict(row) if row is not None else None
 
+    @staticmethod
+    def _await_conflicting_write(reader: Callable[[], dict[str, Any] | None]) -> dict[str, Any] | None:
+        """Wait briefly for a concurrent unique-key winner to become visible.
+
+        SQLite can report a unique-key conflict before the winning transaction is
+        visible to a fresh reader. The retry is bounded and read-only; the caller
+        still raises if no winner appears.
+        """
+        for attempt in range(5):
+            existing = reader()
+            if existing is not None:
+                return existing
+            if attempt < 4:
+                time.sleep(0.01 * (attempt + 1))
+        return None
+
     def create_action(
         self,
         *,
@@ -300,30 +317,30 @@ class GovernanceExecutiveRepository:
         )
         with self._session_factory() as session:
             session.add(row)
-            session.flush()
-            session.add(
-                GovernanceExecutiveActionEventORM(
-                    id=_new_id(),
-                    action_id=row.id,
-                    event_type="CREATED",
-                    from_status=None,
-                    to_status="OPEN",
-                    actor_id=_safe_text(created_by, 256) or "SYSTEM",
-                    actor_role=_safe_text(actor_role, 16).upper() or "SYSTEM",
-                    reason="Strategic action created.",
-                    detail={
-                        "recommendation_id": row.recommendation_id,
-                        "owner_id": row.owner_id,
-                        "due_at": _iso(row.due_at),
-                    },
-                    created_at=moment,
-                )
-            )
             try:
+                session.flush()
+                session.add(
+                    GovernanceExecutiveActionEventORM(
+                        id=_new_id(),
+                        action_id=row.id,
+                        event_type="CREATED",
+                        from_status=None,
+                        to_status="OPEN",
+                        actor_id=_safe_text(created_by, 256) or "SYSTEM",
+                        actor_role=_safe_text(actor_role, 16).upper() or "SYSTEM",
+                        reason="Strategic action created.",
+                        detail={
+                            "recommendation_id": row.recommendation_id,
+                            "owner_id": row.owner_id,
+                            "due_at": _iso(row.due_at),
+                        },
+                        created_at=moment,
+                    )
+                )
                 session.commit()
             except IntegrityError:
                 session.rollback()
-                existing = self.find_action_by_idempotency_key(key)
+                existing = self._await_conflicting_write(lambda: self.find_action_by_idempotency_key(key))
                 if existing is None:
                     raise
                 return existing, False
@@ -606,7 +623,7 @@ class GovernanceExecutiveRepository:
                 session.commit()
             except IntegrityError:
                 session.rollback()
-                existing = self.find_report_by_idempotency_key(key)
+                existing = self._await_conflicting_write(lambda: self.find_report_by_idempotency_key(key))
                 if existing is None:
                     raise
                 return existing, False

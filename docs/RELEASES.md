@@ -1118,3 +1118,12 @@ local JSON/CSV documents with payload and source-snapshot self-digests validated
 on read; they are never emailed, published, externally distributed, or rendered
 as PDF, and no `DELETE` route exists for protected reporting history. See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
+
+V38 hardening adds bounded, deterministic local tests for concurrent idempotent
+action/report writes and optimistic version conflicts, bounded metric labels,
+configuration request bounds, cross-case action isolation, credential
+redaction, and the absence of a `DELETE` route. Unique-key winners are re-read
+after a bounded retry so a concurrent replay cannot duplicate an action,
+report, or audit event. This is local evidence only: a live PostgreSQL
+migration, live concurrency under production isolation levels, and deployment
+remain release-time validation.

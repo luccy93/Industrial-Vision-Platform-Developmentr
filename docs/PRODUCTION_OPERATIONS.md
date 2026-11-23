@@ -765,6 +765,15 @@ V01–V37 schema, evidence, custody, exports, holds, dispositions, audit,
 automation, or intelligence records. Disabling the service is reversible
 without a schema change.
 
+V38 hardening tests cover concurrent idempotent writes, optimistic version
+conflicts, bounded metric labels, bounded configuration bodies, redaction, and
+cross-case isolation. Executive metric labels use fixed vocabularies; hostile
+free-text values map to `UNKNOWN` and cannot create a new time series. The
+router exposes no `DELETE` route, and database triggers protect append-only
+history. Treat `UNKNOWN`, `PARTIAL`, `UNAVAILABLE`, and integrity errors as
+explicit states; never infer success from an empty metric or a missing audit
+event.
+
 See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
 

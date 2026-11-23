@@ -1628,7 +1628,21 @@ class GovernanceExecutiveService:
                 duration_seconds=time.perf_counter() - started,
             )
             raise
-        replayed = not created
+        if not created:
+            # A concurrent request with the same idempotency key won the unique
+            # insert. Return the stored winner verbatim; do not audit, do not
+            # substitute the locally built payload, and do not emit a second
+            # GENERATED metric.
+            content = self.get_report_content(str(report["report_id"]))
+            return {
+                "report": content["report"],
+                "payload": content["payload"],
+                "content": content["content"],
+                "media_type": content["media_type"],
+                "replayed": True,
+                "non_claims": list(EXECUTIVE_NON_CLAIMS),
+            }
+        replayed = False
         record_governance_executive_report(
             report_type=report_type,
             report_format=report_format,
