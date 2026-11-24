@@ -65,6 +65,24 @@ Capability assignments (locked V16 decisions):
   ADMIN only.
 - ``governance_executive_configure``: append executive operational
   configuration — ADMIN only.
+- ``governance_workflow_read``: workflow status, ownership reports, workflow and
+  task overview lists, and SLA reads — all roles.
+- ``governance_workflow_detail_read``: workflow detail, templates, references,
+  and escalation lists — ADMIN, OPERATOR.
+- ``governance_workflow_create``: instantiate workflows from a pinned template
+  version — ADMIN, OPERATOR.
+- ``governance_workflow_transition``: apply strict workflow lifecycle
+  transitions — ADMIN, OPERATOR.
+- ``governance_workflow_assign``: assign or reassign workflow and task owners
+  with a mandatory reason — ADMIN, OPERATOR.
+- ``governance_workflow_task_write``: task lifecycle transitions and cross-domain
+  reference attachment — ADMIN, OPERATOR.
+- ``governance_workflow_escalate``: create, acknowledge, and resolve workflow
+  escalations — ADMIN, OPERATOR.
+- ``governance_workflow_template_manage``: create template versions and disable
+  templates — ADMIN only.
+- ``governance_workflow_audit_read``: read append-only workflow event history —
+  ADMIN, OPERATOR.
 - ``admin_config``: camera CRUD, zones, profiles, defect categories,
   safety/quality suppression, alert rules, delivery retry — ADMIN only.
 - ``user_admin``: user CRUD, role changes, activation, session revocation
@@ -127,6 +145,15 @@ ROLE_CAPABILITIES: dict[str, frozenset[Role]] = {
     "governance_executive_action_write": frozenset({Role.ADMIN, Role.OPERATOR}),
     "governance_executive_action_assign": frozenset({Role.ADMIN}),
     "governance_executive_configure": frozenset({Role.ADMIN}),
+    "governance_workflow_read": frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER}),
+    "governance_workflow_detail_read": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_create": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_transition": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_assign": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_task_write": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_escalate": frozenset({Role.ADMIN, Role.OPERATOR}),
+    "governance_workflow_template_manage": frozenset({Role.ADMIN}),
+    "governance_workflow_audit_read": frozenset({Role.ADMIN, Role.OPERATOR}),
     "admin_config": frozenset({Role.ADMIN}),
     "user_admin": frozenset({Role.ADMIN}),
 }

@@ -24,6 +24,7 @@ from backend.app.models import (
     governance_executive_orm,  # noqa: F401 (registers the V38 executive tables)
     governance_intelligence_orm,  # noqa: F401 (registers the V37 intelligence tables)
     governance_orm,  # noqa: F401 (registers the V35 governance tables)
+    governance_workflow_orm,  # noqa: F401 (registers the V39 workflow tables)
     incident_orm,  # noqa: F401 (registers the incident tables)
     operational_orm,  # noqa: F401 (registers operational history + outbox)
     quality_orm,  # noqa: F401 (registers the quality tables)

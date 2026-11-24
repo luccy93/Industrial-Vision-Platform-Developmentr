@@ -694,6 +694,193 @@ def record_governance_executive_action_transition(
     ).inc()
 
 
+# ---------------------------------------------------------------------------
+# V39 enterprise governance workflows (bounded labels only)
+# ---------------------------------------------------------------------------
+governance_workflows = Gauge(
+    "ivp_governance_workflows",
+    "Current governance workflows by bounded lifecycle status.",
+    ["service", "status"],
+)
+
+governance_workflow_tasks = Gauge(
+    "ivp_governance_workflow_tasks",
+    "Current governance workflow tasks by bounded lifecycle status.",
+    ["service", "status"],
+)
+
+governance_workflow_creations_total = Counter(
+    "ivp_governance_workflow_creations_total",
+    "Governance workflow creation outcomes.",
+    ["service", "outcome"],
+)
+
+governance_workflow_transitions_total = Counter(
+    "ivp_governance_workflow_transitions_total",
+    "Governance workflow lifecycle transitions by bounded entity and status.",
+    ["service", "entity", "from_status", "to_status", "outcome"],
+)
+
+governance_workflow_dependency_evaluations_total = Counter(
+    "ivp_governance_workflow_dependency_evaluations_total",
+    "Deterministic workflow dependency evaluation outcomes.",
+    ["service", "outcome"],
+)
+
+governance_workflow_escalations_total = Counter(
+    "ivp_governance_workflow_escalations_total",
+    "Workflow escalation outcomes by bounded type and status.",
+    ["service", "escalation_type", "status", "outcome"],
+)
+
+governance_workflow_overdue = Gauge(
+    "ivp_governance_workflow_overdue",
+    "Current overdue workflow and task counts.",
+    ["service", "item_type"],
+)
+
+governance_workflow_sla = Gauge(
+    "ivp_governance_workflow_sla",
+    "Current workflow SLA states by bounded state.",
+    ["service", "state"],
+)
+
+governance_workflow_operation_duration_seconds = Histogram(
+    "ivp_governance_workflow_operation_duration_seconds",
+    "Governance workflow operation duration.",
+    ["service", "operation", "outcome"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
+_WORKFLOW_STATUSES = frozenset(
+    {"DRAFT", "READY", "IN_PROGRESS", "BLOCKED", "UNDER_REVIEW", "COMPLETED", "CANCELLED"}
+)
+_WORKFLOW_TASK_STATUSES = frozenset(
+    {"PENDING", "READY", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELLED"}
+)
+_WORKFLOW_ENTITIES = frozenset({"WORKFLOW", "TASK", "ESCALATION", "TEMPLATE", "REFERENCE", "DEPENDENCY"})
+_WORKFLOW_CREATION_OUTCOMES = frozenset({"CREATED", "REPLAYED", "REJECTED"})
+_WORKFLOW_TRANSITION_OUTCOMES = frozenset({"APPLIED", "REJECTED", "CONFLICT"})
+_WORKFLOW_DEPENDENCY_OUTCOMES = frozenset({"SATISFIED", "BLOCKED", "PENDING", "INVALID"})
+_WORKFLOW_ESCALATION_TYPES = frozenset(
+    {"SLA_OVERDUE", "SLA_AT_RISK", "BLOCKED", "UNASSIGNED", "MANUAL"}
+)
+_WORKFLOW_ESCALATION_STATUSES = frozenset({"OPEN", "ACKNOWLEDGED", "RESOLVED"})
+_WORKFLOW_ESCALATION_OUTCOMES = frozenset(
+    {"CREATED", "REPLAYED", "ACKNOWLEDGED", "RESOLVED", "REJECTED"}
+)
+_WORKFLOW_SLA_STATES = frozenset(
+    {"ON_TRACK", "AT_RISK", "OVERDUE", "PAUSED", "UNAVAILABLE", "NOT_APPLICABLE"}
+)
+_WORKFLOW_OVERDUE_ITEM_TYPES = frozenset({"workflow", "task"})
+_WORKFLOW_OPERATIONS = frozenset(
+    {
+        "status",
+        "create_workflow",
+        "transition_workflow",
+        "assign_workflow",
+        "transition_task",
+        "assign_task",
+        "add_reference",
+        "create_escalation",
+        "acknowledge_escalation",
+        "resolve_escalation",
+        "create_template",
+        "disable_template",
+    }
+)
+_WORKFLOW_OPERATION_OUTCOMES = frozenset({"SUCCESS", "REJECTED", "CONFLICT", "FAILED"})
+
+
+def set_governance_workflow_counts(
+    workflow_counts: dict[str, int],
+    task_counts: dict[str, int],
+    service: str | None = None,
+) -> None:
+    resolved = _bounded_executive_service(service)
+    for status in _WORKFLOW_STATUSES:
+        governance_workflows.labels(service=resolved, status=status).set(
+            max(0, int(workflow_counts.get(status, 0)))
+        )
+    for status in _WORKFLOW_TASK_STATUSES:
+        governance_workflow_tasks.labels(service=resolved, status=status).set(
+            max(0, int(task_counts.get(status, 0)))
+        )
+
+
+def set_governance_workflow_overdue(counts: dict[str, int], service: str | None = None) -> None:
+    resolved = _bounded_executive_service(service)
+    for item_type in _WORKFLOW_OVERDUE_ITEM_TYPES:
+        governance_workflow_overdue.labels(service=resolved, item_type=item_type).set(
+            max(0, int(counts.get(item_type, counts.get(f"{item_type}s", 0))))
+        )
+
+
+def set_governance_workflow_sla(counts: dict[str, int], service: str | None = None) -> None:
+    resolved = _bounded_executive_service(service)
+    for state in _WORKFLOW_SLA_STATES:
+        governance_workflow_sla.labels(service=resolved, state=state).set(
+            max(0, int(counts.get(state, 0)))
+        )
+
+
+def record_governance_workflow_creation(outcome: str, service: str | None = None) -> None:
+    governance_workflow_creations_total.labels(
+        service=_bounded_executive_service(service),
+        outcome=_bounded_label(outcome, _WORKFLOW_CREATION_OUTCOMES),
+    ).inc()
+
+
+def record_governance_workflow_transition(
+    entity: str,
+    from_status: str,
+    to_status: str,
+    outcome: str,
+    service: str | None = None,
+) -> None:
+    governance_workflow_transitions_total.labels(
+        service=_bounded_executive_service(service),
+        entity=_bounded_label(entity, _WORKFLOW_ENTITIES),
+        from_status=_bounded_label(from_status, _WORKFLOW_STATUSES | _WORKFLOW_TASK_STATUSES),
+        to_status=_bounded_label(to_status, _WORKFLOW_STATUSES | _WORKFLOW_TASK_STATUSES),
+        outcome=_bounded_label(outcome, _WORKFLOW_TRANSITION_OUTCOMES),
+    ).inc()
+
+
+def record_governance_workflow_dependency(outcome: str, service: str | None = None) -> None:
+    governance_workflow_dependency_evaluations_total.labels(
+        service=_bounded_executive_service(service),
+        outcome=_bounded_label(outcome, _WORKFLOW_DEPENDENCY_OUTCOMES),
+    ).inc()
+
+
+def record_governance_workflow_escalation(
+    escalation_type: str,
+    status: str,
+    outcome: str,
+    service: str | None = None,
+) -> None:
+    governance_workflow_escalations_total.labels(
+        service=_bounded_executive_service(service),
+        escalation_type=_bounded_label(escalation_type, _WORKFLOW_ESCALATION_TYPES),
+        status=_bounded_label(status, _WORKFLOW_ESCALATION_STATUSES),
+        outcome=_bounded_label(outcome, _WORKFLOW_ESCALATION_OUTCOMES),
+    ).inc()
+
+
+def record_governance_workflow_operation(
+    operation: str,
+    outcome: str,
+    duration_seconds: float,
+    service: str | None = None,
+) -> None:
+    governance_workflow_operation_duration_seconds.labels(
+        service=_bounded_executive_service(service),
+        operation=_bounded_label(operation, _WORKFLOW_OPERATIONS),
+        outcome=_bounded_label(outcome, _WORKFLOW_OPERATION_OUTCOMES),
+    ).observe(max(0.0, float(duration_seconds)))
+
+
 def metrics_payload() -> bytes:
     return generate_latest(REGISTRY)
 

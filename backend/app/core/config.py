@@ -259,6 +259,13 @@ class Settings(BaseSettings):
     governance_executive_comparison_period_days: int = Field(default=30, ge=1, le=90)
     governance_executive_action_due_soon_hours: int = Field(default=72, ge=1, le=720)
 
+    # --- V39 enterprise governance workflow orchestration (deterministic, on demand) ---
+    governance_workflow_enabled: bool = Field(default=True)
+    governance_workflow_page_size: int = Field(default=20, ge=1, le=100)
+    governance_workflow_max_active_sample: int = Field(default=500, ge=1, le=2000)
+    governance_workflow_default_warning_hours: int = Field(default=24, ge=1, le=720)
+    governance_workflow_escalation_notifications_enabled: bool = Field(default=False)
+
     # --- AI / model (V01 config; V03 live inference) ---
     gpu_enabled: bool = Field(default=False)
     model_device: str = Field(default="cpu")

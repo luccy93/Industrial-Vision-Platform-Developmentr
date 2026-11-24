@@ -73,6 +73,15 @@ def test_role_matrix_least_privilege() -> None:
     assert can(Role.ADMIN, "governance_executive_action_write")
     assert can(Role.ADMIN, "governance_executive_action_assign")
     assert can(Role.ADMIN, "governance_executive_configure")
+    assert can(Role.ADMIN, "governance_workflow_read")
+    assert can(Role.ADMIN, "governance_workflow_detail_read")
+    assert can(Role.ADMIN, "governance_workflow_create")
+    assert can(Role.ADMIN, "governance_workflow_transition")
+    assert can(Role.ADMIN, "governance_workflow_assign")
+    assert can(Role.ADMIN, "governance_workflow_task_write")
+    assert can(Role.ADMIN, "governance_workflow_escalate")
+    assert can(Role.ADMIN, "governance_workflow_template_manage")
+    assert can(Role.ADMIN, "governance_workflow_audit_read")
     assert can(Role.OPERATOR, "governance_read")
     assert can(Role.OPERATOR, "retention_evaluate")
     assert can(Role.OPERATOR, "legal_hold_write")
@@ -97,6 +106,15 @@ def test_role_matrix_least_privilege() -> None:
     assert not can(Role.OPERATOR, "governance_executive_report_generate")
     assert not can(Role.OPERATOR, "governance_executive_action_assign")
     assert not can(Role.OPERATOR, "governance_executive_configure")
+    assert can(Role.OPERATOR, "governance_workflow_read")
+    assert can(Role.OPERATOR, "governance_workflow_detail_read")
+    assert can(Role.OPERATOR, "governance_workflow_create")
+    assert can(Role.OPERATOR, "governance_workflow_transition")
+    assert can(Role.OPERATOR, "governance_workflow_assign")
+    assert can(Role.OPERATOR, "governance_workflow_task_write")
+    assert can(Role.OPERATOR, "governance_workflow_escalate")
+    assert not can(Role.OPERATOR, "governance_workflow_template_manage")
+    assert can(Role.OPERATOR, "governance_workflow_audit_read")
     assert not can(Role.OPERATOR, "governance_recommendation_dismiss")
     assert not can(Role.OPERATOR, "governance_intelligence_configure")
     assert not can(Role.OPERATOR, "governance_policy_write")
@@ -121,6 +139,15 @@ def test_role_matrix_least_privilege() -> None:
     assert not can(Role.VIEWER, "governance_executive_action_write")
     assert not can(Role.VIEWER, "governance_executive_action_assign")
     assert not can(Role.VIEWER, "governance_executive_configure")
+    assert can(Role.VIEWER, "governance_workflow_read")
+    assert not can(Role.VIEWER, "governance_workflow_detail_read")
+    assert not can(Role.VIEWER, "governance_workflow_create")
+    assert not can(Role.VIEWER, "governance_workflow_transition")
+    assert not can(Role.VIEWER, "governance_workflow_assign")
+    assert not can(Role.VIEWER, "governance_workflow_task_write")
+    assert not can(Role.VIEWER, "governance_workflow_escalate")
+    assert not can(Role.VIEWER, "governance_workflow_template_manage")
+    assert not can(Role.VIEWER, "governance_workflow_audit_read")
     assert not can(Role.VIEWER, "governance_recommendation_acknowledge")
     assert not can(Role.VIEWER, "governance_recommendation_dismiss")
     assert not can(Role.VIEWER, "governance_intelligence_refresh")
@@ -177,6 +204,15 @@ def test_role_matrix_least_privilege() -> None:
             "governance_executive_action_write",
             "governance_executive_action_assign",
             "governance_executive_configure",
+            "governance_workflow_read",
+            "governance_workflow_detail_read",
+            "governance_workflow_create",
+            "governance_workflow_transition",
+            "governance_workflow_assign",
+            "governance_workflow_task_write",
+            "governance_workflow_escalate",
+            "governance_workflow_template_manage",
+            "governance_workflow_audit_read",
             "admin_config",
             "user_admin",
         }

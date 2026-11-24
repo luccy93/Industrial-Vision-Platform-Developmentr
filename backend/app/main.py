@@ -943,6 +943,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.governance_executive_repository = governance_executive_repository
     app.state.governance_executive_service = governance_executive_service
 
+    # V39: enterprise governance workflow orchestration. Templates, instances,
+    # tasks, references, SLA indicators, and escalations are persisted locally
+    # and computed on demand from V10-V38 records. V39 starts no scheduler,
+    # never approves or releases a hold, never decides a disposition, never
+    # modifies evidence, never completes an executive action, and never deletes
+    # a record.
+    from backend.app.auth.repository import AuthRepository
+    from backend.app.governance.workflows.repository import GovernanceWorkflowRepository
+    from backend.app.governance.workflows.service import GovernanceWorkflowService
+
+    governance_workflow_repository: GovernanceWorkflowRepository | None = None
+    governance_workflow_service: GovernanceWorkflowService | None = None
+    if (
+        governance_service is not None
+        and governance_repository is not None
+        and forensic_repository is not None
+        and bool(settings.governance_workflow_enabled)
+    ):
+        try:
+            governance_workflow_repository = GovernanceWorkflowRepository(
+                app.state.session_factory
+            )
+            governance_workflow_service = GovernanceWorkflowService(
+                settings=settings,
+                repository=governance_workflow_repository,
+                governance_service=governance_service,
+                forensic_repository=forensic_repository,
+                integrity_store=getattr(app.state, "integrity_store", None),
+                governance_repository=governance_repository,
+                automation_repository=governance_automation_repository,
+                intelligence_repository=governance_intelligence_repository,
+                executive_repository=governance_executive_repository,
+                auth_repository=AuthRepository(app.state.session_factory),
+                notifier=governance_notifier,
+            )
+        except Exception:
+            get_logger("industrial-vision.governance").warning(
+                "governance workflow initialization skipped", exc_info=True
+            )
+            governance_workflow_repository = None
+            governance_workflow_service = None
+    app.state.governance_workflow_repository = governance_workflow_repository
+    app.state.governance_workflow_service = governance_workflow_service
+
     _register_runtime_phases(app, settings)
     app.state.runtime.initialize()
 
@@ -1191,6 +1235,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from backend.app.api.v1.governance_executive import router as governance_executive_router
 
     app.include_router(governance_executive_router)
+
+    from backend.app.api.v1.governance_workflows import router as governance_workflows_router
+
+    app.include_router(governance_workflows_router)
     from backend.app.api.v1.auth import router as auth_router
 
     app.include_router(auth_router)
