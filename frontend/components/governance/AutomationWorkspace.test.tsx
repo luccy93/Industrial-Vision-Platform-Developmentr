@@ -232,9 +232,9 @@ describe("AutomationWorkspace", () => {
     render(<AutomationWorkspace />);
 
     expect(await screen.findByText("Governance automation")).toBeInTheDocument();
-    expect(screen.getAllByText("ENABLED").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("RUNNING").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("RETENTION_EVALUATION").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("ENABLED")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("RUNNING")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("RETENTION_EVALUATION")).length).toBeGreaterThan(0);
     expect(await screen.findByText(/Synthetic failure/)).toBeInTheDocument();
     expect(screen.getByText("RETENTION_REVIEW_DUE")).toBeInTheDocument();
     expect(screen.getByText("COMPLIANCE_SUMMARY")).toBeInTheDocument();

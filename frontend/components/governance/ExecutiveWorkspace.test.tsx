@@ -396,7 +396,7 @@ describe("ExecutiveWorkspace", () => {
     render(<ExecutiveWorkspace />);
 
     expect(await screen.findByText("Executive governance command center")).toBeInTheDocument();
-    expect(screen.getByText("EXEC_HEALTH_V1")).toBeInTheDocument();
+    expect(await screen.findByText("EXEC_HEALTH_V1")).toBeInTheDocument();
     expect(screen.getByText(/Triggered signal AUDIT_INTEGRITY_GAPS/)).toBeInTheDocument();
     expect(screen.getByText(/missing data is never treated as zero/i)).toBeInTheDocument();
     expect(screen.getByText(/averaged_score_used=false/)).toBeInTheDocument();

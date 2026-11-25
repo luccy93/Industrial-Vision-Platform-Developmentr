@@ -755,20 +755,14 @@ governance_workflow_operation_duration_seconds = Histogram(
 _WORKFLOW_STATUSES = frozenset(
     {"DRAFT", "READY", "IN_PROGRESS", "BLOCKED", "UNDER_REVIEW", "COMPLETED", "CANCELLED"}
 )
-_WORKFLOW_TASK_STATUSES = frozenset(
-    {"PENDING", "READY", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELLED"}
-)
+_WORKFLOW_TASK_STATUSES = frozenset({"PENDING", "READY", "IN_PROGRESS", "BLOCKED", "COMPLETED", "CANCELLED"})
 _WORKFLOW_ENTITIES = frozenset({"WORKFLOW", "TASK", "ESCALATION", "TEMPLATE", "REFERENCE", "DEPENDENCY"})
 _WORKFLOW_CREATION_OUTCOMES = frozenset({"CREATED", "REPLAYED", "REJECTED"})
 _WORKFLOW_TRANSITION_OUTCOMES = frozenset({"APPLIED", "REJECTED", "CONFLICT"})
 _WORKFLOW_DEPENDENCY_OUTCOMES = frozenset({"SATISFIED", "BLOCKED", "PENDING", "INVALID"})
-_WORKFLOW_ESCALATION_TYPES = frozenset(
-    {"SLA_OVERDUE", "SLA_AT_RISK", "BLOCKED", "UNASSIGNED", "MANUAL"}
-)
+_WORKFLOW_ESCALATION_TYPES = frozenset({"SLA_OVERDUE", "SLA_AT_RISK", "BLOCKED", "UNASSIGNED", "MANUAL"})
 _WORKFLOW_ESCALATION_STATUSES = frozenset({"OPEN", "ACKNOWLEDGED", "RESOLVED"})
-_WORKFLOW_ESCALATION_OUTCOMES = frozenset(
-    {"CREATED", "REPLAYED", "ACKNOWLEDGED", "RESOLVED", "REJECTED"}
-)
+_WORKFLOW_ESCALATION_OUTCOMES = frozenset({"CREATED", "REPLAYED", "ACKNOWLEDGED", "RESOLVED", "REJECTED"})
 _WORKFLOW_SLA_STATES = frozenset(
     {"ON_TRACK", "AT_RISK", "OVERDUE", "PAUSED", "UNAVAILABLE", "NOT_APPLICABLE"}
 )
@@ -819,9 +813,7 @@ def set_governance_workflow_overdue(counts: dict[str, int], service: str | None 
 def set_governance_workflow_sla(counts: dict[str, int], service: str | None = None) -> None:
     resolved = _bounded_executive_service(service)
     for state in _WORKFLOW_SLA_STATES:
-        governance_workflow_sla.labels(service=resolved, state=state).set(
-            max(0, int(counts.get(state, 0)))
-        )
+        governance_workflow_sla.labels(service=resolved, state=state).set(max(0, int(counts.get(state, 0))))
 
 
 def record_governance_workflow_creation(outcome: str, service: str | None = None) -> None:
