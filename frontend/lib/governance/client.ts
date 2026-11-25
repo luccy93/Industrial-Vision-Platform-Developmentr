@@ -51,10 +51,22 @@ import type {
   GovernanceSnapshotListResponse,
   GovernanceStatus,
   GovernanceTrendsResponse,
+  GovernanceWorkflowDetail,
+  GovernanceWorkflowEscalationListResponse,
+  GovernanceWorkflowEscalationMutationResponse,
+  GovernanceWorkflowListResponse,
+  GovernanceWorkflowMutationResponse,
+  GovernanceWorkflowOwnershipResponse,
+  GovernanceWorkflowReferenceListResponse,
+  GovernanceWorkflowSlaResponse,
+  GovernanceWorkflowStatusResponse,
+  GovernanceWorkflowTaskMutationResponse,
+  GovernanceWorkflowTemplateListResponse,
+  GovernanceWorkflowTemplateResponse,
 } from "../../types";
 
 function queryString(
-  params: Record<string, string | number | string[] | undefined | null>
+  params: Record<string, string | number | boolean | string[] | undefined | null>
 ): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -941,4 +953,323 @@ export async function downloadGovernanceExecutiveReportContent(
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+// --- V39 enterprise governance workflow orchestration ---
+
+export type GovernanceWorkflowTemplateInput = {
+  template_key: string;
+  name: string;
+  description?: string;
+  tasks: Array<Record<string, unknown>>;
+  reason: string;
+  idempotency_key: string;
+};
+
+export type GovernanceWorkflowTemplateVersionInput = {
+  name?: string;
+  description?: string;
+  tasks: Array<Record<string, unknown>>;
+  reason: string;
+  idempotency_key: string;
+};
+
+export type GovernanceWorkflowCreateInput = {
+  template_id?: string;
+  template_key?: string;
+  template_version?: number;
+  case_id?: string | null;
+  title: string;
+  description?: string;
+  priority?: string;
+  due_at?: string | null;
+  owner_type?: "USER" | "ROLE" | null;
+  owner_id?: string | null;
+  reason: string;
+  idempotency_key: string;
+};
+
+export type GovernanceWorkflowTransitionInput = {
+  target_status: string;
+  expected_version: number;
+  reason?: string;
+  block_reason?: string;
+  cancel_reason?: string;
+  outcome_summary?: string;
+};
+
+export type GovernanceWorkflowAssignInput = {
+  owner_type: "USER" | "ROLE";
+  owner_id: string;
+  expected_version: number;
+  reason: string;
+};
+
+export type GovernanceWorkflowTaskTransitionInput = {
+  target_status: string;
+  expected_version: number;
+  reason?: string;
+  block_reason?: string;
+  cancel_reason?: string;
+  outcome_summary?: string;
+};
+
+export type GovernanceWorkflowReferenceInput = {
+  domain: string;
+  source_id: string;
+  task_id?: string | null;
+  reference_key?: string;
+  reason: string;
+};
+
+export type GovernanceWorkflowEscalationInput = {
+  escalation_type: string;
+  severity?: string;
+  task_id?: string | null;
+  reason: string;
+  idempotency_key: string;
+};
+
+export type GovernanceWorkflowEscalationAcknowledgeInput = {
+  expected_version: number;
+  reason: string;
+};
+
+export type GovernanceWorkflowEscalationResolveInput = {
+  expected_version: number;
+  reason: string;
+  resolution: string;
+};
+
+export function fetchGovernanceWorkflowStatus(
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowStatusResponse> {
+  return apiFetch<GovernanceWorkflowStatusResponse>(
+    "/api/v1/governance/workflows/status",
+    { signal }
+  );
+}
+
+export function fetchGovernanceWorkflowOwnership(
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowOwnershipResponse> {
+  return apiFetch<GovernanceWorkflowOwnershipResponse>(
+    "/api/v1/governance/workflows/ownership",
+    { signal }
+  );
+}
+
+export function fetchGovernanceWorkflowTemplates(
+  params: { template_key?: string; status?: string; page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowTemplateListResponse> {
+  return apiFetch<GovernanceWorkflowTemplateListResponse>(
+    `/api/v1/governance/workflows/templates${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function createGovernanceWorkflowTemplate(
+  input: GovernanceWorkflowTemplateInput
+): Promise<GovernanceWorkflowTemplateResponse> {
+  return apiFetch("/api/v1/governance/workflows/templates", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function createGovernanceWorkflowTemplateVersion(
+  templateKey: string,
+  input: GovernanceWorkflowTemplateVersionInput
+): Promise<GovernanceWorkflowTemplateResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/templates/${encodeURIComponent(templateKey)}/versions`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function disableGovernanceWorkflowTemplate(
+  templateId: string,
+  input: { reason: string }
+): Promise<GovernanceWorkflowTemplateResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/templates/${encodeURIComponent(templateId)}/disable`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceWorkflows(
+  params: {
+    status?: string;
+    owner_id?: string;
+    case_id?: string;
+    unassigned?: boolean;
+    overdue?: boolean;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowListResponse> {
+  return apiFetch<GovernanceWorkflowListResponse>(
+    `/api/v1/governance/workflows/workflows${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function createGovernanceWorkflow(
+  input: GovernanceWorkflowCreateInput
+): Promise<GovernanceWorkflowMutationResponse> {
+  return apiFetch("/api/v1/governance/workflows/workflows", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchGovernanceWorkflow(
+  workflowId: string,
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowDetail> {
+  return apiFetch<GovernanceWorkflowDetail>(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}`,
+    { signal }
+  );
+}
+
+export function transitionGovernanceWorkflow(
+  workflowId: string,
+  input: GovernanceWorkflowTransitionInput
+): Promise<GovernanceWorkflowMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/transitions`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function assignGovernanceWorkflow(
+  workflowId: string,
+  input: GovernanceWorkflowAssignInput
+): Promise<GovernanceWorkflowMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/assignments`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceWorkflowTasks(
+  params: {
+    workflow_id?: string;
+    status?: string;
+    owner_id?: string;
+    unassigned?: boolean;
+    overdue?: boolean;
+    page?: number;
+    page_size?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<{
+  items: import("../../types").GovernanceWorkflowTask[];
+  total: number;
+  page: number;
+  page_size: number;
+  status_counts: Record<string, number>;
+  overdue: { workflows: number; tasks: number };
+  non_claims: string[];
+}> {
+  return apiFetch(`/api/v1/governance/workflows/tasks${queryString(params)}`, { signal });
+}
+
+export function transitionGovernanceWorkflowTask(
+  workflowId: string,
+  taskId: string,
+  input: GovernanceWorkflowTaskTransitionInput
+): Promise<GovernanceWorkflowTaskMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(
+      workflowId
+    )}/tasks/${encodeURIComponent(taskId)}/transitions`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function assignGovernanceWorkflowTask(
+  workflowId: string,
+  taskId: string,
+  input: GovernanceWorkflowAssignInput
+): Promise<{ task: import("../../types").GovernanceWorkflowTask; non_claims: string[] }> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(
+      workflowId
+    )}/tasks/${encodeURIComponent(taskId)}/assignments`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceWorkflowReferences(
+  workflowId: string,
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowReferenceListResponse> {
+  return apiFetch<GovernanceWorkflowReferenceListResponse>(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/references`,
+    { signal }
+  );
+}
+
+export function addGovernanceWorkflowReference(
+  workflowId: string,
+  input: GovernanceWorkflowReferenceInput
+): Promise<GovernanceWorkflowReferenceListResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/references`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceWorkflowEscalations(
+  params: { workflow_id?: string; status?: string; page?: number; page_size?: number } = {},
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowEscalationListResponse> {
+  return apiFetch<GovernanceWorkflowEscalationListResponse>(
+    `/api/v1/governance/workflows/escalations${queryString(params)}`,
+    { signal }
+  );
+}
+
+export function createGovernanceWorkflowEscalation(
+  workflowId: string,
+  input: GovernanceWorkflowEscalationInput
+): Promise<GovernanceWorkflowEscalationMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/escalations`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function acknowledgeGovernanceWorkflowEscalation(
+  escalationId: string,
+  input: GovernanceWorkflowEscalationAcknowledgeInput
+): Promise<GovernanceWorkflowEscalationMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/escalations/${encodeURIComponent(escalationId)}/acknowledge`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function resolveGovernanceWorkflowEscalation(
+  escalationId: string,
+  input: GovernanceWorkflowEscalationResolveInput
+): Promise<GovernanceWorkflowEscalationMutationResponse> {
+  return apiFetch(
+    `/api/v1/governance/workflows/escalations/${encodeURIComponent(escalationId)}/resolve`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function fetchGovernanceWorkflowSla(
+  workflowId: string,
+  signal?: AbortSignal
+): Promise<GovernanceWorkflowSlaResponse> {
+  return apiFetch<GovernanceWorkflowSlaResponse>(
+    `/api/v1/governance/workflows/workflows/${encodeURIComponent(workflowId)}/sla`,
+    { signal }
+  );
 }

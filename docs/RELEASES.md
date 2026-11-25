@@ -1127,3 +1127,46 @@ after a bounded retry so a concurrent replay cannot duplicate an action,
 report, or audit event. This is local evidence only: a live PostgreSQL
 migration, live concurrency under production isolation levels, and deployment
 remain release-time validation.
+
+## V39 release impact
+
+V39 adds an additive Alembic revision, `016_create_governance_workflows`,
+creating only workflow template, workflow, task, dependency, reference,
+escalation, and workflow-event tables after `015_create_governance_executive`.
+Existing V01-V38 tables, evidence references, custody records, export IDs, paths,
+hashes, snapshots, audit records, and semantics are untouched; `downgrade()`
+drops only the V39 objects. No release tag, image publication, workflow dispatch,
+or deployment is part of V39.
+
+New runtime configuration is additive: `GOVERNANCE_WORKFLOW_ENABLED`,
+`GOVERNANCE_WORKFLOW_PAGE_SIZE`, `GOVERNANCE_WORKFLOW_MAX_ACTIVE_SAMPLE`,
+`GOVERNANCE_WORKFLOW_DEFAULT_WARNING_HOURS`, and
+`GOVERNANCE_WORKFLOW_ESCALATION_NOTIFICATIONS_ENABLED`. Deployments must run the
+migration before enabling the workflow API. Escalation notifications remain
+disabled by default and use the existing V15 delivery path; V39 never claims
+delivery.
+
+V39 is a coordination layer, not an authority layer. Templates are versioned and
+immutable, workflow instances pin a template snapshot and digest, task
+dependencies are immutable after instantiation, and terminal workflows and tasks
+cannot be reopened. Lifecycle transitions are strict, use optimistic concurrency,
+and require reasons for blocking, cancellation, and reassignment; workflow
+completion requires mandatory tasks complete plus an outcome summary. Cross-domain
+references to V34 forensic cases and findings, V35 retention reviews, holds,
+dispositions, and export approvals, V36 automation jobs, V37 recommendations, and
+V38 strategic actions are read-only and never mutate the source. V39 never
+approves or releases a hold, decides a disposition, deletes or modifies evidence,
+approves or generates an export, alters custody, resolves a recommendation, or
+completes an executive action. SLA and escalation state are computed on demand;
+V39 starts no scheduler or second worker. There is no `DELETE` route.
+
+V39 hardening adds bounded, deterministic local tests for template validation and
+version preservation, workflow and task lifecycles, dependency cycles, completion
+and blocking rules, ownership history, idempotent escalations, cross-domain
+reference availability, pagination and request bounds, RBAC and cross-case
+isolation, redaction, concurrent version conflicts and idempotency races,
+migration safety, and V10/V14/V15/V16/V29-V38 regressions. This is local evidence
+only: a live PostgreSQL migration, live trigger and concurrency behavior, Redis
+or worker behavior, SMTP or webhook delivery, external services, and production
+deployment remain release-time validation. See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).

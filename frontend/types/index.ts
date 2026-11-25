@@ -356,6 +356,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/forensics", label: "Forensics", note: "V34 incident response" },
   { href: "/governance", label: "Governance", note: "V35 retention & compliance" },
   { href: "/governance/executive", label: "Executive", note: "V38 command center" },
+  { href: "/governance/workflows", label: "Workflows", note: "V39 orchestration" },
   { href: "/users", label: "Users", note: "V16 administration", roles: ["ADMIN"] },
   { href: "/system", label: "System", note: "API / DB / Redis status" }
 ];
@@ -2734,5 +2735,354 @@ export type GovernanceExecutiveComparison = {
   fabricated_history: boolean;
   source_preserved: boolean;
   assurance: string;
+  non_claims: string[];
+};
+
+// --- V39 enterprise governance workflow orchestration ---
+
+export type GovernanceWorkflowStatus =
+  | "DRAFT"
+  | "READY"
+  | "IN_PROGRESS"
+  | "BLOCKED"
+  | "UNDER_REVIEW"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type GovernanceWorkflowTaskStatus =
+  | "PENDING"
+  | "READY"
+  | "IN_PROGRESS"
+  | "BLOCKED"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type GovernanceWorkflowSlaState =
+  | "ON_TRACK"
+  | "AT_RISK"
+  | "OVERDUE"
+  | "PAUSED"
+  | "UNAVAILABLE"
+  | "NOT_APPLICABLE";
+
+export type GovernanceWorkflowPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type GovernanceWorkflowReferenceDomain =
+  | "FORENSIC_CASE"
+  | "FORENSIC_FINDING"
+  | "RETENTION_REVIEW"
+  | "LEGAL_HOLD"
+  | "DISPOSITION"
+  | "EXPORT_APPROVAL"
+  | "AUTOMATION_JOB"
+  | "RECOMMENDATION"
+  | "EXECUTIVE_ACTION";
+
+export type GovernanceWorkflowEscalationType =
+  | "SLA_OVERDUE"
+  | "SLA_AT_RISK"
+  | "BLOCKED"
+  | "UNASSIGNED"
+  | "MANUAL";
+
+export type GovernanceWorkflowEscalationStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+
+export type GovernanceWorkflowSla = {
+  entity_type: string;
+  entity_id: string;
+  state: GovernanceWorkflowSlaState | "UNKNOWN";
+  reason: string;
+  v37_state: string | null;
+  target_hours: number | null;
+  warning_hours: number | null;
+  start_at: string | null;
+  due_at: string | null;
+  warning_at: string | null;
+  resolution_at: string | null;
+  elapsed_hours: number | null;
+  open_age_hours: number | null;
+  duration_hours: number | null;
+  resolved: boolean;
+  computed_at: string | null;
+  non_claim: string;
+};
+
+export type GovernanceWorkflowTemplate = {
+  template_id: string;
+  template_key: string;
+  version: number;
+  name: string;
+  description: string;
+  status: "ACTIVE" | "SUPERSEDED" | "DISABLED";
+  definition: Record<string, unknown>;
+  definition_digest: string;
+  task_count: number;
+  dependency_count: number;
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+  idempotency_key: string;
+  disabled: boolean;
+};
+
+export type GovernanceWorkflow = {
+  workflow_id: string;
+  template_id: string;
+  template_key: string;
+  template_version: number;
+  template_digest: string;
+  template_snapshot: Record<string, unknown>;
+  case_id: string | null;
+  title: string;
+  description: string;
+  status: GovernanceWorkflowStatus;
+  version: number;
+  owner_type: "USER" | "ROLE" | null;
+  owner_id: string | null;
+  priority: GovernanceWorkflowPriority;
+  due_at: string | null;
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+  ready_at: string | null;
+  started_at: string | null;
+  blocked_at: string | null;
+  review_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  outcome_summary: string | null;
+  block_reason: string | null;
+  cancel_reason: string | null;
+  idempotency_key: string;
+  terminal: boolean;
+  unassigned: boolean;
+  sla?: GovernanceWorkflowSla;
+};
+
+export type GovernanceWorkflowTask = {
+  task_id: string;
+  workflow_id: string;
+  task_key: string;
+  title: string;
+  description: string;
+  status: GovernanceWorkflowTaskStatus;
+  version: number;
+  owner_type: "USER" | "ROLE" | null;
+  owner_id: string | null;
+  required: boolean;
+  order_index: number;
+  due_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  started_at: string | null;
+  blocked_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  outcome_summary: string | null;
+  block_reason: string | null;
+  cancel_reason: string | null;
+  terminal: boolean;
+  unassigned: boolean;
+  dependencies?: string[];
+  dependency_state?: string;
+  sla?: GovernanceWorkflowSla;
+};
+
+export type GovernanceWorkflowDependency = {
+  dependency_id: string;
+  workflow_id: string;
+  task_id: string;
+  depends_on_task_id: string;
+  created_at: string | null;
+};
+
+export type GovernanceWorkflowReference = {
+  reference_id: string;
+  workflow_id: string;
+  task_id: string | null;
+  domain: GovernanceWorkflowReferenceDomain;
+  source_id: string;
+  reference_key: string;
+  source_label: string;
+  source_case_id: string | null;
+  availability: "AVAILABLE" | "MISSING" | "UNAVAILABLE" | "UNAUTHORIZED" | "DELETED";
+  source_status: string;
+  source_version: number | null;
+  added_by: string;
+  added_at: string | null;
+  last_checked_at: string | null;
+  reason: string;
+};
+
+export type GovernanceWorkflowEscalation = {
+  escalation_id: string;
+  workflow_id: string;
+  task_id: string | null;
+  escalation_type: GovernanceWorkflowEscalationType;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  status: GovernanceWorkflowEscalationStatus;
+  reason: string;
+  resolution: string | null;
+  requested_by: string;
+  requested_at: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  version: number;
+  idempotency_key: string;
+  terminal: boolean;
+};
+
+export type GovernanceWorkflowEvent = {
+  event_id: string;
+  workflow_id: string | null;
+  task_id: string | null;
+  template_id: string | null;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  actor_id: string | null;
+  actor_role: string | null;
+  reason: string;
+  detail: Record<string, unknown>;
+  sequence: number;
+  created_at: string | null;
+};
+
+export type GovernanceWorkflowStatusResponse = {
+  enabled: boolean;
+  assurance: string;
+  workflow_counts: Record<string, number>;
+  workflow_total: number;
+  task_counts: Record<string, number>;
+  task_total: number;
+  escalation_counts: Record<string, number>;
+  escalation_total: number;
+  unassigned: { workflows: number; tasks: number };
+  overdue: { workflows: number; tasks: number };
+  sla_counts: Record<string, number>;
+  sla_sample_size: number;
+  sla_sample_limit: number;
+  sources: Record<string, string>;
+  lifecycle: {
+    workflow_statuses: GovernanceWorkflowStatus[];
+    task_statuses: GovernanceWorkflowTaskStatus[];
+    template_statuses: string[];
+    escalation_statuses: GovernanceWorkflowEscalationStatus[];
+    workflow_transitions: Record<string, GovernanceWorkflowStatus[]>;
+  };
+  scheduled_workflows: boolean;
+  scheduled_workflows_note: string;
+  generated_at: string | null;
+  non_claims: string[];
+  limitations: string[];
+};
+
+export type GovernanceWorkflowOwnershipResponse = {
+  unassigned: { workflows: number; tasks: number };
+  overdue: { workflows: number; tasks: number };
+  workflow_counts: Record<string, number>;
+  task_counts: Record<string, number>;
+  generated_at: string | null;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowTemplateListResponse = {
+  items: GovernanceWorkflowTemplate[];
+  total: number;
+  page: number;
+  page_size: number;
+  lifecycle: { statuses: string[]; disabled_is_terminal: boolean };
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowTemplateResponse = {
+  template: GovernanceWorkflowTemplate;
+  events: GovernanceWorkflowEvent[];
+  replayed?: boolean;
+  changed?: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowListResponse = {
+  items: GovernanceWorkflow[];
+  total: number;
+  page: number;
+  page_size: number;
+  filters: Record<string, unknown>;
+  status_counts: Record<string, number>;
+  unassigned: { workflows: number; tasks: number };
+  overdue: { workflows: number; tasks: number };
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowDetail = {
+  workflow: GovernanceWorkflow;
+  sla: GovernanceWorkflowSla;
+  tasks: GovernanceWorkflowTask[];
+  dependencies: GovernanceWorkflowDependency[];
+  references: GovernanceWorkflowReference[];
+  escalations: GovernanceWorkflowEscalation[];
+  escalation_total: number;
+  events: GovernanceWorkflowEvent[];
+  ownership_history: GovernanceWorkflowEvent[];
+  lifecycle: {
+    statuses: GovernanceWorkflowStatus[];
+    transitions: Record<string, GovernanceWorkflowStatus[]>;
+    terminal: GovernanceWorkflowStatus[];
+  };
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowMutationResponse = {
+  workflow: GovernanceWorkflow;
+  tasks?: GovernanceWorkflowTask[];
+  sla?: GovernanceWorkflowSla;
+  events?: GovernanceWorkflowEvent[];
+  replayed?: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowTaskMutationResponse = {
+  task: GovernanceWorkflowTask;
+  tasks: GovernanceWorkflowTask[];
+  sla: GovernanceWorkflowSla;
+  events: GovernanceWorkflowEvent[];
+  workflow_status: GovernanceWorkflowStatus | null;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowReferenceListResponse = {
+  workflow_id?: string;
+  items: GovernanceWorkflowReference[];
+  reference?: GovernanceWorkflowReference;
+  replayed?: boolean;
+  source_mutated: boolean;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowEscalationListResponse = {
+  items: GovernanceWorkflowEscalation[];
+  total: number;
+  page: number;
+  page_size: number;
+  status_counts: Record<string, number>;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowEscalationMutationResponse = {
+  escalation: GovernanceWorkflowEscalation;
+  escalations?: GovernanceWorkflowEscalation[];
+  replayed?: boolean;
+  notifications?: Record<string, number | boolean>;
+  non_claims: string[];
+};
+
+export type GovernanceWorkflowSlaResponse = {
+  workflow_id: string;
+  workflow: GovernanceWorkflowSla;
+  tasks: GovernanceWorkflowSla[];
+  counts: Record<string, number>;
   non_claims: string[];
 };

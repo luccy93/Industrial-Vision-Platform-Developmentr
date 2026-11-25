@@ -445,3 +445,15 @@ configuration writes are recorded with the existing V35 `record_access` audit.
 V38 adds the additive revision `015_create_governance_executive` and does not
 alter any V35 table. See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
+
+## Relationship to V39 workflow orchestration
+
+V39 adds workflow coordination above V35 without changing V35 evidence, case,
+custody, export, hold, disposition, policy, report, or audit semantics. It reads
+retention reviews, legal holds, dispositions, and export approvals through
+read-only reference resolution and never approves or releases a hold, decides a
+disposition, generates an export, modifies evidence, or deletes a record. V39
+writes mirror bounded audit events through the existing V35 governance audit and
+add the additive revision `016_create_governance_workflows`; no V35 table is
+altered. See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).

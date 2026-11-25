@@ -390,3 +390,13 @@ the additive revision `015_create_governance_executive` and never approves or
 releases a hold, decides a disposition, modifies evidence, or deletes a record.
 See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
+
+## Relationship to V39 workflow orchestration
+
+V39 adds workflow coordination above V35/V36 without changing V36 schedules,
+jobs, job events, snapshots, or scheduler semantics. It starts no scheduler and
+no second worker; workflow SLA and escalation state are computed on demand or on
+explicit user action. V39 references automation jobs read-only and never mutates
+a job or a schedule. It adds the additive revision
+`016_create_governance_workflows` and does not alter any V36 table. See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).

@@ -405,3 +405,14 @@ recommendation returns `409 RECOMMENDATION_NOT_ACTIONABLE`. V38 adds no LLM,
 machine learning, forecast, or external AI service, starts no scheduler, and
 adds the additive revision `015_create_governance_executive`. See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
+
+## Relationship to V39 workflow orchestration
+
+V39 reuses V37 `calculate_sla()` as the single SLA calculation engine. It maps
+the V37 SLA states into workflow and task states; a missing due date is
+`NOT_APPLICABLE`, a blocked item is `PAUSED`, and an unreadable source is
+`UNAVAILABLE`. V39 references recommendations read-only and never resolves,
+dismisses, or acknowledges one automatically. It starts no scheduler and adds the
+additive revision `016_create_governance_workflows`; no V37 table is altered.
+See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).

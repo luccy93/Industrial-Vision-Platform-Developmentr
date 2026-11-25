@@ -166,6 +166,17 @@ schemas, bounded text, and stable error envelopes. There are no `DELETE` routes.
   `POST /escalations/{id}/acknowledge`, `POST /escalations/{id}/resolve`
 - `GET /workflows/{id}/sla`
 
+## Frontend
+
+The `/governance/workflows` route renders `WorkflowWorkspace` beside the existing
+governance workspace. It reads the overview status, ownership report, template
+list, and paginated workflow list, and exposes detail only to ADMIN/OPERATOR.
+VIEWER keeps aggregate reads and sees no write controls. Template creation and
+disable controls are ADMIN-only. The workspace shows dependency state, SLA
+indicators, read-only reference availability, escalation actions, and the
+append-only event sequence. Every mutation uses an explicit reason where the API
+requires one and refreshes the bounded detail view after success.
+
 ## RBAC
 
 - `governance_workflow_read`: overview, ownership, and SLA reads - all roles.

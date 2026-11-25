@@ -436,3 +436,13 @@ executive layer:
 
 These are deterministic local tests. They do not prove PostgreSQL trigger
 behavior under live concurrency, external delivery, or production deployment.
+
+## Relationship to V39 workflow orchestration
+
+V39 adds workflow coordination above V38 without changing V38 strategic actions,
+action events, report metadata, health, KPI, comparison, or configuration
+semantics. A workflow may reference a V38 strategic action read-only, but V39
+never starts, transitions, completes, or cancels an executive action and never
+resolves a recommendation on its behalf. V39 adds the additive revision
+`016_create_governance_workflows`; no V38 table is altered. See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).

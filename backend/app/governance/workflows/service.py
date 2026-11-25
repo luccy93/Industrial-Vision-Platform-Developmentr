@@ -1576,6 +1576,14 @@ class GovernanceWorkflowService:
             "no_rule": 0,
             "failed": 0,
         }
+        if not bool(
+            getattr(
+                self._settings,
+                "governance_workflow_escalation_notifications_enabled",
+                False,
+            )
+        ):
+            return stats
         if self._notifier is None or not bool(getattr(self._notifier, "enabled", False)):
             return stats
         stats["enabled"] = True

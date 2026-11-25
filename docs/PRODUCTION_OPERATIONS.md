@@ -777,6 +777,73 @@ event.
 See
 [V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md](V38_EXECUTIVE_GOVERNANCE_COMMAND_CENTER.md).
 
+### Enterprise governance workflow orchestration (V39)
+
+V39 adds an enterprise workflow orchestration and cross-domain operations layer
+to the existing `/governance` workspace and the V35/V36/V37/V38 APIs. Alembic
+revision `016_create_governance_workflows` follows
+`015_create_governance_executive` and creates only seven V39-owned tables:
+templates, workflows, tasks, task dependencies, cross-domain references,
+escalations, and append-only workflow events. Foreign keys are non-cascading;
+`downgrade()` drops only the V39 objects. No V35–V38 table is altered.
+
+```powershell
+$env:GOVERNANCE_WORKFLOW_ENABLED="true"
+$env:GOVERNANCE_WORKFLOW_PAGE_SIZE="20"
+$env:GOVERNANCE_WORKFLOW_MAX_ACTIVE_SAMPLE="500"
+$env:GOVERNANCE_WORKFLOW_DEFAULT_WARNING_HOURS="24"
+$env:GOVERNANCE_WORKFLOW_ESCALATION_NOTIFICATIONS_ENABLED="false"
+```
+
+Workflow SLA and escalation state are computed on demand or on explicit user
+action. V39 starts no scheduler and no second worker and does not modify the V36
+scheduler. Missing due dates are `NOT_APPLICABLE`, blocked items are `PAUSED`,
+unreadable sources are `UNAVAILABLE`, and cancelled items are `NOT_APPLICABLE`;
+a missing due date is never treated as zero time. Cross-domain references are
+validated read-only pointers and distinguish `AVAILABLE`, `MISSING`,
+`UNAVAILABLE`, `UNAUTHORIZED`, and `DELETED`; attaching a non-available source
+returns a stable `409`. V39 never approves or releases a hold, decides a
+disposition, modifies or deletes evidence, approves or generates an export,
+alters custody, resolves a V37 recommendation, or completes a V38 action.
+Escalation notifications use the existing V15 delivery path only when both the
+V39 setting and the notifier are enabled; delivery is never claimed.
+
+Operational sequence:
+
+1. Run the Alembic upgrade to `016_create_governance_workflows` before enabling
+   the V39 API. The revision is additive and reversible.
+2. Keep `GOVERNANCE_WORKFLOW_ENABLED=true` unless the workspace must be
+   disabled; `503` is returned when disabled or unavailable.
+3. Review `/api/v1/governance/workflows/status` and `/ownership` before acting.
+   Treat unassigned, overdue, paused, unavailable, and not-applicable counts as
+   explicit states.
+4. Template management is ADMIN-only and versioned. Disabling a template is
+   terminal for that template but does not alter existing workflow instances.
+5. Workflow creation, transition, assignment, task writes, and escalations are
+   ADMIN/OPERATOR; detail and audit reads are ADMIN/OPERATOR; overview reads are
+   available to VIEWER.
+6. Plan capacity for retained workflow, task, event, reference, and escalation
+   rows. V39 performs no pruning and exposes no `DELETE` route. Terminal
+   workflows and tasks cannot be reopened.
+
+Rollback: stop workflow writes, run the Alembic downgrade to
+`015_create_governance_executive`, and restore the pre-upgrade backup if V39
+rows must be discarded. Downgrading drops only V39 tables and does not touch
+V01–V38 schema, evidence, custody, exports, holds, dispositions, audit,
+automation, intelligence, or executive records. Disabling the service is
+reversible without a schema change.
+
+V39 hardening tests cover template validation and version preservation, strict
+lifecycles, dependency cycles, completion and blocking rules, ownership history,
+idempotent escalations, cross-domain reference states, bounded pagination and
+request bodies, RBAC and cross-case isolation, redaction, optimistic concurrency,
+idempotency races, migration safety, and V10/V14/V15/V16/V29–V38 regressions.
+Treat `UNKNOWN`, `PAUSED`, `UNAVAILABLE`, and `NOT_APPLICABLE` as explicit
+states; never infer success from an empty list or a missing event.
+
+See
+[V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md](V39_ENTERPRISE_GOVERNANCE_WORKFLOW_ORCHESTRATION.md).
+
 ## Frontend security headers
 
 The web image applies a security-header baseline: a two-stage CSP
